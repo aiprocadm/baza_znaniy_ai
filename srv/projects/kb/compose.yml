@@ -1,0 +1,17 @@
+services:
+  kb_web:
+    build: .
+    container_name: kb_web
+    env_file:
+      - .env
+    networks:
+      - web
+    volumes:
+      - ./app:/app/app
+      - ./data:/data
+    ports:
+      - "8080:80"
+
+networks:
+  web:
+    driver: bridge
