@@ -2,8 +2,12 @@
 from __future__ import annotations
 
 import json
+      codex/handle-json-errors-in-_load
+import logging
+
 import re
 import unicodedata
+main
 from pathlib import Path
 from threading import RLock
 from typing import Dict, Iterable, List
@@ -26,8 +30,25 @@ class DocumentMemory:
     def _load(self) -> None:
         if not self._storage_path.exists():
             return
-        with self._storage_path.open("r", encoding="utf-8") as handle:
-            raw_items = json.load(handle)
+        try:
+            with self._storage_path.open("r", encoding="utf-8") as handle:
+                raw_items = json.load(handle)
+        except (json.JSONDecodeError, OSError) as exc:
+            logging.warning(
+                "Failed to load documents from %s: %s. Resetting storage.",
+                self._storage_path,
+                exc,
+            )
+            self._documents.clear()
+            try:
+                self._persist()
+            except OSError as persist_exc:
+                logging.warning(
+                    "Failed to persist reset storage to %s: %s.",
+                    self._storage_path,
+                    persist_exc,
+                )
+            return
         for item in raw_items:
             doc = Document.model_validate(item)
             self._documents[doc.id] = doc
