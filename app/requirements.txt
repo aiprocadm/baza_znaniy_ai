@@ -9,6 +9,9 @@ pypdf==5.0.1
 python-docx==1.1.2
         codex/define-chat_logs-model-and-admin-endpoint
 faiss-cpu==1.8.0.post1
+        codex/introduce-tokenizer-and-rewrite-chunking-logic
+tiktoken==0.7.0
+
 sqlalchemy==2.0.32
 psycopg[binary]==3.2.1
 
@@ -18,4 +21,5 @@ psycopg[binary]==3.2.1
 
 tiktoken==0.11.0
     main
+        main
         main
