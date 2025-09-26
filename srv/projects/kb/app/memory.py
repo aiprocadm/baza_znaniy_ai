@@ -1,4 +1,8 @@
+        codex/refactor-modules-to-remove-codex-markers
+"""Simple persistence for the knowledge base service."""
+
 """Simple persistence for the knowledge base."""
+        main
 
 from __future__ import annotations
 
@@ -40,6 +44,10 @@ class DocumentMemory:
                 exc,
             )
             self._documents.clear()
+        codex/refactor-modules-to-remove-codex-markers
+            self._slug_counters.clear()
+            self._persist()
+
             try:
                 self._persist()
             except OSError as persist_exc:  # pragma: no cover - filesystem edge cases
@@ -48,6 +56,7 @@ class DocumentMemory:
                     self._storage_path,
                     persist_exc,
                 )
+        main
             return
         for item in raw_items:
             doc = Document.model_validate(item)
@@ -93,6 +102,7 @@ class DocumentMemory:
             removed = self._documents.pop(document_id, None) is not None
             if removed:
                 self._persist()
+                self._rebuild_slug_counters()
             return removed
 
     def _generate_unique_id(self, source: str | None) -> str:

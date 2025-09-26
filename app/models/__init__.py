@@ -1,3 +1,8 @@
+        codex/refactor-modules-to-remove-codex-markers
+"""Pydantic models shared across the service and tests."""
+
+
+        main
 from __future__ import annotations
 
 from datetime import datetime

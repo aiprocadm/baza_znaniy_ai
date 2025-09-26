@@ -2,10 +2,18 @@ from __future__ import annotations
 
 import enum
 from datetime import datetime
+        codex/refactor-modules-to-remove-codex-markers
+from typing import Any
+
+from sqlalchemy import Boolean, DateTime, Enum, Float, Integer, String, Text, func
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.orm import Mapped, mapped_column
+
 from typing import List, Optional
 
 from sqlalchemy import Boolean, DateTime, Enum, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+        main
 from sqlalchemy.types import JSON
 
 from app.db.session import Base
@@ -33,6 +41,8 @@ class User(Base):
         DateTime(timezone=True), nullable=False, default=datetime.utcnow
     )
 
+        codex/refactor-modules-to-remove-codex-markers
+
     logs: Mapped[List["ChatLog"]] = relationship("ChatLog", back_populates="user")
 
     @property
@@ -43,6 +53,7 @@ class User(Base):
     def login(self, value: str) -> None:
         self.username = value
 
+        main
 
 class ChatLog(Base):
     __tablename__ = "chat_logs"
@@ -52,6 +63,26 @@ class ChatLog(Base):
     conversation_id: Mapped[Optional[str]] = mapped_column(String(255), index=True)
     question: Mapped[str] = mapped_column(Text, nullable=False)
     response_summary: Mapped[str] = mapped_column(Text, nullable=False)
+        codex/refactor-modules-to-remove-codex-markers
+    citations: Mapped[Any] = mapped_column(JSON().with_variant(JSONB, "postgresql"), nullable=False)
+    latency_ms: Mapped[float] = mapped_column(Float, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False, index=True
+    )
+
+    def __repr__(self) -> str:  # pragma: no cover - debugging helper
+        return (
+            "ChatLog(id={!r}, user_id={!r}, conversation_id={!r}, latency_ms={!r})".format(
+                self.id,
+                self.user_id,
+                self.conversation_id,
+                self.latency_ms,
+            )
+        )
+
+
+__all__ = ["User", "UserRole", "ChatLog"]
+
     citations: Mapped[list] = mapped_column(JSONType, nullable=False, default=list)
     response_time: Mapped[float] = mapped_column(Float, nullable=False)
     answered_at: Mapped[datetime] = mapped_column(
@@ -62,3 +93,4 @@ class ChatLog(Base):
 
 
 __all__ = ["UserRole", "User", "ChatLog"]
+        main

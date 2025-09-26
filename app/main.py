@@ -5,23 +5,48 @@ import math
 import os
 import time
 from pathlib import Path
+        codex/refactor-modules-to-remove-codex-markers
+from typing import Annotated, Any
+
 from typing import Annotated
+        main
 
 from fastapi import Depends, FastAPI, File, HTTPException, Query, Request, UploadFile, status
 from fastapi.responses import HTMLResponse, JSONResponse
-from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+        codex/refactor-modules-to-remove-codex-markers
+from app.auth import router as auth_router, require_active_user, require_admin, setup_defaults
+from app.db.models import ChatLog, User
+from app.db.session import get_session, init_db
+
 from app.auth import router as auth_router, setup_defaults
 from app.db.models import ChatLog, User, UserRole
 from app.db.session import get_session
+        main
 from app.memory.store import MemoryStore
 from app.models.ollama_client import ensure_model, generate
 from app.models.qdrant_client import ensure_collection, search_chunks, upsert_chunks
 from app.rag.context import build_context, select_citations
 from app.rag.ingest import parse_and_chunk
+        codex/refactor-modules-to-remove-codex-markers
+
+FILES_ROOT = os.getenv("FILES_ROOT", "/opt/knowlab/data/files")
+DB_PATH = os.path.join(FILES_ROOT, "db", "kb.sqlite")
+MEMORY_ENABLED = os.getenv("CHAT_MEMORY_ENABLED", "true").lower() == "true"
+
+logger = logging.getLogger(__name__)
+
+app = FastAPI(title="kb")
+app.include_router(auth_router)
+
+templates = Jinja2Templates(directory=str(Path(__file__).resolve().parent / "templates"))
+
+mem = MemoryStore(
+    db_path=DB_PATH,
+
 from app.security import create_access_token, decode_token, hash_password, verify_password
 
 LOGGER = logging.getLogger(__name__)
@@ -32,18 +57,51 @@ MEMORY_ENABLED = os.getenv("CHAT_MEMORY_ENABLED", "true").lower() == "true"
 
 mem = MemoryStore(
     db_path=str(DB_PATH),
+        main
     ttl_days=int(os.getenv("CHAT_MEMORY_TTL_DAYS", "90")),
     summary_trigger=int(os.getenv("CHAT_SUMMARY_TRIGGER", "10")),
     max_tokens=int(os.getenv("CHAT_MEMORY_MAXTOK", "2000")),
 )
 
+        codex/refactor-modules-to-remove-codex-markers
+
+@app.on_event("startup")
+def on_startup() -> None:
+    init_db()
+    setup_defaults()
+
+
+@app.get("/health", methods=["GET", "HEAD"])
+def health() -> JSONResponse:
+    return JSONResponse({"status": "ok", "ts": int(time.time())})
+
+
 app = FastAPI(title="kb")
 app.include_router(auth_router)
 
 templates = Jinja2Templates(directory=str(Path(__file__).resolve().parent / "templates"))
+        main
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/token")
 SessionDep = Annotated[Session, Depends(get_session)]
+
+
+        codex/refactor-modules-to-remove-codex-markers
+DatabaseSession = Annotated[Session, Depends(get_session)]
+AuthenticatedUser = Annotated[User, Depends(require_active_user)]
+
+
+@app.post("/api/docs/upload")
+async def upload(
+    file: UploadFile = File(...),
+    user: Annotated[User, Depends(require_admin)] = None,
+) -> dict[str, Any]:
+    del user  # access already enforced by dependency
+
+    name = file.filename or ""
+    ext = name.rsplit(".", 1)[-1].lower() if "." in name else ""
+    if ext not in {"pdf", "docx", "txt"}:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "UPLOAD_INVALID_EXT")
 
 
 class TokenOut(BaseModel):
@@ -126,6 +184,7 @@ async def upload(
     ext = name.rsplit(".", 1)[-1].lower()
     if ext not in {"pdf", "docx", "txt"}:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "UPLOAD_INVALID_EXT")
+        main
     data = await file.read()
     ensure_collection()
     chunks = parse_and_chunk(name, data)
@@ -137,6 +196,33 @@ async def upload(
 
 @app.post("/api/chat")
 def chat(
+        codex/refactor-modules-to-remove-codex-markers
+    inp: ChatIn,
+    user: AuthenticatedUser,
+    db: DatabaseSession,
+) -> dict[str, Any]:
+    ensure_model()
+    ensure_collection()
+    start = time.perf_counter()
+
+    memory_key = str(user.id)
+    memory_text = mem.load_context(memory_key, inp.conversation_id) if MEMORY_ENABLED else ""
+    hits = search_chunks(inp.message, top_k=int(os.getenv("RETRIEVE_TOPK", "24")))
+    context = build_context(hits, token_limit=3000)
+
+    prompt = "\n".join(
+        [
+            "You are a helpful assistant providing concise answers based on documentation.",
+            "Context:",
+            context,
+            "",
+            "Memory:",
+            memory_text,
+            "",
+            f"Question: {inp.message}",
+        ]
+    )
+
     payload: ChatIn,
     db: SessionDep,
     user: Annotated[User, Depends(require_role(UserRole.STAFF))],
@@ -154,6 +240,7 @@ def chat(
     context = build_context(hits, token_limit=3000)
 
     prompt = f"Context:\n{context}\n\nMemory:\n{memory_text}\n\nQuestion: {payload.message}\nAnswer in Russian with citations."
+        main
     answer = generate(prompt)
 
     selected_hits = select_citations(hits, minimum=3, maximum=5)
@@ -162,14 +249,39 @@ def chat(
         for hit in selected_hits
     ]
 
+        codex/refactor-modules-to-remove-codex-markers
+    if MEMORY_ENABLED:
+        mem.record(memory_key, inp.conversation_id, inp.message, answer)
+
+    latency_ms = (time.perf_counter() - start) * 1000
+
     elapsed = time.perf_counter() - start
 
     if MEMORY_ENABLED:
         mem.record(memory_key, payload.conversation_id, payload.message, answer)
 
+        main
     summary = answer.strip()
     if len(summary) > 200:
         summary = summary[:197].rstrip() + "..."
+
+        codex/refactor-modules-to-remove-codex-markers
+    log = ChatLog(
+        user_id=str(user.id),
+        conversation_id=inp.conversation_id,
+        question=inp.message,
+        response_summary=summary,
+        citations=citations,
+        latency_ms=latency_ms,
+    )
+    try:
+        db.add(log)
+        db.commit()
+    except Exception:  # pragma: no cover - defensive persistence handling
+        db.rollback()
+        logger.exception("Failed to persist chat log")
+
+    return {"answer": answer, "citations": citations}
 
     try:
         log = ChatLog(
@@ -203,23 +315,34 @@ def admin_logs(
         .all()
     )
     return templates.TemplateResponse("logs.html", {"request": request, "logs": logs})
+        main
 
 
 @app.get("/admin/chat-logs", response_class=HTMLResponse)
 def chat_logs(
     request: Request,
+        codex/refactor-modules-to-remove-codex-markers
+    db: DatabaseSession,
+
     db: SessionDep,
+        main
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     user_id: str | None = Query(None),
     conversation_id: str | None = Query(None),
+        codex/refactor-modules-to-remove-codex-markers
+    _: Annotated[User, Depends(require_admin)] = None,
+) -> HTMLResponse:
+
     _: Annotated[User, Depends(require_role(UserRole.ADMIN))] = None,
 ):
+        main
     query = db.query(ChatLog)
     if user_id:
         query = query.filter(ChatLog.user_id == int(user_id))
     if conversation_id:
         query = query.filter(ChatLog.conversation_id == conversation_id)
+
     total = query.count()
     pages = math.ceil(total / page_size) if total else 1
     logs = (
@@ -241,3 +364,9 @@ def chat_logs(
             "conversation_id": conversation_id or "",
         },
     )
+        codex/refactor-modules-to-remove-codex-markers
+
+
+__all__ = ["app"]
+
+        main

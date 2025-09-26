@@ -1,19 +1,28 @@
+        codex/refactor-modules-to-remove-codex-markers
+"""Compatibility helpers for the legacy document memory tests."""
+
 """Compatibility helpers for test suite."""
+        main
 
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 from threading import RLock
 from typing import Dict, Iterable, List
 
 from app.models import Document, DocumentCreate
 
+        codex/refactor-modules-to-remove-codex-markers
+LOGGER = logging.getLogger(__name__)
+
 __all__ = ["DocumentMemory"]
+        main
 
 
 class DocumentMemory:
-    """Minimal persistent storage used by the legacy tests."""
+    """Thread-safe document storage with JSON persistence."""
 
     def __init__(self, storage_path: Path) -> None:
         self._storage_path = Path(storage_path)
@@ -29,7 +38,12 @@ class DocumentMemory:
         try:
             with self._storage_path.open("r", encoding="utf-8") as handle:
                 raw_items = json.load(handle)
+        codex/refactor-modules-to-remove-codex-markers
+        except (json.JSONDecodeError, OSError) as exc:
+            LOGGER.warning("Resetting invalid document storage %s: %s", self._storage_path, exc)
+
         except (json.JSONDecodeError, OSError):
+        main
             self._documents.clear()
             self._persist()
             return
@@ -103,3 +117,9 @@ class DocumentMemory:
         if suffix.isdigit():
             return int(suffix)
         return None
+        codex/refactor-modules-to-remove-codex-markers
+
+
+__all__ = ["DocumentMemory", "DocumentCreate"]
+
+        main
