@@ -73,15 +73,16 @@ def test_document_memory_persists_and_loads(tmp_path, memory_cls, payload_cls) -
     assert loaded.tags == created.tags
 
 
- codex/handle-json-errors-in-_load
 def test_document_memory_recovers_from_invalid_json(tmp_path) -> None:
     storage_path = tmp_path / "documents.json"
     storage_path.write_text("{not: valid json}", encoding="utf-8")
 
-    memory = DocumentMemory(storage_path)
+    memory = LegacyDocumentMemory(storage_path)
 
     assert memory.all() == []
     assert storage_path.read_text(encoding="utf-8").strip().startswith("[")
+
+
 @pytest.mark.parametrize(
     "memory_cls, payload_cls",
     [
@@ -108,4 +109,3 @@ def test_document_ids_remain_unique_after_deletion(tmp_path, memory_cls, payload
     remaining = memory.get(second.id)
     assert remaining is not None
     assert remaining.content == "Same prefix"
-       main

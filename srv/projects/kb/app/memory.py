@@ -1,13 +1,11 @@
 """Simple persistence for the knowledge base."""
+
 from __future__ import annotations
 
 import json
-      codex/handle-json-errors-in-_load
 import logging
-
 import re
 import unicodedata
-main
 from pathlib import Path
 from threading import RLock
 from typing import Dict, Iterable, List
@@ -15,12 +13,14 @@ from uuid import uuid4
 
 from .models import Document, DocumentCreate
 
+LOGGER = logging.getLogger(__name__)
+
 
 class DocumentMemory:
     """Thread-safe in-memory document store with disk persistence."""
 
     def __init__(self, storage_path: Path) -> None:
-        self._storage_path = storage_path
+        self._storage_path = Path(storage_path)
         self._documents: Dict[str, Document] = {}
         self._lock = RLock()
         self._slug_counters: Dict[str, int] = {}
@@ -34,7 +34,7 @@ class DocumentMemory:
             with self._storage_path.open("r", encoding="utf-8") as handle:
                 raw_items = json.load(handle)
         except (json.JSONDecodeError, OSError) as exc:
-            logging.warning(
+            LOGGER.warning(
                 "Failed to load documents from %s: %s. Resetting storage.",
                 self._storage_path,
                 exc,
@@ -42,8 +42,8 @@ class DocumentMemory:
             self._documents.clear()
             try:
                 self._persist()
-            except OSError as persist_exc:
-                logging.warning(
+            except OSError as persist_exc:  # pragma: no cover - filesystem edge cases
+                LOGGER.warning(
                     "Failed to persist reset storage to %s: %s.",
                     self._storage_path,
                     persist_exc,
@@ -148,3 +148,6 @@ class DocumentMemory:
         slug = re.sub(r"[^A-Za-z0-9_-]+", "-", normalized)
         slug = slug.strip("-_")
         return slug.lower()
+
+
+__all__ = ["DocumentMemory"]
