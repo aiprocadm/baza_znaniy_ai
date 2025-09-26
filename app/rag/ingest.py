@@ -9,6 +9,10 @@ def _clean(t: str) -> str:
     return t
 
 def _chunk(text: str, chunk=900, overlap=140):
+    chunk = max(int(chunk), 1)
+    overlap = max(int(overlap), 0)
+    if overlap >= chunk:
+        overlap = chunk - 1
     out = []
     i = 0
     n = len(text)
