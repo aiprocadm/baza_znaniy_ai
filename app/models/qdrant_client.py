@@ -1,6 +1,6 @@
+import hashlib
 import os
 from typing import Dict, List
-from uuid import uuid4
 
 from qdrant_client import QdrantClient
 from qdrant_client.models import Distance, PointStruct, VectorParams
@@ -32,6 +32,10 @@ def _embedding_dim() -> int:
     return _expected_dim
 
 
+def _collection_name() -> str:
+    return os.getenv("QDRANT_COLLECTION", "kb_chunks")
+
+
 def _get_client() -> QdrantClient:
     global _client
     if _client is None:
@@ -40,7 +44,7 @@ def _get_client() -> QdrantClient:
         if url:
             _client = QdrantClient(url=url, api_key=api_key)
         else:
-            host = os.getenv("QDRANT_HOST", "localhost")
+            host = os.getenv("QDRANT_HOST", "qdrant")
             port_str = os.getenv("QDRANT_PORT")
             port = int(port_str) if port_str else 6333
             _client = QdrantClient(host=host, port=port, api_key=api_key)
@@ -61,7 +65,7 @@ def _current_collection_dim(client: QdrantClient, collection: str) -> int | None
 def ensure_collection() -> None:
     client = _get_client()
     dim = _embedding_dim()
-    collection = os.getenv("QDRANT_COLLECTION", "kb_chunks")
+    collection = _collection_name()
 
     if not client.collection_exists(collection):
         client.create_collection(
@@ -78,12 +82,18 @@ def ensure_collection() -> None:
         )
 
 
+def _chunk_id(chunk: Dict) -> str:
+    raw = f"{chunk.get('file','')}|{chunk.get('page','')}|{chunk.get('text','')}"
+    digest = hashlib.sha1(raw.encode("utf-8")).hexdigest()
+    return digest
+
+
 def upsert_chunks(chunks: List[Dict]) -> None:
     if not chunks:
         return
 
     ensure_collection()
-    collection = os.getenv("QDRANT_COLLECTION", "kb_chunks")
+    collection = _collection_name()
     client = _get_client()
 
     texts = [chunk["text"] for chunk in chunks]
@@ -98,22 +108,28 @@ def upsert_chunks(chunks: List[Dict]) -> None:
         }
         points.append(
             PointStruct(
-                id=str(uuid4()),
+                id=_chunk_id(chunk),
                 vector=vector.tolist(),
                 payload=payload,
             )
         )
 
-    client.upsert(collection_name=collection, points=points)
+    client.upsert(collection_name=collection, points=points, wait=True)
 
 
 def search_chunks(query: str, top_k: int = 10) -> List[Dict]:
     ensure_collection()
-    collection = os.getenv("QDRANT_COLLECTION", "kb_chunks")
+    collection = _collection_name()
     client = _get_client()
 
     query_vector = _embedder().encode([query], convert_to_numpy=True)[0].tolist()
-    results = client.search(collection_name=collection, query_vector=query_vector, limit=top_k)
+    results = client.search(
+        collection_name=collection,
+        query_vector=query_vector,
+        limit=top_k,
+        with_payload=True,
+        with_vectors=False,
+    )
 
     hits: List[Dict] = []
     for point in results:
