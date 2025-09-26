@@ -1,3 +1,8 @@
+        codex/add-postgresql-access-layer-and-auth-features
+import os, time
+
+from fastapi import Depends, FastAPI, File, HTTPException, UploadFile
+
         codex/setup-postgresql-as-data-source
 from __future__ import annotations
 
@@ -47,6 +52,7 @@ from sqlalchemy.orm import Session
 import os
 import time
 from fastapi import FastAPI, UploadFile, File, HTTPException
+        main
 from fastapi.responses import JSONResponse
         main
 from pydantic import BaseModel
@@ -62,11 +68,16 @@ from app.security import create_access_token, decode_token, hash_password, verif
 MEMORY_ENABLED = os.getenv("CHAT_MEMORY_ENABLED", "true").lower() == "true"
 
 from app.memory.store import MemoryStore
+        codex/add-postgresql-access-layer-and-auth-features
+from app.auth import router as auth_router, require_admin, require_active_user, setup_defaults
+from app.db import models
+
 from app.db import get_db, init_db
 from app.db.models import ChatLog
 
 FILES_ROOT = os.getenv("FILES_ROOT", "/opt/knowlab/data/files")
 DB_PATH = os.path.join(FILES_ROOT, "db", "kb.sqlite")
+        main
 
 APP_SECRET = os.getenv("APP_SECRET", "dev")
 MEMORY_ENABLED = os.getenv("CHAT_MEMORY_ENABLED", "true").lower() == "true"
@@ -75,9 +86,13 @@ logger = logging.getLogger(__name__)
         main
 
 app = FastAPI(title="kb")
+        codex/add-postgresql-access-layer-and-auth-features
+app.include_router(auth_router)
+
 templates = Jinja2Templates(directory="app/templates")
 
 templates = Jinja2Templates(directory=str(Path(__file__).resolve().parent / "templates"))
+        main
 
 mem = MemoryStore(
         codex/setup-postgresql-as-data-source
@@ -90,6 +105,11 @@ mem = MemoryStore(
     max_tokens=int(os.getenv("CHAT_MEMORY_MAXTOK", "2000")),
 )
 
+        codex/add-postgresql-access-layer-and-auth-features
+@app.on_event("startup")
+def _startup() -> None:
+    setup_defaults()
+
         codex/setup-postgresql-as-data-source
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/token")
 
@@ -99,6 +119,7 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/token")
 def on_startup() -> None:
     init_db()
 
+        main
 
 @app.api_route("/health", methods=["GET","HEAD"])
 def health():
@@ -254,9 +275,14 @@ def change_password(
 @app.post("/api/docs/upload")
 async def upload(
     file: UploadFile = File(...),
+        codex/add-postgresql-access-layer-and-auth-features
+    user: models.User = Depends(require_admin),
+):
+
     user: Annotated[User, Depends(require_role("admin"))] = None,
 ):
     del user  # hint for linters; role check performed in dependency
+        main
     name = file.filename
     ext = name.rsplit(".", 1)[-1].lower()
     if ext not in {"pdf", "docx", "txt"}:
@@ -300,6 +326,17 @@ def require_admin(
         main
 
 @app.post("/api/chat")
+        codex/add-postgresql-access-layer-and-auth-features
+def chat(
+    inp: ChatIn,
+    user: models.User = Depends(require_active_user),
+):
+    ensure_model()
+    ensure_collection()
+    user_id = user.login
+    memory = mem.load_context(user_id, inp.conversation_id) if MEMORY_ENABLED else ""
+    hits = search_chunks(inp.message, top_k=int(os.getenv("RETRIEVE_TOPK","24")))
+
 def chat(inp: ChatIn, db: Session = Depends(get_db)):
     start = time.perf_counter()
     ensure_model()
@@ -307,6 +344,7 @@ def chat(inp: ChatIn, db: Session = Depends(get_db)):
     memory = mem.load_context(inp.user_id, inp.conversation_id) if MEMORY_ENABLED else ""
         main
     hits = search_chunks(inp.message, top_k=int(os.getenv("RETRIEVE_TOPK", "24")))
+        main
     context = "\n\n".join(h["text"] for h in hits[:8])
     prompt = f"""Ты помощник по нормативным документам. Отвечай кратко и давай точные цитаты с указанием файла и страницы.
 Контекст:
@@ -355,6 +393,9 @@ def admin_logs(
     return templates.TemplateResponse("logs.html", {"request": request, "logs": logs})
 
     if MEMORY_ENABLED:
+        codex/add-postgresql-access-layer-and-auth-features
+        mem.record(user_id, inp.conversation_id, inp.message, answer)
+
         mem.record(inp.user_id, inp.conversation_id, inp.message, answer)
     latency_ms = (time.perf_counter() - start) * 1000
     citation_payload: list[dict[str, Any]] = [
@@ -378,6 +419,7 @@ def admin_logs(
     except Exception:
         db.rollback()
         logger.exception("Failed to persist chat log")
+        main
     return {"answer": answer, "citations": citations}
 
 

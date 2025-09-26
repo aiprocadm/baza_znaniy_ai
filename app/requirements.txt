@@ -9,6 +9,12 @@ pypdf==5.0.1
 python-docx==1.1.2
         codex/define-chat_logs-model-and-admin-endpoint
 faiss-cpu==1.8.0.post1
+        codex/add-postgresql-access-layer-and-auth-features
+SQLAlchemy==2.0.34
+psycopg[binary]==3.2.1
+argon2-cffi==23.1.0
+python-jose[cryptography]==3.3.0
+
         codex/introduce-tokenizer-and-rewrite-chunking-logic-ca0dv1
 tiktoken==0.7.0
 
@@ -30,6 +36,7 @@ psycopg[binary]==3.2.1
 
 tiktoken==0.11.0
     main
+        main
         main
         main
         main
