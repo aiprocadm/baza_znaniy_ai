@@ -275,6 +275,13 @@ Following this procedure will give you a repeatable deployment for `kb_ai`, cove
 - REST API для интеграции с внешними интерфейсами и административный веб-интерфейс за Nginx.
 
 ## Архитектура
+        codex/setup-postgresql-as-data-source
+- **FastAPI** — HTTP API (`/api/auth/token`, `/api/docs/upload`, `/api/chat`, `/admin/logs`, `/health`).
+- **Sentence Transformers + FAISS** — извлечение и хранение векторных представлений фрагментов.
+- **Ollama** — генерация ответов (модель определяется переменной `GEN_MODEL`).
+- **PostgreSQL** — пользователи, роли, журнал обращений.
+- **SQLite** — хранение памяти диалогов.
+
 - **FastAPI** — HTTP API (`/api/docs/upload`, `/api/chat`, `/health`).
 - **Sentence Transformers + Qdrant** — извлечение и хранение векторных представлений фрагментов.
 - **Ollama** — генерация ответов (модель определяется переменной `GEN_MODEL`).
@@ -282,8 +289,9 @@ Following this procedure will give you a repeatable deployment for `kb_ai`, cove
 - **PostgreSQL** — хранилище памяти диалогов.
 - **Nginx** — TLS-терминация, обратный прокси и выдача статического административного интерфейса.
 - **Docker Compose** — развёртывание компонентов и служебных зависимостей.
-=======
+
 - **SQLite** — хранилище для памяти чата.
+        main
 - **Docker Compose** — развёртывание сервиса вместе с конфигурацией Nginx.
       main
 
@@ -318,18 +326,39 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 Для полноценной работы локально также потребуется запущенный Qdrant (`qdrant`), PostgreSQL и Ollama, доступные по значениям переменных окружения `QDRANT_URL`, `PG*` и `OLLAMA_HOST`.
 
 ## Загрузка документов и чат
-- Загрузка документа:
+1. Получите токен доступа:
+   ```bash
+   curl -X POST http://localhost:8000/api/auth/token \
+     -H "Content-Type: application/x-www-form-urlencoded" \
+     -d "username=admin&password=admin"
+   ```
+   > При первом входе под учетной записью `admin/admin` необходимо сменить пароль через `/api/auth/change-password`.
+
+2. Смените пароль администратора (обязательно при первом входе):
+   ```bash
+   curl -X POST http://localhost:8000/api/auth/change-password \
+     -H "Authorization: Bearer <token>" \
+     -H "Content-Type: application/json" \
+     -d '{"current_password": "admin", "new_password": "S3cure!"}'
+   ```
+
+- Загрузка документа (роль `admin`):
   ```bash
   curl -X POST \
     -F "file=@docs/manual.pdf" \
+        codex/setup-postgresql-as-data-source
+    -H "Authorization: Bearer <token>" \
+    http://localhost:8000/api/docs/upload
+=======
     https://kb.local/api/docs/upload
+        main
   ```
-- Диалог с ассистентом:
+- Диалог с ассистентом (роль `staff` или `admin`):
   ```bash
   curl -X POST https://kb.local/api/chat \
     -H "Content-Type: application/json" \
+    -H "Authorization: Bearer <token>" \
     -d '{
-          "user_id": "u123",
           "conversation_id": "conv-1",
           "message": "Какие требования описаны на странице 5?"
         }'
@@ -341,6 +370,9 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 | Переменная | По умолчанию | Описание |
 | --- | --- | --- |
 | `APP_SECRET` | `dev` | Секретный ключ приложения. |
+        codex/setup-postgresql-as-data-source
+| `DATABASE_URL` | `postgresql+psycopg2://kb:kb@localhost:5432/kb` | Подключение к PostgreSQL. |
+=======
 | `FILES_ROOT` | `/opt/knowlab/data/files` | Каталог с загруженными файлами, статикой и БД памяти. |
 | `GEN_MODEL` | `qwen2.5:3b-instruct` | Имя модели Ollama для генерации. |
 | `EMBED_MODEL` | `intfloat/multilingual-e5-small` | Модель эмбеддингов для индекса. |
@@ -352,6 +384,7 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 | `PGDATABASE` | `knowlab` | Имя БД PostgreSQL. |
 | `PGUSER` | `knowlab` | Пользователь PostgreSQL. |
 | `PGPASSWORD` | `change-me` | Пароль PostgreSQL. |
+        main
 | `CHAT_MEMORY_ENABLED` | `true` | Включение памяти диалогов. |
 | `CHAT_MEMORY_TTL_DAYS` | `90` | Срок хранения истории в днях. |
 | `CHAT_SUMMARY_TRIGGER` | `10` | Количество сообщений до свёртки истории. |
@@ -373,8 +406,15 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 ## Структура репозитория
 ```
 app/                исходный код приложения FastAPI
+        codex/setup-postgresql-as-data-source
+├─ main.py          HTTP-эндпоинты, аутентификация и журналирование
+├─ database.py      инициализация подключения к PostgreSQL
+├─ models/          клиенты Ollama/векторного индекса и ORM-модели
+├─ templates/       HTML-шаблоны административных страниц
+
 ├─ main.py          HTTP-эндпоинты и диалоговая логика
 ├─ models/          клиенты Ollama и Qdrant
+        main
 ├─ rag/             парсинг и нарезка документов
 ├─ memory/          реализация памяти диалогов (PostgreSQL/SQLite)
 compose.yml         docker-compose для продакшн-развёртывания
