@@ -1,3 +1,5 @@
+"""Security helpers for password hashing and JWT tokens."""
+
 import os
 from datetime import datetime, timedelta
 from typing import Any, Dict, Optional
@@ -5,7 +7,6 @@ from typing import Any, Dict, Optional
 from argon2 import PasswordHasher, Type
 from argon2.exceptions import VerificationError
 from jose import JWTError, jwt
-
 
 SECRET_KEY = os.getenv("APP_SECRET", "dev")
 ALGORITHM = "HS256"
@@ -37,3 +38,11 @@ def decode_token(token: str) -> Dict[str, Any]:
         return jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
     except JWTError as exc:  # pragma: no cover - defensive
         raise ValueError("INVALID_TOKEN") from exc
+
+
+__all__ = [
+    "hash_password",
+    "verify_password",
+    "create_access_token",
+    "decode_token",
+]
