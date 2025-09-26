@@ -50,6 +50,8 @@ def _get_tokenizer() -> _Tokenizer:
         else:
             _TOKENIZER = _CharTokenizer()
     return _TOKENIZER
+        codex/introduce-tokenizer-and-rewrite-chunking-logic-ca0dv1
+
 
 from pypdf import PdfReader
 from tiktoken.core import Encoding
@@ -58,12 +60,16 @@ from tiktoken.core import Encoding
 LOGGER = logging.getLogger(__name__)
 
         main
+        main
 
 def _clean(t: str) -> str:
     t = re.sub(r'\s+', ' ', t).strip()
     return t
 
+        codex/introduce-tokenizer-and-rewrite-chunking-logic-ca0dv1
+
         codex/introduce-tokenizer-and-rewrite-chunking-logic
+        main
 def _chunk(text: str, chunk=900, overlap=140, encoder: Optional[_Tokenizer] = None):
     if not text:
         return []
@@ -72,6 +78,25 @@ def _chunk(text: str, chunk=900, overlap=140, encoder: Optional[_Tokenizer] = No
     token_ids = encoder.encode(text)
     if not token_ids:
         return []
+
+        codex/introduce-tokenizer-and-rewrite-chunking-logic-ca0dv1
+    chunk = max(int(chunk), 1)
+    overlap = max(int(overlap), 0)
+    if overlap >= chunk:
+        overlap = chunk - 1 if chunk > 1 else 0
+
+    out = []
+    start = 0
+    total = len(token_ids)
+
+    while start < total:
+        end = min(start + chunk, total)
+        window_tokens = token_ids[start:end]
+        out.append(encoder.decode(window_tokens))
+        if end >= total:
+            break
+        start = max(end - overlap, 0)
+
 
 
 @lru_cache(maxsize=1)
@@ -151,6 +176,7 @@ def _chunk(text: str, chunk=900, overlap=140):
             i = 0
         main
         main
+        main
     return out
 
 
@@ -178,6 +204,10 @@ def parse_and_chunk(filename: str, data: bytes) -> List[Dict]:
     chunks = []
     csize = int(os.getenv("RAG_CHUNK","900"))
     cover = int(os.getenv("RAG_OVERLAP","140"))
+        codex/introduce-tokenizer-and-rewrite-chunking-logic-ca0dv1
+    encoder = _get_tokenizer()
+
+
         codex/introduce-tokenizer-and-rewrite-chunking-logic
     encoder = _get_tokenizer()
 
@@ -188,6 +218,7 @@ def parse_and_chunk(filename: str, data: bytes) -> List[Dict]:
         cover = 0
     if csize > 0:
         cover = min(cover, csize - 1)
+        main
         main
     for page, txt in text_pages:
         if not txt: continue
