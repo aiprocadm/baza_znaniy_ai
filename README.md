@@ -9,10 +9,11 @@
 - REST API для интеграции с внешними интерфейсами.
 
 ## Архитектура
-- **FastAPI** — HTTP API (`/api/docs/upload`, `/api/chat`, `/health`).
+- **FastAPI** — HTTP API (`/api/auth/token`, `/api/docs/upload`, `/api/chat`, `/admin/logs`, `/health`).
 - **Sentence Transformers + FAISS** — извлечение и хранение векторных представлений фрагментов.
 - **Ollama** — генерация ответов (модель определяется переменной `GEN_MODEL`).
-- **SQLite** — хранилища для памяти чата и метаданных фрагментов.
+- **PostgreSQL** — пользователи, роли, журнал обращений.
+- **SQLite** — хранение памяти диалогов.
 - **Docker Compose** — развёртывание сервиса вместе с конфигурацией Nginx.
 
 ## Быстрый старт (Docker Compose)
@@ -44,18 +45,35 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 Эндпоинт `/health` можно использовать для проверки готовности. Для обращения к модели Ollama требуется запущенный локальный сервер Ollama с выбранной моделью.
 
 ## Загрузка документов и чат
-- Загрузка документа:
+1. Получите токен доступа:
+   ```bash
+   curl -X POST http://localhost:8000/api/auth/token \
+     -H "Content-Type: application/x-www-form-urlencoded" \
+     -d "username=admin&password=admin"
+   ```
+   > При первом входе под учетной записью `admin/admin` необходимо сменить пароль через `/api/auth/change-password`.
+
+2. Смените пароль администратора (обязательно при первом входе):
+   ```bash
+   curl -X POST http://localhost:8000/api/auth/change-password \
+     -H "Authorization: Bearer <token>" \
+     -H "Content-Type: application/json" \
+     -d '{"current_password": "admin", "new_password": "S3cure!"}'
+   ```
+
+- Загрузка документа (роль `admin`):
   ```bash
   curl -X POST \
     -F "file=@docs/manual.pdf" \
+    -H "Authorization: Bearer <token>" \
     http://localhost:8000/api/docs/upload
   ```
-- Диалог с ассистентом:
+- Диалог с ассистентом (роль `staff` или `admin`):
   ```bash
   curl -X POST http://localhost:8000/api/chat \
     -H "Content-Type: application/json" \
+    -H "Authorization: Bearer <token>" \
     -d '{
-          "user_id": "u123",
           "conversation_id": "conv-1",
           "message": "Какие требования описаны на странице 5?"
         }'
@@ -67,6 +85,7 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 | Переменная | По умолчанию | Описание |
 | --- | --- | --- |
 | `APP_SECRET` | `dev` | Секретный ключ приложения. |
+| `DATABASE_URL` | `postgresql+psycopg2://kb:kb@localhost:5432/kb` | Подключение к PostgreSQL. |
 | `CHAT_MEMORY_ENABLED` | `true` | Включение памяти диалогов. |
 | `CHAT_MEMORY_TTL_DAYS` | `90` | Срок хранения истории в днях. |
 | `CHAT_SUMMARY_TRIGGER` | `10` | Количество сообщений до свёртки истории. |
@@ -80,8 +99,10 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 ## Структура репозитория
 ```
 app/                исходный код приложения FastAPI
-├─ main.py          HTTP-эндпоинты и диалоговая логика
-├─ models/          клиенты Ollama и векторного индекса
+├─ main.py          HTTP-эндпоинты, аутентификация и журналирование
+├─ database.py      инициализация подключения к PostgreSQL
+├─ models/          клиенты Ollama/векторного индекса и ORM-модели
+├─ templates/       HTML-шаблоны административных страниц
 ├─ rag/             парсинг и нарезка документов
 ├─ memory/          реализация памяти диалогов
 compose.yml         docker-compose для продакшн-развёртывания
