@@ -4,6 +4,8 @@ from docx import Document
 import io, re
 from typing import List, Dict
 
+from .tokenizer import detokenize, tokenize
+
 def _clean(t: str) -> str:
     t = re.sub(r'\s+', ' ', t).strip()
     return t
@@ -13,12 +15,13 @@ def _chunk(text: str, chunk=900, overlap=140):
     overlap = max(int(overlap), 0)
     if overlap >= chunk:
         overlap = chunk - 1
-    out = []
+    tokens = tokenize(text)
+    out: List[str] = []
     i = 0
-    n = len(text)
+    n = len(tokens)
     while i < n:
-        j = min(i+chunk, n)
-        out.append(text[i:j])
+        j = min(i + chunk, n)
+        out.append(detokenize(tokens[i:j]))
         i = j - overlap if j < n else j
         if i < 0: i = 0
     return out

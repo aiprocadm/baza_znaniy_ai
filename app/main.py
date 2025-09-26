@@ -4,6 +4,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from app.models.qdrant_client import ensure_collection, upsert_chunks, search_chunks
 from app.models.ollama_client import ensure_model, generate
+from app.rag.context import build_context, select_citations
 from app.rag.ingest import parse_and_chunk
 from app.memory.store import MemoryStore
 
@@ -44,11 +45,13 @@ async def upload(file: UploadFile = File(...)):
 
 @app.post("/api/chat")
 def chat(inp: ChatIn):
+    start_time = time.time()
+
     ensure_model()
     ensure_collection()
     memory = mem.load_context(inp.user_id, inp.conversation_id) if MEMORY_ENABLED else ""
-    hits = search_chunks(inp.message, top_k=int(os.getenv("RETRIEVE_TOPK","24")))
-    context = "\n\n".join(h["text"] for h in hits[:8])
+    hits = search_chunks(inp.message, top_k=10)
+    context = build_context(hits, token_limit=3000)
     prompt = f"""Ты помощник по нормативным документам. Отвечай кратко и давай точные цитаты с указанием файла и страницы.
 Контекст:
 {context}
@@ -59,7 +62,12 @@ def chat(inp: ChatIn):
 Вопрос: {inp.message}
 """
     answer = generate(prompt)
-    citations = [{"file":h["file"], "page":h.get("page"), "score":float(h["score"])} for h in hits[:5]]
+    selected_hits = select_citations(hits, minimum=3, maximum=5)
+    citations = [
+        {"file": h.get("file"), "page": h.get("page"), "score": float(h.get("score", 0.0))}
+        for h in selected_hits
+    ]
     if MEMORY_ENABLED:
         mem.record(inp.user_id, inp.conversation_id, inp.message, answer)
-    return {"answer": answer, "citations": citations}
+    latency_ms = int((time.time() - start_time) * 1000)
+    return {"answer": answer, "citations": citations, "latency_ms": latency_ms}
