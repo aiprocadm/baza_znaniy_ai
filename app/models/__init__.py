@@ -1,3 +1,10 @@
+        codex/fix-top_k-to-10-in-vector-search
+"""Compatibility re-export for shared document models."""
+
+from srv.projects.kb.app.models import DocumentCreate  # type: ignore F401
+
+__all__ = ["DocumentCreate"]
+
 """Pydantic models shared across the service and tests."""
 
 from __future__ import annotations
@@ -26,3 +33,4 @@ class DocumentCreate(BaseModel):
 
 
 __all__ = ["Document", "DocumentCreate"]
+        main

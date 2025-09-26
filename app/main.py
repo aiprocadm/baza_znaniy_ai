@@ -60,7 +60,11 @@ from pydantic import BaseModel
 from app.models.qdrant_client import ensure_collection, upsert_chunks, search_chunks
         main
 from app.models.ollama_client import ensure_model, generate
+        codex/fix-top_k-to-10-in-vector-search
+from app.rag.context import build_context, select_citations
+
 from app.models.qdrant_client import ensure_collection, search_chunks, upsert_chunks
+        main
 from app.rag.ingest import parse_and_chunk
         codex/setup-postgresql-as-data-source
 from app.security import create_access_token, decode_token, hash_password, verify_password
@@ -302,6 +306,16 @@ async def upload(
         codex/setup-postgresql-as-data-source
 
 @app.post("/api/chat")
+        codex/fix-top_k-to-10-in-vector-search
+def chat(inp: ChatIn):
+    start_time = time.time()
+
+    ensure_model()
+    ensure_collection()
+    memory = mem.load_context(inp.user_id, inp.conversation_id) if MEMORY_ENABLED else ""
+    hits = search_chunks(inp.message, top_k=10)
+    context = build_context(hits, token_limit=3000)
+
 def chat(
     inp: ChatIn,
     user: Annotated[User, Depends(require_role("staff"))],
@@ -346,6 +360,7 @@ def chat(inp: ChatIn, db: Session = Depends(get_db)):
     hits = search_chunks(inp.message, top_k=int(os.getenv("RETRIEVE_TOPK", "24")))
         main
     context = "\n\n".join(h["text"] for h in hits[:8])
+        main
     prompt = f"""Ты помощник по нормативным документам. Отвечай кратко и давай точные цитаты с указанием файла и страницы.
 Контекст:
 {context}
@@ -356,12 +371,20 @@ def chat(inp: ChatIn, db: Session = Depends(get_db)):
 Вопрос: {inp.message}
 """
     answer = generate(prompt)
+        codex/fix-top_k-to-10-in-vector-search
+    selected_hits = select_citations(hits, minimum=3, maximum=5)
+    citations = [
+        {"file": h.get("file"), "page": h.get("page"), "score": float(h.get("score", 0.0))}
+        for h in selected_hits
+    ]
+
     citations = [
         {"file": h["file"], "page": h.get("page"), "score": float(h["score"])}
         for h in hits[:5]
     ]
         codex/setup-postgresql-as-data-source
     elapsed = time.perf_counter() - start_ts
+        main
     if MEMORY_ENABLED:
         mem.record(memory_key, inp.conversation_id, inp.message, answer)
     db.add(
@@ -397,6 +420,10 @@ def admin_logs(
         mem.record(user_id, inp.conversation_id, inp.message, answer)
 
         mem.record(inp.user_id, inp.conversation_id, inp.message, answer)
+        codex/fix-top_k-to-10-in-vector-search
+    latency_ms = int((time.time() - start_time) * 1000)
+    return {"answer": answer, "citations": citations, "latency_ms": latency_ms}
+
     latency_ms = (time.perf_counter() - start) * 1000
     citation_payload: list[dict[str, Any]] = [
         {"file": c.get("file"), "page": c.get("page")}
@@ -459,4 +486,5 @@ def chat_logs(
             "conversation_id": conversation_id or "",
         },
     )
+        main
         main

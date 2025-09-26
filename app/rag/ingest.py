@@ -62,6 +62,8 @@ LOGGER = logging.getLogger(__name__)
         main
         main
 
+from .tokenizer import detokenize, tokenize
+
 def _clean(t: str) -> str:
     t = re.sub(r'\s+', ' ', t).strip()
     return t
@@ -147,6 +149,10 @@ def _chunk(text: str, chunk=900, overlap=140):
 
 
         overlap = chunk - 1
+        codex/fix-top_k-to-10-in-vector-search
+    tokens = tokenize(text)
+    out: List[str] = []
+
 
     tokenizer = _get_tokenizer()
     tokens = tokenizer.encode(text)
@@ -155,10 +161,16 @@ def _chunk(text: str, chunk=900, overlap=140):
         main
 
     out = []
+        main
     i = 0
     n = len(tokens)
     while i < n:
         j = min(i + chunk, n)
+        codex/fix-top_k-to-10-in-vector-search
+        out.append(detokenize(tokens[i:j]))
+        i = j - overlap if j < n else j
+        if i < 0: i = 0
+
         codex/fix-overlapping-chunk-processing-in-ingest.py
         out.append(text[i:j])
 
@@ -174,6 +186,7 @@ def _chunk(text: str, chunk=900, overlap=140):
         i = j - overlap
         if i < 0:
             i = 0
+        main
         main
         main
         main
