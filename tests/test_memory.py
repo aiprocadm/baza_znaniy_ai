@@ -26,3 +26,13 @@ def test_document_memory_persists_and_loads(tmp_path) -> None:
     assert loaded is not None
     assert loaded.content == created.content
     assert loaded.tags == created.tags
+
+
+def test_document_memory_recovers_from_invalid_json(tmp_path) -> None:
+    storage_path = tmp_path / "documents.json"
+    storage_path.write_text("{not: valid json}", encoding="utf-8")
+
+    memory = DocumentMemory(storage_path)
+
+    assert memory.all() == []
+    assert storage_path.read_text(encoding="utf-8").strip().startswith("[")
