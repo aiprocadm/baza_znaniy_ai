@@ -6,14 +6,17 @@ import importlib.util
 import sys
 import types
 from pathlib import Path
-from typing import Tuple
+from typing import Tuple, Type
 
 import pytest
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 from app.memory import DocumentCreate as LegacyDocumentCreate
 from app.memory import DocumentMemory as LegacyDocumentMemory
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SERVICE_ROOT = PROJECT_ROOT / "srv" / "projects" / "kb"
 
 
@@ -26,7 +29,7 @@ def _load_service_memory() -> Tuple[Type, Type]:
             sys.modules.pop(module_name, None)
 
     package = types.ModuleType(package_name)
-    package.__path__ = [str(package_path)]
+    package.__path__ = [str(package_path)]  # type: ignore[attr-defined]
     sys.modules[package_name] = package
 
     models_spec = importlib.util.spec_from_file_location(
@@ -52,13 +55,15 @@ ServiceDocumentMemory, ServiceDocumentCreate = _load_service_memory()
 
 
 @pytest.mark.parametrize(
-    "memory_cls, payload_cls",
+    ("memory_cls", "payload_cls"),
     [
         (LegacyDocumentMemory, LegacyDocumentCreate),
         (ServiceDocumentMemory, ServiceDocumentCreate),
     ],
 )
-def test_document_memory_persists_and_loads(tmp_path: Path, memory_cls: type, payload_cls: type) -> None:
+def test_document_memory_persists_and_loads(
+    tmp_path: Path, memory_cls: Type, payload_cls: Type
+) -> None:
     storage_path = tmp_path / f"{memory_cls.__module__.replace('.', '_')}_documents.json"
     memory = memory_cls(storage_path)
 
@@ -74,12 +79,11 @@ def test_document_memory_persists_and_loads(tmp_path: Path, memory_cls: type, pa
     assert loaded.tags == created.tags
 
 
-        codex/refactor-modules-to-remove-codex-markers
 @pytest.mark.parametrize(
     "memory_cls",
     [LegacyDocumentMemory, ServiceDocumentMemory],
 )
-def test_document_memory_recovers_from_invalid_json(tmp_path: Path, memory_cls: type) -> None:
+def test_document_memory_recovers_from_invalid_json(tmp_path: Path, memory_cls: Type) -> None:
     storage_path = tmp_path / "documents.json"
     storage_path.write_text("{not: valid json}", encoding="utf-8")
 
@@ -90,26 +94,16 @@ def test_document_memory_recovers_from_invalid_json(tmp_path: Path, memory_cls: 
         content = handle.read().strip()
     assert content.startswith("[")
 
-def test_document_memory_recovers_from_invalid_json(tmp_path) -> None:
-    storage_path = tmp_path / "documents.json"
-    storage_path.write_text("{not: valid json}", encoding="utf-8")
-
-    memory = LegacyDocumentMemory(storage_path)
-
-    assert memory.all() == []
-    assert storage_path.read_text(encoding="utf-8").strip().startswith("[")
-        main
-
 
 @pytest.mark.parametrize(
-    "memory_cls, payload_cls",
+    ("memory_cls", "payload_cls"),
     [
         (LegacyDocumentMemory, LegacyDocumentCreate),
         (ServiceDocumentMemory, ServiceDocumentCreate),
     ],
 )
 def test_document_ids_remain_unique_after_deletion(
-    tmp_path: Path, memory_cls: type, payload_cls: type
+    tmp_path: Path, memory_cls: Type, payload_cls: Type
 ) -> None:
     storage_path = tmp_path / f"{memory_cls.__module__.replace('.', '_')}_unique.json"
     memory = memory_cls(storage_path)

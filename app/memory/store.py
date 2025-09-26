@@ -1,3 +1,5 @@
+"""Persistence layer for chat conversation memory."""
+
 import os
 import sqlite3
 import time

@@ -53,9 +53,15 @@ class DocumentMemory:
             self._update_counter_from_id(document.id)
 
     def _save(self) -> None:
-        data = [doc.model_dump() for doc in self._documents.values()]
+        payload = []
+        for document in self._documents.values():
+            data = document.model_dump()
+            created_at = data.get("created_at")
+            if hasattr(created_at, "isoformat"):
+                data["created_at"] = created_at.isoformat()
+            payload.append(data)
         with self._storage_path.open("w", encoding="utf-8") as handle:
-            json.dump(data, handle, ensure_ascii=False, indent=2)
+            json.dump(payload, handle, ensure_ascii=False, indent=2)
 
     def _update_counter_from_id(self, identifier: str) -> None:
         match = re.search(r"(\d+)$", identifier)
