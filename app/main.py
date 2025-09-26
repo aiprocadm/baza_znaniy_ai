@@ -99,6 +99,12 @@ templates = Jinja2Templates(directory=str(Path(__file__).resolve().parent / "tem
         main
 
 mem = MemoryStore(
+        codex/split-existing-service-into-containers
+  db_path="/srv/projects/kb/data/files/kb.sqlite",
+  ttl_days=int(os.getenv("CHAT_MEMORY_TTL_DAYS","90")),
+  summary_trigger=int(os.getenv("CHAT_SUMMARY_TRIGGER","10")),
+  max_tokens=int(os.getenv("CHAT_MEMORY_MAXTOK","2000"))
+
         codex/setup-postgresql-as-data-source
     db_path="/srv/projects/kb/data/db/kb.sqlite",
 
@@ -107,6 +113,7 @@ mem = MemoryStore(
     ttl_days=int(os.getenv("CHAT_MEMORY_TTL_DAYS", "90")),
     summary_trigger=int(os.getenv("CHAT_SUMMARY_TRIGGER", "10")),
     max_tokens=int(os.getenv("CHAT_MEMORY_MAXTOK", "2000")),
+        main
 )
 
         codex/add-postgresql-access-layer-and-auth-features

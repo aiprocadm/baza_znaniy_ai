@@ -25,6 +25,9 @@ sqlalchemy==2.0.32
 psycopg[binary]==3.2.1
 
 qdrant-client==1.11.1
+        codex/split-existing-service-into-containers
+psycopg[binary]==3.2.1
+
         codex/setup-postgresql-as-data-source
 SQLAlchemy==2.0.34
 psycopg2-binary==2.9.9
@@ -36,6 +39,7 @@ psycopg[binary]==3.2.1
 
 tiktoken==0.11.0
     main
+        main
         main
         main
         main

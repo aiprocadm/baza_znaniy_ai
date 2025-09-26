@@ -275,6 +275,15 @@ Following this procedure will give you a repeatable deployment for `kb_ai`, cove
 - REST API для интеграции с внешними интерфейсами и административный веб-интерфейс за Nginx.
 
 ## Архитектура
+        codex/split-existing-service-into-containers
+- **FastAPI** — HTTP API (`/api/docs/upload`, `/api/chat`, `/health`) в отдельном контейнере `api`.
+- **Nginx** — TLS-терминация, базовая авторизация и проксирование запросов к API (контейнер `nginx`).
+- **Ollama** — генерация ответов (контейнер `ollama`, модель определяется переменной `GEN_MODEL`).
+- **Qdrant** — хранение и поиск векторных представлений фрагментов (контейнер `qdrant`).
+- **Sentence Transformers** — вычисление эмбеддингов для индекса.
+- **PostgreSQL** — долговременное хранилище памяти диалогов (контейнер `db`, конфигурируется через `DATABASE_URL`).
+- **Docker Compose** — оркестрация сервисов, общие сети и тома `data/{files,qdrant,pg,logs}`.
+
         codex/setup-postgresql-as-data-source
 - **FastAPI** — HTTP API (`/api/auth/token`, `/api/docs/upload`, `/api/chat`, `/admin/logs`, `/health`).
 - **Sentence Transformers + FAISS** — извлечение и хранение векторных представлений фрагментов.
@@ -294,17 +303,25 @@ Following this procedure will give you a repeatable deployment for `kb_ai`, cove
         main
 - **Docker Compose** — развёртывание сервиса вместе с конфигурацией Nginx.
       main
+        main
 
 ## Быстрый старт (Docker Compose)
 1. Скопируйте пример окружения и обновите значения под свою среду (обязательно задайте уникальный `APP_SECRET`, модели `GEN_MODEL`/`EMBED_MODEL`, а также параметры доступа к PostgreSQL, если они отличаются):
    ```bash
    cp data/scripts/example.env .env
    ```
+        codex/split-existing-service-into-containers
+2. Подготовьте директории с данными и журналами (сертификаты, веб-ресурсы, документы, базы данных):
+   ```bash
+   sudo mkdir -p /srv/projects/kb/data/{www,ssl,files,qdrant,pg,logs,logs/nginx,logs/api,files/ollama}
+   sudo chown -R "$USER" /srv/projects/kb/data
+
 2. Подготовьте директории с данными и логами (сертификаты, статические файлы, модели Ollama и т.п.):
    ```bash
    sudo mkdir -p /opt/knowlab/data/{files,qdrant,pg,logs}
    sudo mkdir -p /opt/knowlab/data/files/{www,ssl,db,ollama}
    sudo chown -R "$USER" /opt/knowlab/data
+        main
    ```
    В каталоге `/opt/knowlab/data/files/ssl` разместите самоподписанный сертификат (`kb.local.crt`, `kb.local.key`) и `.htpasswd` для Basic Auth.
 3. Запустите сервисы:
@@ -312,6 +329,8 @@ Following this procedure will give you a repeatable deployment for `kb_ai`, cove
    docker compose up -d
    ```
    После запуска административный интерфейс и API будут доступны на `https://<ваш-домен>/` (эндпоинты API проксируются через `/api`).
+
+   > **Примечание:** контейнер `api` зависит от готовности сервисов `db`, `qdrant` и `ollama`. Для корректной работы памяти диалогов задайте валидный `DATABASE_URL` в `.env` (см. пример в `data/scripts/example.env`).
 
 ## Локальный запуск без Docker
 ```bash
