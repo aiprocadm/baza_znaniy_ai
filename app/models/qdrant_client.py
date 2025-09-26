@@ -6,10 +6,10 @@ import numpy as np, faiss
 BASE = "/srv/projects/kb/data/storage/qdrant"
 IDX_PATH = os.path.join(BASE,"kb.index")
 DB_PATH  = os.path.join(BASE,"meta.sqlite")
-DIM = 384
 
 _model = None
 _index = None
+_expected_dim = None
 
 def _embedder():
     global _model
@@ -17,14 +17,26 @@ def _embedder():
         _model = SentenceTransformer(os.getenv("EMBED_MODEL","intfloat/multilingual-e5-small"))
     return _model
 
+def _embedding_dim():
+    global _expected_dim
+    if _expected_dim is None:
+        model = _embedder()
+        if hasattr(model, "get_sentence_embedding_dimension"):
+            _expected_dim = int(model.get_sentence_embedding_dimension())
+        else:
+            sample = model.encode([""], convert_to_numpy=True)
+            _expected_dim = int(sample.shape[1])
+    return _expected_dim
+
 def _norm(v):
     n = np.linalg.norm(v, axis=1, keepdims=True) + 1e-12
     return v / n
 
 def ensure_collection():
     os.makedirs(BASE, exist_ok=True)
+    dim = _embedding_dim()
+    _load_index(dim)
     _init_db()
-    _load_index()
 
 def _init_db():
     with sqlite3.connect(DB_PATH) as c:
@@ -35,20 +47,49 @@ def _init_db():
         c.execute("CREATE INDEX IF NOT EXISTS ix_file ON chunks(file)")
         c.commit()
 
-def _load_index():
-    global _index
-    if _index is not None: return
+def _create_index(dim: int):
+    base = faiss.IndexFlatIP(dim)
+    return faiss.IndexIDMap2(base)
+
+def _handle_dim_mismatch(saved_dim: int, expected_dim: int):
+    global _index, _expected_dim
     if os.path.exists(IDX_PATH):
-        _index = faiss.read_index(IDX_PATH)
+        os.remove(IDX_PATH)
+    if os.path.exists(DB_PATH):
+        os.remove(DB_PATH)
+    _index = _create_index(expected_dim)
+    faiss.write_index(_index, IDX_PATH)
+    _init_db()
+    _expected_dim = expected_dim
+
+def _ensure_index_dim(expected_dim: int):
+    global _index
+    if _index is not None and getattr(_index, "d", None) != expected_dim:
+        _handle_dim_mismatch(getattr(_index, "d", None), expected_dim)
+
+def _load_index(expected_dim: int):
+    global _index
+    if _index is not None:
+        _ensure_index_dim(expected_dim)
         return
-    base = faiss.IndexFlatIP(DIM)
-    _index = faiss.IndexIDMap2(base)
+    if os.path.exists(IDX_PATH):
+        idx = faiss.read_index(IDX_PATH)
+        if getattr(idx, "d", None) != expected_dim:
+            _handle_dim_mismatch(getattr(idx, "d", None), expected_dim)
+            return
+        _index = idx
+        return
+    _index = _create_index(expected_dim)
     faiss.write_index(_index, IDX_PATH)
 
 def upsert_chunks(chunks: List[Dict]):
     ensure_collection()
+    dim = _embedding_dim()
+    _ensure_index_dim(dim)
     texts = [c["text"] for c in chunks]
     embs = _norm(_embedder().encode(texts, convert_to_numpy=True))
+    if embs.shape[1] != dim:
+        raise ValueError(f"Embedding dimension mismatch: expected {dim}, got {embs.shape[1]}")
     ids = []
     with sqlite3.connect(DB_PATH) as c:
         for ch in chunks:
@@ -56,14 +97,17 @@ def upsert_chunks(chunks: List[Dict]):
                             (ch.get("file"), int(ch.get("page") or 0), ch["text"]))
             ids.append(cur.lastrowid)
         c.commit()
-    import numpy as np
     ids_np = np.array(ids, dtype=np.int64)
     _index.add_with_ids(embs, ids_np)
     faiss.write_index(_index, IDX_PATH)
 
 def search_chunks(query: str, top_k: int = 10) -> List[Dict]:
     ensure_collection()
+    dim = _embedding_dim()
+    _ensure_index_dim(dim)
     q = _norm(_embedder().encode([query], convert_to_numpy=True))
+    if q.shape[1] != dim:
+        raise ValueError(f"Query embedding dimension mismatch: expected {dim}, got {q.shape[1]}")
     D, I = _index.search(q, top_k)
     res = []
     with sqlite3.connect(DB_PATH) as c:
