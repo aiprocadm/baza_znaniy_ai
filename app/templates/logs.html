@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Журнал обращений</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 2rem; background: #f9fafb; color: #111827; }
+        table { width: 100%; border-collapse: collapse; margin-top: 1.5rem; }
+        th, td { padding: 0.75rem; border-bottom: 1px solid #e5e7eb; text-align: left; vertical-align: top; }
+        th { background: #111827; color: #f9fafb; position: sticky; top: 0; }
+        tbody tr:nth-child(even) { background: #f3f4f6; }
+        .citations { font-size: 0.9rem; color: #374151; }
+        h1 { margin-bottom: 0.5rem; }
+        time { color: #6b7280; font-size: 0.85rem; }
+    </style>
+</head>
+<body>
+<h1>Журнал обращений</h1>
+<p>Последние {{ logs|length }} записей.</p>
+<table>
+    <thead>
+    <tr>
+        <th>Дата</th>
+        <th>Пользователь</th>
+        <th>Вопрос</th>
+        <th>Цитаты</th>
+        <th>Время ответа, c</th>
+    </tr>
+    </thead>
+    <tbody>
+    {% for log in logs %}
+        <tr>
+            <td><time datetime="{{ log.answered_at.isoformat() }}">{{ log.answered_at.strftime("%Y-%m-%d %H:%M:%S") }}</time></td>
+            <td>{{ log.user.username if log.user else '—' }}</td>
+            <td>{{ log.question }}</td>
+            <td class="citations">
+                {% if log.citations %}
+                    <ul>
+                        {% for item in log.citations %}
+                            <li>{{ item.get('file', '—') }}{% if item.get('page') %}, стр. {{ item.get('page') }}{% endif %}</li>
+                        {% endfor %}
+                    </ul>
+                {% else %}
+                    —
+                {% endif %}
+            </td>
+            <td>{{ '%.2f'|format(log.response_time or 0) }}</td>
+        </tr>
+    {% endfor %}
+    </tbody>
+</table>
+</body>
+</html>
