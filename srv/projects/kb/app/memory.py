@@ -1,4 +1,8 @@
+        codex/refactor-modules-to-remove-codex-markers
 """Simple persistence for the knowledge base service."""
+
+"""Simple persistence for the knowledge base."""
+        main
 
 from __future__ import annotations
 
@@ -40,8 +44,19 @@ class DocumentMemory:
                 exc,
             )
             self._documents.clear()
+        codex/refactor-modules-to-remove-codex-markers
             self._slug_counters.clear()
             self._persist()
+
+            try:
+                self._persist()
+            except OSError as persist_exc:  # pragma: no cover - filesystem edge cases
+                LOGGER.warning(
+                    "Failed to persist reset storage to %s: %s.",
+                    self._storage_path,
+                    persist_exc,
+                )
+        main
             return
         for item in raw_items:
             doc = Document.model_validate(item)

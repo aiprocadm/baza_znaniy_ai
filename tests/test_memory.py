@@ -74,6 +74,7 @@ def test_document_memory_persists_and_loads(tmp_path: Path, memory_cls: type, pa
     assert loaded.tags == created.tags
 
 
+        codex/refactor-modules-to-remove-codex-markers
 @pytest.mark.parametrize(
     "memory_cls",
     [LegacyDocumentMemory, ServiceDocumentMemory],
@@ -88,6 +89,16 @@ def test_document_memory_recovers_from_invalid_json(tmp_path: Path, memory_cls: 
     with storage_path.open(encoding="utf-8") as handle:
         content = handle.read().strip()
     assert content.startswith("[")
+
+def test_document_memory_recovers_from_invalid_json(tmp_path) -> None:
+    storage_path = tmp_path / "documents.json"
+    storage_path.write_text("{not: valid json}", encoding="utf-8")
+
+    memory = LegacyDocumentMemory(storage_path)
+
+    assert memory.all() == []
+    assert storage_path.read_text(encoding="utf-8").strip().startswith("[")
+        main
 
 
 @pytest.mark.parametrize(
