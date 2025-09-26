@@ -1,12 +1,3 @@
-        codex/fix-top_k-to-10-in-vector-search
-"""Compatibility re-export for shared document models."""
-
-from srv.projects.kb.app.models import DocumentCreate  # type: ignore F401
-
-__all__ = ["DocumentCreate"]
-
-"""Pydantic models shared across the service and tests."""
-
 from __future__ import annotations
 
 from datetime import datetime
@@ -16,7 +7,7 @@ from pydantic import BaseModel, Field
 
 
 class Document(BaseModel):
-    """Representation of a stored document chunk used in tests."""
+    """Representation of a stored document chunk used across the service."""
 
     id: str = Field(..., description="Unique document identifier")
     content: str = Field(..., description="Document body")
@@ -33,4 +24,3 @@ class DocumentCreate(BaseModel):
 
 
 __all__ = ["Document", "DocumentCreate"]
-        main

@@ -1,23 +1,26 @@
+from __future__ import annotations
+
 import io
 import logging
 import os
 import re
 from functools import lru_cache
-from typing import Dict, List
+from typing import Dict, Iterable, List, Optional, Protocol
 
-import tiktoken
-from docx import Document
-        codex/introduce-tokenizer-and-rewrite-chunking-logic
-import io, re
-from typing import List, Dict, Optional, Protocol
-
-try:
+try:  # pragma: no cover - dependency provided via requirements
     import tiktoken
-except ImportError:  # pragma: no cover - dependency is provided via requirements
+except ImportError:  # pragma: no cover - used in tests when dependency missing
     tiktoken = None  # type: ignore
+
+from docx import Document
+from pypdf import PdfReader
+
+LOGGER = logging.getLogger(__name__)
 
 
 class _Tokenizer(Protocol):
+    """Subset of the tiktoken ``Encoding`` interface used by the tests."""
+
     def encode(self, text: str) -> List[int]:
         ...
 
@@ -26,215 +29,159 @@ class _Tokenizer(Protocol):
 
 
 class _CharTokenizer:
+    """Fallback tokenizer that operates on individual characters."""
+
     def encode(self, text: str) -> List[int]:
         return [ord(ch) for ch in text]
 
     def decode(self, tokens: List[int]) -> str:
-        return "".join(chr(t) for t in tokens)
+        return "".join(chr(token) for token in tokens)
 
 
 _TOKENIZER: Optional[_Tokenizer] = None
 
 
-def _get_tokenizer() -> _Tokenizer:
-    global _TOKENIZER
-    if _TOKENIZER is None:
-        if tiktoken is not None:
-            try:
-                _TOKENIZER = tiktoken.get_encoding("cl100k_base")
-            except Exception:
-                try:
-                    _TOKENIZER = tiktoken.encoding_for_model("text-embedding-3-small")
-                except Exception:
-                    _TOKENIZER = _CharTokenizer()
-        else:
-            _TOKENIZER = _CharTokenizer()
-    return _TOKENIZER
-        codex/introduce-tokenizer-and-rewrite-chunking-logic-ca0dv1
-
-
-from pypdf import PdfReader
-from tiktoken.core import Encoding
-
-
-LOGGER = logging.getLogger(__name__)
-
-        main
-        main
-
-from .tokenizer import detokenize, tokenize
-
-def _clean(t: str) -> str:
-    t = re.sub(r'\s+', ' ', t).strip()
-    return t
-
-        codex/introduce-tokenizer-and-rewrite-chunking-logic-ca0dv1
-
-        codex/introduce-tokenizer-and-rewrite-chunking-logic
-        main
-def _chunk(text: str, chunk=900, overlap=140, encoder: Optional[_Tokenizer] = None):
-    if not text:
-        return []
-
-    encoder = encoder or _get_tokenizer()
-    token_ids = encoder.encode(text)
-    if not token_ids:
-        return []
-
-        codex/introduce-tokenizer-and-rewrite-chunking-logic-ca0dv1
-    chunk = max(int(chunk), 1)
-    overlap = max(int(overlap), 0)
-    if overlap >= chunk:
-        overlap = chunk - 1 if chunk > 1 else 0
-
-    out = []
-    start = 0
-    total = len(token_ids)
-
-    while start < total:
-        end = min(start + chunk, total)
-        window_tokens = token_ids[start:end]
-        out.append(encoder.decode(window_tokens))
-        if end >= total:
-            break
-        start = max(end - overlap, 0)
-
-
-
 @lru_cache(maxsize=1)
-def _get_tokenizer() -> Encoding:
+def _byte_fallback() -> "tiktoken.core.Encoding":  # type: ignore[name-defined]
+    """Return a byte-level tokenizer compatible with the tiktoken API."""
+
+    mergeable_ranks = {bytes([i]): i for i in range(256)}
+    return tiktoken.Encoding(  # type: ignore[call-arg]
+        name="byte_fallback",
+        pat_str=r"(?s:.)",
+        mergeable_ranks=mergeable_ranks,
+        special_tokens={},
+    )
+
+
+def _get_tokenizer() -> _Tokenizer:
     """Return the tokenizer used to measure token lengths."""
+
+    global _TOKENIZER
+    if _TOKENIZER is not None:
+        return _TOKENIZER
+
+    if tiktoken is None:
+        _TOKENIZER = _CharTokenizer()
+        return _TOKENIZER
 
     name = os.getenv("RAG_TOKENIZER_NAME", "cl100k_base")
     try:
-        return tiktoken.get_encoding(name)
-    except Exception as exc:  # pragma: no cover - handled by tests via behaviour
-        LOGGER.warning(
-            "Falling back to byte-level tokenizer for '%s': %s",
-            name,
-            exc,
-        )
-        mergeable_ranks = {bytes([i]): i for i in range(256)}
-        return Encoding(
-            name="byte_fallback",
-            pat_str=r"(?s:.)",
-            mergeable_ranks=mergeable_ranks,
-            special_tokens={},
-        )
+        _TOKENIZER = tiktoken.get_encoding(name)
+    except Exception:  # pragma: no cover - defensive fall-back
+        try:
+            _TOKENIZER = tiktoken.encoding_for_model("text-embedding-3-small")
+        except Exception:  # pragma: no cover - fallback for unusual environments
+            _TOKENIZER = _byte_fallback()
+    return _TOKENIZER
 
 
-def _chunk(text: str, chunk=900, overlap=140):
-        codex/fix-overlapping-chunk-processing-in-ingest.py
-    chunk = max(1, int(chunk))
-    overlap = max(0, int(overlap))
-        main
+def _clean(text: str) -> str:
+    """Normalise whitespace extracted from source documents."""
 
-    chunk = max(int(chunk), 1)
-    overlap = max(int(overlap), 0)
-    if overlap >= chunk:
-        codex/introduce-tokenizer-and-rewrite-chunking-logic
-        overlap = chunk - 1 if chunk > 1 else 0
+    return re.sub(r"\s+", " ", text).strip()
 
-    out = []
+
+def _normalise_window_size(value: int, minimum: int = 1) -> int:
+    value = int(value)
+    return minimum if value < minimum else value
+
+
+def _normalise_overlap(chunk: int, overlap: int) -> int:
+    overlap = 0 if overlap < 0 else int(overlap)
+    if chunk <= 1:
+        return 0
+    return min(overlap, chunk - 1)
+
+
+def _chunk(
+    text: str,
+    *,
+    chunk: int = 900,
+    overlap: int = 140,
+    encoder: Optional[_Tokenizer] = None,
+) -> List[str]:
+    """Split ``text`` into overlapping windows based on token counts."""
+
+    if not text:
+        return []
+
+    tokenizer = encoder or _get_tokenizer()
+    token_ids = tokenizer.encode(text)
+    if not token_ids:
+        return []
+
+    window = _normalise_window_size(chunk)
+    step_overlap = _normalise_overlap(window, overlap)
+
+    pieces: List[str] = []
     start = 0
     total = len(token_ids)
 
     while start < total:
-        end = min(start + chunk, total)
-        window_tokens = token_ids[start:end]
-        out.append(encoder.decode(window_tokens))
+        end = min(start + window, total)
+        tokens = token_ids[start:end]
+        pieces.append(tokenizer.decode(tokens))
         if end >= total:
             break
-        start = max(end - overlap, 0)
+        next_start = end - step_overlap
+        if next_start <= start:
+            next_start = start + 1
+        start = next_start
+
+    return pieces
 
 
-        overlap = chunk - 1
-        codex/fix-top_k-to-10-in-vector-search
-    tokens = tokenize(text)
-    out: List[str] = []
+def _iter_pdf_text(data: bytes) -> Iterable[tuple[int, str]]:
+    reader = PdfReader(io.BytesIO(data))
+    for page_number, page in enumerate(reader.pages, start=1):
+        try:
+            text = page.extract_text() or ""
+        except Exception:  # pragma: no cover - pypdf quirks
+            text = ""
+        cleaned = _clean(text)
+        if cleaned:
+            yield page_number, cleaned
 
 
-    tokenizer = _get_tokenizer()
-    tokens = tokenizer.encode(text)
-    if not tokens:
-        return []
-        main
-
-    out = []
-        main
-    i = 0
-    n = len(tokens)
-    while i < n:
-        j = min(i + chunk, n)
-        codex/fix-top_k-to-10-in-vector-search
-        out.append(detokenize(tokens[i:j]))
-        i = j - overlap if j < n else j
-        if i < 0: i = 0
-
-        codex/fix-overlapping-chunk-processing-in-ingest.py
-        out.append(text[i:j])
-
-        next_i = j - overlap if j < n else j
-        if next_i <= i:
-            next_i = min(i + 1, n)
-        i = next_i
-
-        token_slice = tokens[i:j]
-        out.append(tokenizer.decode(token_slice))
-        if j >= n:
-            break
-        i = j - overlap
-        if i < 0:
-            i = 0
-        main
-        main
-        main
-        main
-    return out
+def _iter_docx_text(data: bytes) -> Iterable[tuple[int, str]]:
+    document = Document(io.BytesIO(data))
+    text = _clean("\n".join(paragraph.text for paragraph in document.paragraphs))
+    if text:
+        yield 1, text
 
 
-def parse_and_chunk(filename: str, data: bytes) -> List[Dict]:
-    ext = filename.rsplit('.',1)[-1].lower()
-    text_pages = []
+def _iter_txt_text(data: bytes) -> Iterable[tuple[int, str]]:
+    text = _clean(data.decode("utf-8", errors="ignore"))
+    if text:
+        yield 1, text
+
+
+def parse_and_chunk(filename: str, data: bytes) -> List[Dict[str, object]]:
+    """Parse ``data`` according to ``filename`` extension and chunk the text."""
+
+    ext = filename.rsplit(".", 1)[-1].lower()
     if ext == "pdf":
-        r = PdfReader(io.BytesIO(data))
-        for p, page in enumerate(r.pages, start=1):
-            try:
-                txt = page.extract_text() or ""
-            except Exception:
-                txt = ""
-            text_pages.append((p, _clean(txt)))
+        pages = list(_iter_pdf_text(data))
     elif ext == "docx":
-        d = Document(io.BytesIO(data))
-        txt = _clean("\n".join(p.text for p in d.paragraphs))
-        text_pages = [(1, txt)]
+        pages = list(_iter_docx_text(data))
     elif ext == "txt":
-        txt = _clean(data.decode("utf-8", errors="ignore"))
-        text_pages = [(1, txt)]
+        pages = list(_iter_txt_text(data))
     else:
         return []
 
-    chunks = []
-    csize = int(os.getenv("RAG_CHUNK","900"))
-    cover = int(os.getenv("RAG_OVERLAP","140"))
-        codex/introduce-tokenizer-and-rewrite-chunking-logic-ca0dv1
-    encoder = _get_tokenizer()
+    if not pages:
+        return []
 
+    chunk_size = _normalise_window_size(int(os.getenv("RAG_CHUNK", "900")))
+    overlap = _normalise_overlap(chunk_size, int(os.getenv("RAG_OVERLAP", "140")))
+    tokenizer = _get_tokenizer()
 
-        codex/introduce-tokenizer-and-rewrite-chunking-logic
-    encoder = _get_tokenizer()
-
-
-    if csize <= 0:
-        csize = 1
-    if cover < 0:
-        cover = 0
-    if csize > 0:
-        cover = min(cover, csize - 1)
-        main
-        main
-    for page, txt in text_pages:
-        if not txt: continue
-        for ch in _chunk(txt, chunk=csize, overlap=cover, encoder=encoder):
-            chunks.append({"file": filename, "page": page, "text": ch})
+    chunks: List[Dict[str, object]] = []
+    for page, text in pages:
+        for piece in _chunk(text, chunk=chunk_size, overlap=overlap, encoder=tokenizer):
+            chunks.append({"file": filename, "page": page, "text": piece})
     return chunks
+
+
+__all__ = ["_chunk", "_clean", "_get_tokenizer", "parse_and_chunk"]

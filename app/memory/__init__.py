@@ -1,11 +1,3 @@
-        codex/fix-top_k-to-10-in-vector-search
-"""Compatibility re-export for legacy DocumentMemory tests."""
-
-from srv.projects.kb.app.memory import DocumentMemory  # type: ignore F401
-from srv.projects.kb.app.models import DocumentCreate  # type: ignore F401
-
-__all__ = ["DocumentMemory", "DocumentCreate"]
-
 """Compatibility helpers for test suite."""
 
 from __future__ import annotations
@@ -16,6 +8,8 @@ from threading import RLock
 from typing import Dict, Iterable, List
 
 from app.models import Document, DocumentCreate
+
+__all__ = ["DocumentMemory"]
 
 
 class DocumentMemory:
@@ -32,8 +26,13 @@ class DocumentMemory:
     def _load(self) -> None:
         if not self._storage_path.exists():
             return
-        with self._storage_path.open("r", encoding="utf-8") as handle:
-            raw_items = json.load(handle)
+        try:
+            with self._storage_path.open("r", encoding="utf-8") as handle:
+                raw_items = json.load(handle)
+        except (json.JSONDecodeError, OSError):
+            self._documents.clear()
+            self._persist()
+            return
         for item in raw_items:
             doc = Document.model_validate(item)
             self._documents[doc.id] = doc
@@ -59,41 +58,14 @@ class DocumentMemory:
     def add(self, payload: DocumentCreate) -> Document:
         with self._lock:
             if payload.id:
-                doc_id = payload.id
-                self._update_next_id_from(doc_id)
+                document_id = payload.id
+                self._update_next_id_from(document_id)
             else:
-                doc_id = self._generate_id()
-            document = Document(id=doc_id, content=payload.content, tags=payload.tags)
+                document_id = self._generate_id()
+            document = Document(id=document_id, content=payload.content, tags=payload.tags)
             self._documents[document.id] = document
             self._persist()
             return document
-
-    def _generate_id(self) -> str:
-        doc_id = f"doc-{self._next_id}"
-        self._next_id += 1
-        return doc_id
-
-    def _update_next_id_from(self, doc_id: str) -> None:
-        suffix = self._parse_numeric_suffix(doc_id)
-        if suffix is not None and suffix >= self._next_id:
-            self._next_id = suffix + 1
-
-    def _reset_next_id(self) -> None:
-        max_suffix = 0
-        for existing_id in self._documents:
-            suffix = self._parse_numeric_suffix(existing_id)
-            if suffix is not None and suffix > max_suffix:
-                max_suffix = suffix
-        self._next_id = max_suffix + 1 if max_suffix >= 1 else 1
-
-    @staticmethod
-    def _parse_numeric_suffix(doc_id: str) -> int | None:
-        if not doc_id.startswith("doc-"):
-            return None
-        suffix = doc_id[4:]
-        if suffix.isdigit():
-            return int(suffix)
-        return None
 
     def bulk_add(self, payloads: Iterable[DocumentCreate]) -> List[Document]:
         return [self.add(item) for item in payloads]
@@ -105,6 +77,29 @@ class DocumentMemory:
                 self._persist()
             return removed
 
+    def _generate_id(self) -> str:
+        document_id = f"doc-{self._next_id}"
+        self._next_id += 1
+        return document_id
 
-__all__ = ["DocumentMemory"]
-        main
+    def _update_next_id_from(self, document_id: str) -> None:
+        suffix = self._parse_numeric_suffix(document_id)
+        if suffix is not None and suffix >= self._next_id:
+            self._next_id = suffix + 1
+
+    def _reset_next_id(self) -> None:
+        max_suffix = 0
+        for doc_id in self._documents:
+            suffix = self._parse_numeric_suffix(doc_id)
+            if suffix is not None and suffix > max_suffix:
+                max_suffix = suffix
+        self._next_id = max_suffix + 1 if max_suffix >= 1 else 1
+
+    @staticmethod
+    def _parse_numeric_suffix(document_id: str) -> int | None:
+        if not document_id.startswith("doc-"):
+            return None
+        suffix = document_id[4:]
+        if suffix.isdigit():
+            return int(suffix)
+        return None

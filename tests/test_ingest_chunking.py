@@ -1,12 +1,9 @@
-        codex/introduce-tokenizer-and-rewrite-chunking-logic-ca0dv1
-import importlib
+from __future__ import annotations
 
-        codex/introduce-tokenizer-and-rewrite-chunking-logic
 import importlib
-
-      codex/fix-overlapping-chunk-processing-in-ingest.py
 import pathlib
 import sys
+from typing import List
 
 import pytest
 
@@ -14,7 +11,41 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from app.rag.ingest import _chunk
+ingest_module = importlib.import_module("app.rag.ingest")
+_chunk = ingest_module._chunk
+_clean = ingest_module._clean
+_get_tokenizer = ingest_module._get_tokenizer
+parse_and_chunk = ingest_module.parse_and_chunk
+
+
+def _make_text_with_tokens(count: int, token_id: int = 100):
+    encoder = _get_tokenizer()
+    token_ids = [token_id] * count
+    text = encoder.decode(token_ids)
+    return text, encoder, token_ids
+
+
+def _token_windows(text: str, chunk: int, overlap: int) -> List[List[int]]:
+    tokenizer = _get_tokenizer()
+    tokens = tokenizer.encode(text)
+    windows: List[List[int]] = []
+    if not tokens:
+        return windows
+
+    chunk = max(chunk, 1)
+    overlap = max(min(overlap, chunk - 1), 0) if chunk > 1 else 0
+    start = 0
+    total = len(tokens)
+    while start < total:
+        end = min(start + chunk, total)
+        windows.append(tokens[start:end])
+        if end >= total:
+            break
+        next_start = end - overlap
+        if next_start <= start:
+            next_start = start + 1
+        start = next_start
+    return windows
 
 
 @pytest.mark.parametrize(
@@ -24,7 +55,7 @@ from app.rag.ingest import _chunk
         ("hello", 0, 2, ["h", "e", "l", "l", "o"]),
     ],
 )
-def test_chunk_small_sizes(text, chunk, overlap, expected):
+def test_chunk_small_sizes(text: str, chunk: int, overlap: int, expected: list[str]):
     assert _chunk(text, chunk=chunk, overlap=overlap) == expected
 
 
@@ -35,100 +66,18 @@ def test_chunk_progress_with_high_overlap():
     assert chunks[-1]
     assert sum(len(c) for c in chunks) >= len(text)
 
-from pathlib import Path
-        main
-        main
-import sys
-from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
-
-        codex/introduce-tokenizer-and-rewrite-chunking-logic-ca0dv1
-
-        codex/introduce-tokenizer-and-rewrite-chunking-logic
-        main
-ingest_module = importlib.import_module("app.rag.ingest")
-_chunk = ingest_module._chunk
-_get_tokenizer = ingest_module._get_tokenizer
-
-for name in ["app.rag.ingest", "app.rag", "app"]:
-    sys.modules.pop(name, None)
-
-        codex/introduce-tokenizer-and-rewrite-chunking-logic-ca0dv1
-
-def _make_text_with_tokens(count: int, token_id: int = 100):
-    encoder = _get_tokenizer()
-    token_ids = [token_id] * count
-    text = encoder.decode(token_ids)
-    return text, encoder, token_ids
-
-        main
-
-def _make_text_with_tokens(count: int, token_id: int = 100):
-    encoder = _get_tokenizer()
-    token_ids = [token_id] * count
-    text = encoder.decode(token_ids)
-    return text, encoder, token_ids
-
-        codex/introduce-tokenizer-and-rewrite-chunking-logic-ca0dv1
 def test_chunk_respects_token_window_size():
     text, encoder, original_tokens = _make_text_with_tokens(1800)
 
     chunks = _chunk(text, chunk=900, overlap=140, encoder=encoder)
     encoded_chunks = [encoder.encode(chunk) for chunk in chunks]
 
-
-from app.rag.ingest import _chunk, _clean, _get_tokenizer
-
-        main
-
-def _token_windows(text: str, chunk: int, overlap: int):
-    tokenizer = _get_tokenizer()
-    tokens = tokenizer.encode(text)
-    windows = []
-    i = 0
-    n = len(tokens)
-    if n == 0:
-        return windows
-    overlap = max(min(overlap, chunk - 1), 0)
-    while i < n:
-        j = min(i + chunk, n)
-        windows.append(tokens[i:j])
-        if j >= n:
-            break
-        i = j - overlap
-        if i < 0:
-            i = 0
-    return windows
-
-        codex/introduce-tokenizer-and-rewrite-chunking-logic
-def test_chunk_respects_token_window_size():
-    text, encoder, original_tokens = _make_text_with_tokens(1800)
-
-    chunks = _chunk(text, chunk=900, overlap=140, encoder=encoder)
-    encoded_chunks = [encoder.encode(chunk) for chunk in chunks]
-
-        main
     assert len(chunks) == 3
     assert encoded_chunks[0] == original_tokens[:900]
     assert encoded_chunks[1] == original_tokens[760:1660]
     assert encoded_chunks[2] == original_tokens[1520:1800]
     assert all(len(tokens) <= 900 for tokens in encoded_chunks)
-        codex/introduce-tokenizer-and-rewrite-chunking-logic-ca0dv1
-
-
-def test_chunk_overlap_consistency():
-    text, encoder, _ = _make_text_with_tokens(1500, token_id=101)
-
-    chunks = _chunk(text, chunk=900, overlap=140, encoder=encoder)
-    encoded_chunks = [encoder.encode(chunk) for chunk in chunks]
-
-    for current, nxt in zip(encoded_chunks, encoded_chunks[1:]):
-        overlap = min(140, len(current), len(nxt))
-        assert current[-overlap:] == nxt[:overlap]
-
 
 
 def test_chunk_overlap_consistency():
@@ -168,8 +117,6 @@ def test_chunk_overlap_adjusts_when_chunk_is_small():
 
 
 def test_parse_and_chunk_preserves_metadata_and_tokens():
-    from app.rag.ingest import parse_and_chunk
-
     text = "page content " * 20
     payload = text.encode("utf-8")
 
@@ -182,6 +129,3 @@ def test_parse_and_chunk_preserves_metadata_and_tokens():
     assert reconstructed == expected
     assert all(chunk["file"] == "example.txt" for chunk in chunks)
     assert all(chunk["page"] == 1 for chunk in chunks)
-        main
-        main
-        main
