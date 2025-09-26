@@ -1,0 +1,477 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>KB Admin</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    line-height: 1.5;
+    --accent: #2563eb;
+    --danger: #b91c1c;
+    --surface: rgba(37, 99, 235, 0.08);
+  }
+  body {
+    margin: 0;
+    padding: 2.5rem 1.5rem 4rem;
+    background: radial-gradient(circle at top, rgba(37, 99, 235, 0.15), transparent 55%);
+    min-height: 100vh;
+  }
+  h1, h2, h3 {
+    font-weight: 600;
+  }
+  main {
+    max-width: 960px;
+    margin: 0 auto;
+    background: color-mix(in srgb, var(--surface) 35%, transparent);
+    border-radius: 18px;
+    padding: 2rem 2.5rem 3rem;
+    box-shadow: 0 18px 50px rgba(15, 23, 42, 0.2);
+    backdrop-filter: blur(8px);
+  }
+  section + section {
+    margin-top: 2.25rem;
+  }
+  form {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    align-items: center;
+  }
+  label {
+    font-size: 0.95rem;
+    font-weight: 500;
+  }
+  input[type="password"], input[type="text"], input[type="file"] {
+    padding: 0.6rem 0.75rem;
+    border-radius: 10px;
+    border: 1px solid rgba(148, 163, 184, 0.45);
+    flex: 1 1 220px;
+    font-size: 0.95rem;
+    background: rgba(255,255,255,0.85);
+  }
+  button {
+    appearance: none;
+    border: none;
+    border-radius: 999px;
+    background: var(--accent);
+    color: #fff;
+    font-weight: 600;
+    padding: 0.6rem 1.4rem;
+    cursor: pointer;
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+    box-shadow: 0 12px 20px rgba(37, 99, 235, 0.25);
+  }
+  button[disabled] {
+    background: rgba(148, 163, 184, 0.45);
+    box-shadow: none;
+    cursor: not-allowed;
+  }
+  button:hover:not([disabled]) {
+    transform: translateY(-1px);
+    box-shadow: 0 18px 30px rgba(37, 99, 235, 0.35);
+  }
+  #auth-status, #upload-status, #doc-status {
+    margin-top: 0.75rem;
+    font-size: 0.95rem;
+  }
+  .danger {
+    color: var(--danger);
+    font-weight: 600;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 0.75rem;
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 10px 22px rgba(15, 23, 42, 0.12);
+  }
+  th, td {
+    padding: 0.75rem 0.9rem;
+    text-align: left;
+    background: rgba(15, 23, 42, 0.04);
+  }
+  tr:nth-child(even) td {
+    background: rgba(15, 23, 42, 0.08);
+  }
+  small {
+    font-size: 0.8rem;
+    color: rgba(71, 85, 105, 0.95);
+  }
+  .hidden {
+    display: none !important;
+  }
+  .stack {
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+  }
+  .actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+  .secondary {
+    background: rgba(15, 23, 42, 0.1);
+    color: inherit;
+    box-shadow: none;
+  }
+</style>
+<main>
+  <section>
+    <h1>Knowledge Base — Admin</h1>
+    <p>Загрузите новые документы и следите за историей индексации. Доступ ограничен администраторами.</p>
+    <form id="token-form">
+      <label for="token">Auth token</label>
+      <input id="token" type="password" placeholder="Bearer token" autocomplete="off" spellcheck="false">
+      <button type="submit">Сохранить токен</button>
+      <button type="button" class="secondary" id="clear-token">Очистить</button>
+    </form>
+    <div id="auth-status"></div>
+  </section>
+  <section id="upload-section" class="hidden">
+    <h2>Загрузка документа</h2>
+    <p>Принимаются файлы PDF, DOCX и TXT. Файл отправляется на <code>/api/docs/upload</code> с вашим токеном.</p>
+    <form id="upload-form">
+      <input id="file" type="file" accept=".pdf,.doc,.docx,.txt" required>
+      <button type="submit">Загрузить</button>
+    </form>
+    <div id="upload-status"></div>
+  </section>
+  <section>
+    <h2>История загрузок</h2>
+    <p><small>История хранится только в вашем браузере. Очистите её, если хотите начать заново.</small></p>
+    <div class="actions">
+      <button type="button" class="secondary" id="clear-history">Очистить историю</button>
+    </div>
+    <div id="history-empty">Пока нет записей.</div>
+    <table id="history-table" class="hidden">
+      <thead>
+        <tr>
+          <th>Файл</th>
+          <th>Статус</th>
+          <th>Подробности</th>
+          <th>Время</th>
+        </tr>
+      </thead>
+      <tbody id="history-body"></tbody>
+    </table>
+  </section>
+  <section id="doc-admin" class="hidden">
+    <h2>Управление документами</h2>
+    <p><small>Функции активируются автоматически, когда сервер предоставляет админские эндпоинты.</small></p>
+    <div class="actions">
+      <button type="button" id="refresh-docs">Обновить список</button>
+    </div>
+    <div id="doc-status"></div>
+    <div id="doc-list" class="stack"></div>
+  </section>
+</main>
+<script>
+(function(){
+  const storageKey = 'kb_admin_token';
+  const historyKey = 'kb_admin_upload_history';
+  const tokenInput = document.getElementById('token');
+  const tokenForm = document.getElementById('token-form');
+  const authStatus = document.getElementById('auth-status');
+  const uploadSection = document.getElementById('upload-section');
+  const uploadForm = document.getElementById('upload-form');
+  const fileInput = document.getElementById('file');
+  const uploadStatus = document.getElementById('upload-status');
+  const historyTable = document.getElementById('history-table');
+  const historyBody = document.getElementById('history-body');
+  const historyEmpty = document.getElementById('history-empty');
+  const clearHistoryBtn = document.getElementById('clear-history');
+  const clearTokenBtn = document.getElementById('clear-token');
+  const docSection = document.getElementById('doc-admin');
+  const docStatus = document.getElementById('doc-status');
+  const docList = document.getElementById('doc-list');
+  const refreshDocsBtn = document.getElementById('refresh-docs');
+
+  let currentToken = '';
+  let tokenPayload = null;
+
+  const stored = localStorage.getItem(storageKey) || sessionStorage.getItem(storageKey);
+  if(stored){
+    tokenInput.value = stored;
+    setToken(stored, false);
+  } else {
+    updateAuthStatus('Укажите токен администратора, чтобы продолжить.', false);
+  }
+
+  tokenForm.addEventListener('submit', function(e){
+    e.preventDefault();
+    const token = tokenInput.value.trim();
+    if(!token){
+      updateAuthStatus('Введите токен авторизации.', true);
+      return;
+    }
+    setToken(token, true);
+  });
+
+  clearTokenBtn.addEventListener('click', function(){
+    currentToken = '';
+    tokenPayload = null;
+    localStorage.removeItem(storageKey);
+    sessionStorage.removeItem(storageKey);
+    uploadSection.classList.add('hidden');
+    docSection.classList.add('hidden');
+    updateAuthStatus('Токен удалён. Введите новый токен администратора.', true);
+  });
+
+  clearHistoryBtn.addEventListener('click', function(){
+    localStorage.removeItem(historyKey);
+    renderHistory([]);
+  });
+
+  uploadForm.addEventListener('submit', async function(e){
+    e.preventDefault();
+    if(!currentToken){
+      updateAuthStatus('Сначала сохраните токен администратора.', true);
+      return;
+    }
+    const file = fileInput.files[0];
+    if(!file){
+      uploadStatus.textContent = 'Выберите файл для загрузки.';
+      uploadStatus.classList.add('danger');
+      return;
+    }
+    uploadStatus.textContent = 'Загрузка…';
+    uploadStatus.classList.remove('danger');
+    const form = new FormData();
+    form.append('file', file);
+    try {
+      const res = await fetch('/api/docs/upload', {
+        method: 'POST',
+        headers: buildAuthHeader(),
+        body: form
+      });
+      const ts = new Date().toISOString();
+      if(!res.ok){
+        const text = await res.text();
+        const errorInfo = text || ('Ошибка ' + res.status);
+        uploadStatus.textContent = 'Ошибка загрузки: ' + errorInfo;
+        uploadStatus.classList.add('danger');
+        appendHistory({file: file.name, status: 'Ошибка', detail: errorInfo, timestamp: ts});
+        return;
+      }
+      const data = await res.json().catch(()=>({}));
+      const detail = data && typeof data === 'object' ? JSON.stringify(data) : 'Загрузка завершена';
+      uploadStatus.textContent = 'Успех! Документ обработан.';
+      uploadStatus.classList.remove('danger');
+      appendHistory({file: file.name, status: 'Готово', detail: detail, timestamp: ts});
+      fileInput.value = '';
+      tryLoadDocuments(true);
+    } catch (err){
+      uploadStatus.textContent = 'Сбой соединения: ' + err.message;
+      uploadStatus.classList.add('danger');
+      appendHistory({file: file ? file.name : 'Неизвестно', status: 'Сбой', detail: err.message, timestamp: new Date().toISOString()});
+    }
+  });
+
+  refreshDocsBtn.addEventListener('click', function(){
+    tryLoadDocuments(true);
+  });
+
+  function setToken(token, persist){
+    const cleaned = token.replace(/^Bearer\s+/i, '');
+    if(cleaned !== token){
+      token = cleaned;
+      tokenInput.value = cleaned;
+    }
+    const payload = decodePayload(token);
+    if(!payload){
+      updateAuthStatus('Не удалось разобрать токен. Убедитесь, что это корректный JWT.', true);
+      uploadSection.classList.add('hidden');
+      docSection.classList.add('hidden');
+      return;
+    }
+    if(!isAdmin(payload)){
+      updateAuthStatus('Доступ запрещён: требуется роль администратора.', true);
+      uploadSection.classList.add('hidden');
+      docSection.classList.add('hidden');
+      return;
+    }
+    currentToken = token;
+    tokenPayload = payload;
+    if(persist){
+      localStorage.setItem(storageKey, token);
+    }
+    updateAuthStatus('Авторизовано как администратор. Пользователь: ' + (payload.sub || payload.user || 'неизвестно') + '.', false);
+    uploadSection.classList.remove('hidden');
+    renderHistory(loadHistory());
+    tryLoadDocuments(false);
+  }
+
+  function updateAuthStatus(message, isError){
+    authStatus.textContent = message;
+    authStatus.classList.toggle('danger', !!isError);
+  }
+
+  function decodePayload(token){
+    try {
+      const parts = token.split('.');
+      if(parts.length < 2){
+        return null;
+      }
+      const base64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+      const padded = base64.padEnd(base64.length + (4 - base64.length % 4) % 4, '=');
+      const json = atob(padded);
+      return JSON.parse(json);
+    } catch (err){
+      console.error('Failed to decode token', err);
+      return null;
+    }
+  }
+
+  function isAdmin(payload){
+    if(!payload || typeof payload !== 'object') return false;
+    if(typeof payload.role === 'string' && payload.role.toLowerCase() === 'admin') return true;
+    if(Array.isArray(payload.roles) && payload.roles.some(r => typeof r === 'string' && r.toLowerCase() === 'admin')) return true;
+    if(Array.isArray(payload.permissions) && payload.permissions.some(r => typeof r === 'string' && r.toLowerCase() === 'admin')) return true;
+    if(payload.scope && typeof payload.scope === 'string' && payload.scope.split(/[\s,]+/).some(r => r.toLowerCase() === 'admin')) return true;
+    return false;
+  }
+
+  function buildAuthHeader(){
+    return currentToken ? { 'Authorization': 'Bearer ' + currentToken } : {};
+  }
+
+  function loadHistory(){
+    try {
+      const raw = localStorage.getItem(historyKey);
+      return raw ? JSON.parse(raw) : [];
+    } catch (err){
+      console.error('Failed to load history', err);
+      return [];
+    }
+  }
+
+  function appendHistory(entry){
+    const history = loadHistory();
+    history.unshift(entry);
+    localStorage.setItem(historyKey, JSON.stringify(history.slice(0, 50)));
+    renderHistory(history);
+  }
+
+  function renderHistory(history){
+    if(!Array.isArray(history) || history.length === 0){
+      historyTable.classList.add('hidden');
+      historyEmpty.classList.remove('hidden');
+      historyBody.innerHTML = '';
+      return;
+    }
+    historyTable.classList.remove('hidden');
+    historyEmpty.classList.add('hidden');
+    historyBody.innerHTML = history.map(item => {
+      const detail = typeof item.detail === 'string' ? item.detail : JSON.stringify(item.detail);
+      return `<tr><td>${escapeHtml(item.file || '')}</td><td>${escapeHtml(item.status || '')}</td><td><small>${escapeHtml(detail)}</small></td><td><small>${formatDate(item.timestamp)}</small></td></tr>`;
+    }).join('');
+  }
+
+  function formatDate(ts){
+    if(!ts) return '';
+    try {
+      return new Date(ts).toLocaleString();
+    } catch (err){
+      return ts;
+    }
+  }
+
+  function escapeHtml(text){
+    const value = text == null ? '' : String(text);
+    return value.replace(/[&<>"']/g, function(ch){
+      return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]);
+    });
+  }
+
+  async function tryLoadDocuments(force){
+    if(!currentToken){
+      return;
+    }
+    if(force){
+      docStatus.textContent = 'Обновление списка…';
+      docStatus.classList.remove('danger');
+    }
+    try {
+      const res = await fetch('/api/admin/docs', {
+        headers: Object.assign({'Accept':'application/json'}, buildAuthHeader())
+      });
+      if(res.status === 404){
+        docStatus.textContent = 'Админские эндпоинты ещё недоступны.';
+        docSection.classList.add('hidden');
+        return;
+      }
+      if(!res.ok){
+        const text = await res.text();
+        throw new Error(text || ('HTTP ' + res.status));
+      }
+      const docs = await res.json();
+      if(!Array.isArray(docs) || docs.length === 0){
+        docList.innerHTML = '<p>Документы не найдены.</p>';
+      } else {
+        docList.innerHTML = docs.map(renderDocItem).join('');
+      }
+      docSection.classList.remove('hidden');
+      docStatus.textContent = 'Список обновлён.';
+      docStatus.classList.remove('danger');
+    } catch (err){
+      docStatus.textContent = 'Не удалось получить список документов: ' + err.message;
+      docStatus.classList.add('danger');
+      docSection.classList.remove('hidden');
+      if(!force){
+        docStatus.textContent += ' (попробуйте обновить позже)';
+      }
+    }
+  }
+
+  function renderDocItem(doc){
+    const id = escapeHtml(doc.id || doc.uuid || doc.file || 'unknown');
+    const name = escapeHtml(doc.file || doc.name || id);
+    const details = [];
+    if(doc.page_count) details.push(`Страниц: ${doc.page_count}`);
+    if(doc.chunks) details.push(`Фрагментов: ${doc.chunks}`);
+    if(doc.updated_at) details.push(`Обновлено: ${formatDate(doc.updated_at)}`);
+    return `<article class="stack" data-doc="${id}">
+      <h3>${name}</h3>
+      <small>${escapeHtml(details.join(' • '))}</small>
+      <div class="actions">
+        <button type="button" class="secondary" data-action="reindex" data-id="${id}">Переиндексировать</button>
+        <button type="button" class="secondary" data-action="delete" data-id="${id}">Удалить</button>
+      </div>
+    </article>`;
+  }
+
+  docList.addEventListener('click', async function(e){
+    const btn = e.target.closest('button[data-action]');
+    if(!btn) return;
+    const action = btn.dataset.action;
+    const id = btn.dataset.id;
+    if(action === 'delete' && !confirm('Удалить документ "' + id + '"?')){
+      return;
+    }
+    btn.disabled = true;
+    btn.textContent = action === 'delete' ? 'Удаление…' : 'Обновление…';
+    try {
+      const endpoint = action === 'delete' ? '/api/admin/docs/' + encodeURIComponent(id) : '/api/admin/docs/' + encodeURIComponent(id) + '/reindex';
+      const method = action === 'delete' ? 'DELETE' : 'POST';
+      const res = await fetch(endpoint, {
+        method,
+        headers: buildAuthHeader()
+      });
+      if(!res.ok){
+        const text = await res.text();
+        throw new Error(text || ('HTTP ' + res.status));
+      }
+      docStatus.textContent = action === 'delete' ? 'Документ удалён.' : 'Запрошена переиндексация.';
+      docStatus.classList.remove('danger');
+      tryLoadDocuments(true);
+    } catch (err){
+      docStatus.textContent = 'Операция не выполнена: ' + err.message;
+      docStatus.classList.add('danger');
+      btn.disabled = false;
+      btn.textContent = action === 'delete' ? 'Удалить' : 'Переиндексировать';
+    }
+  });
+})();
+</script>
