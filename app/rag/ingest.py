@@ -9,14 +9,20 @@ def _clean(t: str) -> str:
     return t
 
 def _chunk(text: str, chunk=900, overlap=140):
+    chunk = max(1, int(chunk))
+    overlap = max(0, int(overlap))
+
     out = []
     i = 0
     n = len(text)
     while i < n:
-        j = min(i+chunk, n)
+        j = min(i + chunk, n)
         out.append(text[i:j])
-        i = j - overlap if j < n else j
-        if i < 0: i = 0
+
+        next_i = j - overlap if j < n else j
+        if next_i <= i:
+            next_i = min(i + 1, n)
+        i = next_i
     return out
 
 def parse_and_chunk(filename: str, data: bytes) -> List[Dict]:
@@ -43,6 +49,12 @@ def parse_and_chunk(filename: str, data: bytes) -> List[Dict]:
     chunks = []
     csize = int(os.getenv("RAG_CHUNK","900"))
     cover = int(os.getenv("RAG_OVERLAP","140"))
+    if csize <= 0:
+        csize = 1
+    if cover < 0:
+        cover = 0
+    if csize > 0:
+        cover = min(cover, csize - 1)
     for page, txt in text_pages:
         if not txt: continue
         for ch in _chunk(txt, chunk=csize, overlap=cover):
