@@ -13,9 +13,14 @@
 - **FastAPI** — HTTP API (`/api/docs/upload`, `/api/chat`, `/health`).
 - **Sentence Transformers + Qdrant** — извлечение и хранение векторных представлений фрагментов.
 - **Ollama** — генерация ответов (модель определяется переменной `GEN_MODEL`).
+      codex/split-monolithic-image-into-separate-services
 - **PostgreSQL** — хранилище памяти диалогов.
 - **Nginx** — TLS-терминация, обратный прокси и выдача статического административного интерфейса.
 - **Docker Compose** — развёртывание компонентов и служебных зависимостей.
+=======
+- **SQLite** — хранилище для памяти чата.
+- **Docker Compose** — развёртывание сервиса вместе с конфигурацией Nginx.
+      main
 
 ## Быстрый старт (Docker Compose)
 1. Скопируйте пример окружения и обновите значения под свою среду (обязательно задайте уникальный `APP_SECRET`, модели `GEN_MODEL`/`EMBED_MODEL`, а также параметры доступа к PostgreSQL, если они отличаются):
@@ -88,9 +93,17 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 | `CHAT_MEMORY_MAXTOK` | `2000` | Ограничение на размер свёрнутой памяти. |
 | `RAG_CHUNK` | `900` | Размер фрагмента при разбиении текста. |
 | `RAG_OVERLAP` | `140` | Перекрытие соседних фрагментов. |
+       codex/split-monolithic-image-into-separate-services
 | `RETRIEVE_TOPK` | `24` | Количество кандидатов для поиска. |
 | `RATE_LIMIT` | `30r/m` | Базовый лимит запросов Nginx. |
 | `RATE_BURST` | `20` | Допустимый burst для лимитера. |
+
+| `QDRANT_URL` | — | Полный URL Qdrant (например, `http://qdrant:6333`). При указании `QDRANT_HOST`/`QDRANT_PORT` не требуется. |
+| `QDRANT_HOST` | `qdrant` | Хост Qdrant при прямом подключении. |
+| `QDRANT_PORT` | `6333` | Порт Qdrant при прямом подключении. |
+| `QDRANT_API_KEY` | — | API ключ Qdrant при использовании облачной версии. |
+| `QDRANT_COLLECTION` | `kb_chunks` | Название коллекции для хранения фрагментов. |
+    main
 
 ## Структура репозитория
 ```
