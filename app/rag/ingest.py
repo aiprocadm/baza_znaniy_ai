@@ -42,6 +42,10 @@ def _get_tokenizer() -> Encoding:
 
 
 def _chunk(text: str, chunk=900, overlap=140):
+        codex/fix-overlapping-chunk-processing-in-ingest.py
+    chunk = max(1, int(chunk))
+    overlap = max(0, int(overlap))
+
     chunk = max(int(chunk), 1)
     overlap = max(int(overlap), 0)
     if overlap >= chunk:
@@ -51,12 +55,21 @@ def _chunk(text: str, chunk=900, overlap=140):
     tokens = tokenizer.encode(text)
     if not tokens:
         return []
+        main
 
     out = []
     i = 0
     n = len(tokens)
     while i < n:
         j = min(i + chunk, n)
+        codex/fix-overlapping-chunk-processing-in-ingest.py
+        out.append(text[i:j])
+
+        next_i = j - overlap if j < n else j
+        if next_i <= i:
+            next_i = min(i + 1, n)
+        i = next_i
+
         token_slice = tokens[i:j]
         out.append(tokenizer.decode(token_slice))
         if j >= n:
@@ -64,6 +77,7 @@ def _chunk(text: str, chunk=900, overlap=140):
         i = j - overlap
         if i < 0:
             i = 0
+        main
     return out
 
 
@@ -91,6 +105,12 @@ def parse_and_chunk(filename: str, data: bytes) -> List[Dict]:
     chunks = []
     csize = int(os.getenv("RAG_CHUNK","900"))
     cover = int(os.getenv("RAG_OVERLAP","140"))
+    if csize <= 0:
+        csize = 1
+    if cover < 0:
+        cover = 0
+    if csize > 0:
+        cover = min(cover, csize - 1)
     for page, txt in text_pages:
         if not txt: continue
         for ch in _chunk(txt, chunk=csize, overlap=cover):
