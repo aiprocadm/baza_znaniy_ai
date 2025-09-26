@@ -30,7 +30,12 @@ class DocumentMemory:
 
     def _persist(self) -> None:
         with self._storage_path.open("w", encoding="utf-8") as handle:
-            json.dump([doc.model_dump() for doc in self._documents.values()], handle, ensure_ascii=False, indent=2)
+            json.dump(
+                [doc.model_dump(mode="json") for doc in self._documents.values()],
+                handle,
+                ensure_ascii=False,
+                indent=2,
+            )
 
     def all(self) -> List[Document]:
         with self._lock:
