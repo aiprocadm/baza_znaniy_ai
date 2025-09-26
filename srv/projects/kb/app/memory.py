@@ -19,6 +19,7 @@ class DocumentMemory:
         self._storage_path = storage_path
         self._documents: Dict[str, Document] = {}
         self._lock = RLock()
+        self._slug_counters: Dict[str, int] = {}
         self._storage_path.parent.mkdir(parents=True, exist_ok=True)
         self._load()
 
@@ -30,6 +31,7 @@ class DocumentMemory:
         for item in raw_items:
             doc = Document.model_validate(item)
             self._documents[doc.id] = doc
+        self._rebuild_slug_counters()
 
     def _persist(self) -> None:
         with self._storage_path.open("w", encoding="utf-8") as handle:
@@ -58,6 +60,7 @@ class DocumentMemory:
                 tags=payload.tags,
             )
             self._documents[document.id] = document
+            self._update_slug_counter(document.id)
             self._persist()
             return document
 
@@ -78,12 +81,38 @@ class DocumentMemory:
         if not base:
             base = uuid4().hex
 
-        candidate = base
-        counter = 2
-        while candidate in self._documents:
-            candidate = f"{base}-{counter}"
+        counter = self._slug_counters.get(base, 1)
+        while True:
+            candidate = base if counter == 1 else f"{base}-{counter}"
+            if candidate not in self._documents:
+                break
             counter += 1
+        self._slug_counters[base] = counter + 1
         return candidate
+
+    def _rebuild_slug_counters(self) -> None:
+        counters: Dict[str, int] = {}
+        for document_id in self._documents:
+            base, next_value = self._slug_counter_values(document_id)
+            if base:
+                counters[base] = max(counters.get(base, 1), next_value)
+        self._slug_counters = counters
+
+    def _update_slug_counter(self, document_id: str) -> None:
+        base, next_value = self._slug_counter_values(document_id)
+        if base:
+            self._slug_counters[base] = max(self._slug_counters.get(base, 1), next_value)
+
+    @staticmethod
+    def _slug_counter_values(document_id: str) -> tuple[str | None, int]:
+        match = re.fullmatch(r"(?P<base>[a-z0-9_-]+?)(?:-(?P<suffix>\d+))?", document_id)
+        if not match:
+            return None, 1
+        base = match.group("base")
+        suffix = match.group("suffix")
+        if suffix is None:
+            return base, 2
+        return base, int(suffix) + 1
 
     @staticmethod
     def _slugify(value: str) -> str:
