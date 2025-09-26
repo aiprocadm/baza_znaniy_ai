@@ -1,25 +1,20 @@
-        codex/fix-top_k-to-10-in-vector-search
-"""Compatibility re-export for legacy DocumentMemory tests."""
-
-from srv.projects.kb.app.memory import DocumentMemory  # type: ignore F401
-from srv.projects.kb.app.models import DocumentCreate  # type: ignore F401
-
-__all__ = ["DocumentMemory", "DocumentCreate"]
-
-"""Compatibility helpers for test suite."""
+"""Compatibility helpers for the legacy document memory tests."""
 
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 from threading import RLock
 from typing import Dict, Iterable, List
 
 from app.models import Document, DocumentCreate
 
+LOGGER = logging.getLogger(__name__)
+
 
 class DocumentMemory:
-    """Minimal persistent storage used by the legacy tests."""
+    """Thread-safe document storage with JSON persistence."""
 
     def __init__(self, storage_path: Path) -> None:
         self._storage_path = Path(storage_path)
@@ -32,8 +27,14 @@ class DocumentMemory:
     def _load(self) -> None:
         if not self._storage_path.exists():
             return
-        with self._storage_path.open("r", encoding="utf-8") as handle:
-            raw_items = json.load(handle)
+        try:
+            with self._storage_path.open("r", encoding="utf-8") as handle:
+                raw_items = json.load(handle)
+        except (json.JSONDecodeError, OSError) as exc:
+            LOGGER.warning("Resetting invalid document storage %s: %s", self._storage_path, exc)
+            self._documents.clear()
+            self._persist()
+            return
         for item in raw_items:
             doc = Document.model_validate(item)
             self._documents[doc.id] = doc
@@ -68,6 +69,16 @@ class DocumentMemory:
             self._persist()
             return document
 
+    def bulk_add(self, payloads: Iterable[DocumentCreate]) -> List[Document]:
+        return [self.add(item) for item in payloads]
+
+    def remove(self, document_id: str) -> bool:
+        with self._lock:
+            removed = self._documents.pop(document_id, None) is not None
+            if removed:
+                self._persist()
+            return removed
+
     def _generate_id(self) -> str:
         doc_id = f"doc-{self._next_id}"
         self._next_id += 1
@@ -95,16 +106,5 @@ class DocumentMemory:
             return int(suffix)
         return None
 
-    def bulk_add(self, payloads: Iterable[DocumentCreate]) -> List[Document]:
-        return [self.add(item) for item in payloads]
 
-    def remove(self, document_id: str) -> bool:
-        with self._lock:
-            removed = self._documents.pop(document_id, None) is not None
-            if removed:
-                self._persist()
-            return removed
-
-
-__all__ = ["DocumentMemory"]
-        main
+__all__ = ["DocumentMemory", "DocumentCreate"]

@@ -6,17 +6,18 @@ import importlib.util
 import sys
 import types
 from pathlib import Path
+from typing import Tuple
 
 import pytest
 
+from app.memory import DocumentCreate as LegacyDocumentCreate
 from app.memory import DocumentMemory as LegacyDocumentMemory
-from app.models import DocumentCreate as LegacyDocumentCreate
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SERVICE_ROOT = PROJECT_ROOT / "srv" / "projects" / "kb"
 
 
-def _load_service_memory() -> tuple[type, type]:
+def _load_service_memory() -> Tuple[Type, Type]:
     package_name = "kb_service_memory_tests"
     package_path = SERVICE_ROOT / "app"
 
@@ -57,7 +58,7 @@ ServiceDocumentMemory, ServiceDocumentCreate = _load_service_memory()
         (ServiceDocumentMemory, ServiceDocumentCreate),
     ],
 )
-def test_document_memory_persists_and_loads(tmp_path, memory_cls, payload_cls) -> None:
+def test_document_memory_persists_and_loads(tmp_path: Path, memory_cls: type, payload_cls: type) -> None:
     storage_path = tmp_path / f"{memory_cls.__module__.replace('.', '_')}_documents.json"
     memory = memory_cls(storage_path)
 
@@ -73,15 +74,22 @@ def test_document_memory_persists_and_loads(tmp_path, memory_cls, payload_cls) -
     assert loaded.tags == created.tags
 
 
- codex/handle-json-errors-in-_load
-def test_document_memory_recovers_from_invalid_json(tmp_path) -> None:
+@pytest.mark.parametrize(
+    "memory_cls",
+    [LegacyDocumentMemory, ServiceDocumentMemory],
+)
+def test_document_memory_recovers_from_invalid_json(tmp_path: Path, memory_cls: type) -> None:
     storage_path = tmp_path / "documents.json"
     storage_path.write_text("{not: valid json}", encoding="utf-8")
 
-    memory = DocumentMemory(storage_path)
+    memory = memory_cls(storage_path)
 
     assert memory.all() == []
-    assert storage_path.read_text(encoding="utf-8").strip().startswith("[")
+    with storage_path.open(encoding="utf-8") as handle:
+        content = handle.read().strip()
+    assert content.startswith("[")
+
+
 @pytest.mark.parametrize(
     "memory_cls, payload_cls",
     [
@@ -89,7 +97,9 @@ def test_document_memory_recovers_from_invalid_json(tmp_path) -> None:
         (ServiceDocumentMemory, ServiceDocumentCreate),
     ],
 )
-def test_document_ids_remain_unique_after_deletion(tmp_path, memory_cls, payload_cls) -> None:
+def test_document_ids_remain_unique_after_deletion(
+    tmp_path: Path, memory_cls: type, payload_cls: type
+) -> None:
     storage_path = tmp_path / f"{memory_cls.__module__.replace('.', '_')}_unique.json"
     memory = memory_cls(storage_path)
 
@@ -104,8 +114,6 @@ def test_document_ids_remain_unique_after_deletion(tmp_path, memory_cls, payload
 
     assert third.id not in {first.id, second.id}
 
-    # Ensure the second document still exists and was not overwritten.
     remaining = memory.get(second.id)
     assert remaining is not None
     assert remaining.content == "Same prefix"
-       main
