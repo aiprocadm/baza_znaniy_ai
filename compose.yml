@@ -14,8 +14,8 @@ services:
       OLLAMA_BASE_URL: http://ollama:11434
       DATABASE_URL: ${DATABASE_URL:-}
     volumes:
-      - ./data/files:/srv/projects/kb/data/files
-      - ./data/logs/api:/srv/projects/kb/data/logs
+      - /opt/knowlab/data/files:/opt/knowlab/data/files
+      - /opt/knowlab/data/logs/api:/opt/knowlab/data/logs/api
     depends_on:
       postgres:
         condition: service_healthy
@@ -38,9 +38,9 @@ services:
       - "443:443"
     volumes:
       - ./data/nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./data/ssl:/srv/projects/kb/data/ssl:ro
-      - ./data/www:/srv/projects/kb/data/www:ro
-      - ./data/logs/nginx:/var/log/nginx
+      - /opt/knowlab/data/ssl:/etc/nginx/ssl:ro
+      - /opt/knowlab/data/www:/usr/share/nginx/html:ro
+      - /opt/knowlab/data/logs/nginx:/var/log/nginx
     networks:
       - proxy
       - internal
@@ -50,7 +50,7 @@ services:
     image: qdrant/qdrant:v1.9.1
     container_name: knowlab_qdrant
     volumes:
-      - ./data/qdrant:/qdrant/storage
+      - /opt/knowlab/data/qdrant:/qdrant/storage
     networks:
       - internal
     healthcheck:
@@ -70,7 +70,7 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-kb}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-kb}
     volumes:
-      - ./data/pg:/var/lib/postgresql/data
+      - /opt/knowlab/data/pg:/var/lib/postgresql/data
     networks:
       - internal
     healthcheck:
@@ -86,7 +86,7 @@ services:
     environment:
       OLLAMA_HOST: 0.0.0.0
     volumes:
-      - ./data/files/ollama:/root/.ollama
+      - /opt/knowlab/data/ollama:/root/.ollama
     networks:
       - internal
     healthcheck:

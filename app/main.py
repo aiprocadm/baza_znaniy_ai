@@ -158,7 +158,7 @@ def chat(
     memory_key = str(user.id)
     memory_text = mem.load_context(memory_key, inp.conversation_id) if MEMORY_ENABLED else ""
 
-    hits = search_chunks(inp.message, top_k=int(os.getenv("RETRIEVE_TOPK", "24")))
+    hits = search_chunks(inp.message, top_k=int(os.getenv("RETRIEVE_TOPK", "10")))
     context = build_context(hits, token_limit=3000)
 
     prompt = "\n".join(
