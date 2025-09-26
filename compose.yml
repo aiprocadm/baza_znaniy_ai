@@ -1,27 +1,90 @@
 services:
-  kb_web:
+  api:
     build:
-      context: /srv/projects/kb
+      context: .
       dockerfile: Dockerfile
-    container_name: kb_web
-    env_file: /srv/projects/kb/.env
-    networks: [web]
+    container_name: knowlab_api
+    env_file: .env
+    volumes:
+      - /opt/knowlab/data/files:/opt/knowlab/data/files
+    depends_on:
+      postgres:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+      ollama:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8080/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks: [backend]
+
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: knowlab_nginx
+    depends_on:
+      api:
+        condition: service_healthy
     ports:
       - "80:80"
       - "443:443"
     volumes:
-      - /srv/projects/kb/data/www:/srv/projects/kb/data/www:ro
-      - /srv/projects/kb/data/nginx.conf:/etc/nginx/nginx.conf:ro
-      - /srv/projects/kb/data/ssl:/srv/projects/kb/data/ssl:ro
-      - /srv/projects/kb/data/storage:/srv/projects/kb/data/storage
-      - /srv/projects/kb/data/db:/srv/projects/kb/data/db
+      - ./data/nginx.conf:/etc/nginx/nginx.conf:ro
+      - /opt/knowlab/data/files/www:/usr/share/nginx/html:ro
+      - /opt/knowlab/data/files/ssl:/etc/nginx/ssl:ro
+      - /opt/knowlab/data/logs/nginx:/var/log/nginx
+    networks: [edge, backend]
     restart: unless-stopped
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "5"
+
+  qdrant:
+    image: qdrant/qdrant:1.11.0
+    container_name: knowlab_qdrant
+    volumes:
+      - /opt/knowlab/data/qdrant:/qdrant/storage
+    networks: [backend]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:6333/healthz || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: knowlab_postgres
+    env_file: .env
+    environment:
+      - POSTGRES_DB=${PGDATABASE}
+      - POSTGRES_USER=${PGUSER}
+      - POSTGRES_PASSWORD=${PGPASSWORD}
+    volumes:
+      - /opt/knowlab/data/pg:/var/lib/postgresql/data
+    networks: [backend]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -d \"$${PGDATABASE}\" -U \"$${PGUSER}\""]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  ollama:
+    image: ollama/ollama:0.3.12
+    container_name: knowlab_ollama
+    volumes:
+      - /opt/knowlab/data/files/ollama:/root/.ollama
+    networks: [backend]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:11434/api/tags || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
 
 networks:
-  web:
-    external: true
+  edge:
+    driver: bridge
+  backend:
+    driver: bridge
