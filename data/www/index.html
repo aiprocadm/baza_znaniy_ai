@@ -1,0 +1,25 @@
+<!doctype html><meta charset="utf-8">
+<title>KB</title>
+<h1>KB Chat</h1>
+<form id="f">
+  <input id="uid" value="demo" required>
+  <input id="cid" value="demo-1">
+  <input id="q" placeholder="вопрос" size="70" required>
+  <button>OK</button>
+</form>
+<pre id="out"></pre>
+<script>
+const f = document.getElementById('f');
+const uid = document.getElementById('uid');
+const cid = document.getElementById('cid');
+const q = document.getElementById('q');
+const out = document.getElementById('out');
+f.onsubmit = async (e)=>{
+  e.preventDefault();
+  const res = await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({user_id:uid.value,conversation_id:cid.value,message:q.value})});
+  if(!res.ok){ out.textContent='Ошибка '+res.status; return }
+  const data = await res.json();
+  out.textContent = data.answer + "\n\nЦитаты:\n" + JSON.stringify(data.citations,null,2);
+};
+</script>
