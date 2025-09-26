@@ -2,9 +2,12 @@
 from __future__ import annotations
 
 import json
+import re
+import unicodedata
 from pathlib import Path
 from threading import RLock
 from typing import Dict, Iterable, List
+from uuid import uuid4
 
 from .models import Document, DocumentCreate
 
@@ -47,8 +50,10 @@ class DocumentMemory:
 
     def add(self, payload: DocumentCreate) -> Document:
         with self._lock:
+            candidate = payload.id or payload.content
+            document_id = self._generate_unique_id(candidate)
             document = Document(
-                id=payload.id or payload.content[:16].replace(" ", "_") + "-" + str(len(self._documents) + 1),
+                id=document_id,
                 content=payload.content,
                 tags=payload.tags,
             )
@@ -65,3 +70,31 @@ class DocumentMemory:
             if removed:
                 self._persist()
             return removed
+
+    def _generate_unique_id(self, source: str | None) -> str:
+        """Create a URL-safe identifier that does not collide with existing ones."""
+
+        base = self._slugify(source or "")
+        if not base:
+            base = uuid4().hex
+
+        candidate = base
+        counter = 2
+        while candidate in self._documents:
+            candidate = f"{base}-{counter}"
+            counter += 1
+        return candidate
+
+    @staticmethod
+    def _slugify(value: str) -> str:
+        """Return a lowercase slug limited to URL-safe characters."""
+
+        normalized = (
+            unicodedata.normalize("NFKD", value)
+            .encode("ascii", "ignore")
+            .decode("ascii")
+        )
+        normalized = normalized.replace(" ", "-")
+        slug = re.sub(r"[^A-Za-z0-9_-]+", "-", normalized)
+        slug = slug.strip("-_")
+        return slug.lower()
