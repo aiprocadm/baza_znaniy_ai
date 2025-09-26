@@ -13,7 +13,7 @@ MEMORY_ENABLED = os.getenv("CHAT_MEMORY_ENABLED","true").lower()=="true"
 app = FastAPI(title="kb")
 
 mem = MemoryStore(
-  db_path="/srv/projects/kb/data/db/kb.sqlite",
+  db_path="/srv/projects/kb/data/files/kb.sqlite",
   ttl_days=int(os.getenv("CHAT_MEMORY_TTL_DAYS","90")),
   summary_trigger=int(os.getenv("CHAT_SUMMARY_TRIGGER","10")),
   max_tokens=int(os.getenv("CHAT_MEMORY_MAXTOK","2000"))

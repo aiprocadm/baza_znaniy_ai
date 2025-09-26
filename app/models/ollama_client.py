@@ -1,6 +1,6 @@
 import os, httpx
 
-OLLAMA = "http://127.0.0.1:11434"
+OLLAMA = os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434").rstrip("/")
 MODEL = os.getenv("GEN_MODEL","qwen2.5:3b-instruct")
 
 def ensure_model():
