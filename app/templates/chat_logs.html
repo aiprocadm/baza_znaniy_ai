@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <title>Chat Logs</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 2rem; background: #f6f6f9; color: #1d1d1f; }
+        h1 { margin-bottom: 1rem; }
+        form { margin-bottom: 1.5rem; display: flex; gap: 1rem; flex-wrap: wrap; }
+        label { display: flex; flex-direction: column; font-size: 0.9rem; color: #555; }
+        input { padding: 0.35rem 0.5rem; border-radius: 4px; border: 1px solid #ccc; min-width: 220px; }
+        button { padding: 0.45rem 0.9rem; border: none; border-radius: 4px; background: #2563eb; color: white; cursor: pointer; }
+        button:hover { background: #1d4ed8; }
+        table { width: 100%; border-collapse: collapse; background: white; box-shadow: 0 1px 2px rgba(15, 23, 42, 0.1); }
+        th, td { padding: 0.75rem; border-bottom: 1px solid #e5e7eb; text-align: left; vertical-align: top; }
+        th { background: #f3f4f6; font-weight: 600; }
+        ul { margin: 0.25rem 0 0; padding-left: 1.2rem; }
+        nav { margin-top: 1rem; display: flex; gap: 0.5rem; align-items: center; }
+        .muted { color: #6b7280; font-size: 0.85rem; }
+    </style>
+</head>
+<body>
+    <h1>Chat Logs</h1>
+    <form method="get">
+        <input type="hidden" name="secret" value="{{ request.query_params.get('secret', '') }}" />
+        <label>
+            User ID
+            <input type="text" name="user_id" value="{{ user_id }}" />
+        </label>
+        <label>
+            Conversation ID
+            <input type="text" name="conversation_id" value="{{ conversation_id }}" />
+        </label>
+        <label>
+            Page Size
+            <input type="number" min="1" max="100" name="page_size" value="{{ page_size }}" />
+        </label>
+        <div style="align-self: flex-end; display: flex; gap: 0.5rem;">
+            <button type="submit">Apply Filters</button>
+        </div>
+    </form>
+
+    <table>
+        <thead>
+            <tr>
+                <th>Timestamp</th>
+                <th>User</th>
+                <th>Conversation</th>
+                <th>Question</th>
+                <th>Response Summary</th>
+                <th>Citations</th>
+                <th>Latency (ms)</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for log in logs %}
+            <tr>
+                <td>{{ log.created_at }}</td>
+                <td>{{ log.user_id }}</td>
+                <td>{{ log.conversation_id or '—' }}</td>
+                <td>{{ log.question }}</td>
+                <td>{{ log.response_summary }}</td>
+                <td>
+                    {% if log.citations %}
+                    <ul>
+                        {% for citation in log.citations %}
+                        <li>
+                            {{ citation.get('file') or 'Unknown' }}
+                            {% if citation.get('page') %}
+                                <span class="muted">(page {{ citation.get('page') }})</span>
+                            {% endif %}
+                        </li>
+                        {% endfor %}
+                    </ul>
+                    {% else %}
+                        <span class="muted">None</span>
+                    {% endif %}
+                </td>
+                <td>{{ '%.2f' % log.latency_ms }}</td>
+            </tr>
+            {% else %}
+            <tr>
+                <td colspan="7">No logs found for the selected filters.</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    <nav>
+        <span class="muted">Total: {{ total }} records</span>
+        {% if page > 1 %}
+            <a href="?page={{ page - 1 }}&page_size={{ page_size }}&user_id={{ user_id }}&conversation_id={{ conversation_id }}&secret={{ request.query_params.get('secret', '') }}">Previous</a>
+        {% endif %}
+        <span>Page {{ page }} of {{ pages }}</span>
+        {% if page < pages %}
+            <a href="?page={{ page + 1 }}&page_size={{ page_size }}&user_id={{ user_id }}&conversation_id={{ conversation_id }}&secret={{ request.query_params.get('secret', '') }}">Next</a>
+        {% endif %}
+    </nav>
+</body>
+</html>
