@@ -1,8 +1,4 @@
-        codex/refactor-modules-to-remove-codex-markers
-"""Simple persistence for the knowledge base service."""
-
-"""Simple persistence for the knowledge base."""
-        main
+"""Simple JSON-backed persistence for service documents."""
 
 from __future__ import annotations
 
@@ -26,14 +22,21 @@ class DocumentMemory:
     def __init__(self, storage_path: Path) -> None:
         self._storage_path = Path(storage_path)
         self._documents: Dict[str, Document] = {}
-        self._lock = RLock()
         self._slug_counters: Dict[str, int] = {}
+        self._lock = RLock()
         self._storage_path.parent.mkdir(parents=True, exist_ok=True)
         self._load()
 
+    # ------------------------------------------------------------------
+    # Persistence helpers
+    # ------------------------------------------------------------------
     def _load(self) -> None:
+        """Load documents from disk, resetting corrupt files if necessary."""
+
         if not self._storage_path.exists():
+            self._persist()
             return
+
         try:
             with self._storage_path.open("r", encoding="utf-8") as handle:
                 raw_items = json.load(handle)
@@ -44,34 +47,38 @@ class DocumentMemory:
                 exc,
             )
             self._documents.clear()
-        codex/refactor-modules-to-remove-codex-markers
             self._slug_counters.clear()
             self._persist()
-
-            try:
-                self._persist()
-            except OSError as persist_exc:  # pragma: no cover - filesystem edge cases
-                LOGGER.warning(
-                    "Failed to persist reset storage to %s: %s.",
-                    self._storage_path,
-                    persist_exc,
-                )
-        main
             return
+
+        documents: Dict[str, Document] = {}
         for item in raw_items:
-            doc = Document.model_validate(item)
-            self._documents[doc.id] = doc
+            try:
+                document = Document.model_validate(item)
+            except Exception as exc:  # pragma: no cover - defensive branch
+                LOGGER.warning("Discarding invalid document entry: %s", exc)
+                continue
+            documents[document.id] = document
+
+        self._documents = documents
         self._rebuild_slug_counters()
 
     def _persist(self) -> None:
-        with self._storage_path.open("w", encoding="utf-8") as handle:
-            json.dump(
-                [doc.model_dump(mode="json") for doc in self._documents.values()],
-                handle,
-                ensure_ascii=False,
-                indent=2,
-            )
+        """Persist the current documents to disk as JSON."""
 
+        with self._storage_path.open("w", encoding="utf-8") as handle:
+            payload = []
+            for document in self._documents.values():
+                data = document.model_dump()
+                created_at = data.get("created_at")
+                if hasattr(created_at, "isoformat"):
+                    data["created_at"] = created_at.isoformat()
+                payload.append(data)
+            json.dump(payload, handle, ensure_ascii=False, indent=2)
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
     def all(self) -> List[Document]:
         with self._lock:
             return list(self._documents.values())
@@ -105,8 +112,11 @@ class DocumentMemory:
                 self._rebuild_slug_counters()
             return removed
 
+    # ------------------------------------------------------------------
+    # Identifier helpers
+    # ------------------------------------------------------------------
     def _generate_unique_id(self, source: str | None) -> str:
-        """Create a URL-safe identifier that does not collide with existing ones."""
+        """Generate a URL-safe identifier that does not collide with existing ones."""
 
         base = self._slugify(source or "")
         if not base:
