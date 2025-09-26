@@ -1,29 +1,85 @@
+import io
+import logging
 import os
-from pypdf import PdfReader
+import re
+from functools import lru_cache
+from typing import Dict, List
+
+import tiktoken
 from docx import Document
-import io, re
-from typing import List, Dict
+from pypdf import PdfReader
+from tiktoken.core import Encoding
+
+
+LOGGER = logging.getLogger(__name__)
+
 
 def _clean(t: str) -> str:
     t = re.sub(r'\s+', ' ', t).strip()
     return t
 
+
+@lru_cache(maxsize=1)
+def _get_tokenizer() -> Encoding:
+    """Return the tokenizer used to measure token lengths."""
+
+    name = os.getenv("RAG_TOKENIZER_NAME", "cl100k_base")
+    try:
+        return tiktoken.get_encoding(name)
+    except Exception as exc:  # pragma: no cover - handled by tests via behaviour
+        LOGGER.warning(
+            "Falling back to byte-level tokenizer for '%s': %s",
+            name,
+            exc,
+        )
+        mergeable_ranks = {bytes([i]): i for i in range(256)}
+        return Encoding(
+            name="byte_fallback",
+            pat_str=r"(?s:.)",
+            mergeable_ranks=mergeable_ranks,
+            special_tokens={},
+        )
+
+
 def _chunk(text: str, chunk=900, overlap=140):
+        codex/fix-overlapping-chunk-processing-in-ingest.py
     chunk = max(1, int(chunk))
     overlap = max(0, int(overlap))
 
+    chunk = max(int(chunk), 1)
+    overlap = max(int(overlap), 0)
+    if overlap >= chunk:
+        overlap = chunk - 1
+
+    tokenizer = _get_tokenizer()
+    tokens = tokenizer.encode(text)
+    if not tokens:
+        return []
+        main
+
     out = []
     i = 0
-    n = len(text)
+    n = len(tokens)
     while i < n:
         j = min(i + chunk, n)
+        codex/fix-overlapping-chunk-processing-in-ingest.py
         out.append(text[i:j])
 
         next_i = j - overlap if j < n else j
         if next_i <= i:
             next_i = min(i + 1, n)
         i = next_i
+
+        token_slice = tokens[i:j]
+        out.append(tokenizer.decode(token_slice))
+        if j >= n:
+            break
+        i = j - overlap
+        if i < 0:
+            i = 0
+        main
     return out
+
 
 def parse_and_chunk(filename: str, data: bytes) -> List[Dict]:
     ext = filename.rsplit('.',1)[-1].lower()
