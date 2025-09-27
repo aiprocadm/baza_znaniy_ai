@@ -36,7 +36,7 @@ def verify_password(password: str, password_hash: str) -> bool:
 
 
 def ensure_default_admin(session: Session) -> None:
-    stmt = select(models.User).where(models.User.login == DEFAULT_ADMIN_LOGIN)
+    stmt = select(models.User).where(models.User.username == DEFAULT_ADMIN_LOGIN)
     user = session.scalars(stmt).first()
     if user:
         return

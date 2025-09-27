@@ -90,7 +90,7 @@ def require_admin(user: models.User = Depends(require_active_user)) -> models.Us
 
 @router.post("/login", response_model=TokenResponse)
 def login(payload: LoginRequest, session: UserSession) -> TokenResponse:
-    stmt = select(models.User).where(models.User.login == payload.login)
+    stmt = select(models.User).where(models.User.username == payload.login)
     user = session.scalars(stmt).first()
     if user is None or not verify_password(payload.password, user.password_hash):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="INVALID_CREDENTIALS")
@@ -111,7 +111,7 @@ def change_password(
     user: models.User = Depends(get_current_user),
 ) -> TokenResponse:
     if payload.new_login and payload.new_login != user.login:
-        stmt = select(models.User).where(models.User.login == payload.new_login)
+        stmt = select(models.User).where(models.User.username == payload.new_login)
         existing = session.scalars(stmt).first()
         if existing:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="LOGIN_TAKEN")
