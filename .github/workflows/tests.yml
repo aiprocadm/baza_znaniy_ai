@@ -22,5 +22,10 @@ jobs:
           [ -f requirements.txt ] && pip install -r requirements.txt || true
           pip install pytest
 
+      - name: Prepare test storage directory
+        run: mkdir -p ${{ runner.temp }}/storage
+
       - name: Run all tests
         run: pytest -v
+        env:
+          DATA_DIR: ${{ runner.temp }}/storage
