@@ -6,10 +6,12 @@ from fastapi.testclient import TestClient
 
 # Provide lightweight stubs for optional heavy dependencies before importing the app.
 import os
+import tempfile
 import sys
 import types
 
 os.environ.setdefault("DATABASE_URL", "sqlite+pysqlite:///:memory:")
+os.environ.setdefault("CHAT_DB_PATH", os.path.join(tempfile.gettempdir(), "chat_store_test.sqlite"))
 
 
 if "qdrant_client" not in sys.modules:
@@ -122,7 +124,6 @@ def test_chat_returns_unique_citations_and_shortage_flag(monkeypatch):
     monkeypatch.setattr("app.main.ensure_model", lambda: None)
     monkeypatch.setattr("app.main.ensure_collection", lambda: None)
     monkeypatch.setattr("app.main.generate", lambda _prompt: "Ответ")
-    monkeypatch.setattr("app.main.MEMORY_ENABLED", False)
 
     hits = [
         {"file": "doc1.pdf", "page": 1, "score": 0.9},
@@ -134,7 +135,7 @@ def test_chat_returns_unique_citations_and_shortage_flag(monkeypatch):
 
     monkeypatch.setattr("app.main.search_chunks", fake_search_chunks)
 
-    response = client.post("/api/chat", json={"message": "Привет"})
+    response = client.post("/api/chat", json={"user_id": "1", "message": "Привет"})
 
     try:
         payload = response.json()
@@ -142,6 +143,7 @@ def test_chat_returns_unique_citations_and_shortage_flag(monkeypatch):
         app.dependency_overrides.clear()
 
     assert response.status_code == 200
+    assert payload["conversation_id"]
     assert [c["file"] for c in payload["citations"]] == ["doc1.pdf", "doc2.pdf"]
     assert payload["citations_insufficient"] is True
     assert len(payload["citations"]) == 2
