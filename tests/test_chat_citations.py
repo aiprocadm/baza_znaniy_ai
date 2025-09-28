@@ -120,19 +120,30 @@ def test_chat_returns_unique_citations_and_shortage_flag(tmp_path, monkeypatch):
         {"file": "doc1.pdf", "page": 1, "score": 0.8},
         {"file": "doc2.pdf", "page": 2, "score": 0.7},
     ]
+
     def fake_search_chunks(_msg, top_k=10, **_kwargs):
         return hits
 
     monkeypatch.setattr("app.main.search_chunks", fake_search_chunks)
 
-    response = client.post(
+    first_response = client.post(
         "/api/chat",
         json={"user_id": "tester", "message": "Привет", "conversation_id": "conv"},
     )
+    assert first_response.status_code == 200
 
-    payload = response.json()
+    second_response = client.post(
+        "/api/chat",
+        json={
+            "user_id": "tester",
+            "message": "Ещё вопрос",
+            "conversation_id": "conv",
+        },
+    )
 
-    assert response.status_code == 200
+    payload = second_response.json()
+
+    assert second_response.status_code == 200
     assert payload["conversation_id"]
     assert [c["file"] for c in payload["citations"]] == ["doc1.pdf", "doc2.pdf"]
     assert payload["citations_insufficient"] is True
