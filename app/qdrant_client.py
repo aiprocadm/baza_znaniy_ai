@@ -73,7 +73,7 @@ def ensure_collection() -> None:
         client.recreate_collection(
             collection_name=QDRANT_COLLECTION,
             vectors_config=qmodels.VectorParams(size=EMBED_DIMENSION, distance=qmodels.Distance.COSINE),
-            hnsw_config=qmodels.HnswConfigDiff(m=48, ef_construct=128),
+            hnsw_config=qmodels.HnswConfigDiff(m=48, ef_construct=256),
         )
         for field, schema in (
             ("file", qmodels.PayloadSchemaType.KEYWORD),
