@@ -249,6 +249,51 @@ def test_upload_returns_expected_response(
     ]
 
 
+def test_upload_returns_no_text_found_when_chunks_missing(
+    service_app: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    sample_dir = tmp_path / "samples"
+    ensure_demo_assets(sample_dir)
+    sample_path = sample_dir / "demo_notes.txt"
+    sample_bytes = sample_path.read_bytes()
+
+    call_counts = {"parse": 0, "save": 0, "upsert": 0}
+
+    def fake_parse_and_chunk(filename: str, data: bytes):
+        call_counts["parse"] += 1
+        assert data == sample_bytes
+        return []
+
+    def fake_save_file(path: Path, data: bytes):
+        call_counts["save"] += 1
+
+    def fake_upsert_chunks(chunks: list[dict[str, Any]]):
+        call_counts["upsert"] += 1
+
+    monkeypatch.setattr(service_app, "parse_and_chunk", fake_parse_and_chunk)
+    monkeypatch.setattr(service_app, "_save_file", fake_save_file)
+    monkeypatch.setattr(service_app, "upsert_chunks", fake_upsert_chunks)
+
+    settings = service_app.get_settings()
+    settings.data_dir = tmp_path
+    monkeypatch.setattr(service_app, "get_settings", lambda: settings)
+
+    with TestClient(service_app.app) as client:
+        response = client.post(
+            "/api/docs/upload",
+            data={"user_id": "tester"},
+            files={"files": (sample_path.name, sample_bytes, "text/plain")},
+        )
+
+    assert response.status_code == 400
+    payload = response.json()
+
+    assert payload["detail"] == "NO_TEXT_FOUND"
+    assert payload.get("ok") is not True
+
+    assert call_counts == {"parse": 1, "save": 0, "upsert": 0}
+
+
 @pytest.mark.parametrize(
     "asset_specs",
     [
