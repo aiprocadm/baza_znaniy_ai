@@ -14,13 +14,6 @@ from app.chat.store import ChatStore, ConversationAccessError
 from app.chat.summarizer import ConversationSummarizer
 from app.ingest import parse_and_chunk
 from app.memory.store import MemoryStore
-        codex/refactor-app/main.py-and-clean-imports
-
-        codex/create-qdrant-and-ingest-modules-kfqtqh
-
-        codex/create-qdrant-and-ingest-modules
-        main
-        main
 from app.ollama_client import ensure_model, generate
 from app.qdrant_client import ensure_collection, search_chunks, upsert_chunks
 from app.rag.context import build_context, select_citations
