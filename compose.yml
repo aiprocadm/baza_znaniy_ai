@@ -5,7 +5,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: knowlab_web
+    container_name: kb_web
     env_file:
       - .env
     environment:
