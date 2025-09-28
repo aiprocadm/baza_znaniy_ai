@@ -16,8 +16,7 @@ from .models import Document, DocumentCreate, QueryRequest, QueryResponse
 from .rag import retrieve
 
 load_dotenv()
-settings = config.get_settings()
-logging.basicConfig(level=getattr(logging, settings.log_level.upper(), logging.INFO))
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("kb")
 
 app = FastAPI(title="Knowledge Base API", version="1.0.0")
@@ -29,12 +28,29 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-memory = DocumentMemory(Path(settings.data_dir) / "documents.json")
+_memory: DocumentMemory | None = None
+
+
+def get_memory() -> DocumentMemory:
+    """Return the initialized document memory instance."""
+
+    if _memory is None:
+        raise RuntimeError("Document memory has not been initialized")
+    return _memory
 
 
 @app.on_event("startup")
 def bootstrap() -> None:
-    logger.info("Knowledge base service starting with %d documents", len(memory.all()))
+    settings = config.get_settings()
+    level = getattr(logging, settings.log_level.upper(), logging.INFO)
+    logging.getLogger().setLevel(level)
+    logger.setLevel(level)
+
+    documents_path = Path(settings.data_dir) / "documents.json"
+
+    global _memory
+    _memory = DocumentMemory(documents_path)
+    logger.info("Knowledge base service starting with %d documents", len(_memory.all()))
 
 
 @app.get("/health", tags=["system"])
@@ -44,11 +60,12 @@ def health() -> JSONResponse:
 
 @app.get("/documents", response_model=List[Document], tags=["documents"])
 def list_documents() -> List[Document]:
-    return memory.all()
+    return get_memory().all()
 
 
 @app.post("/documents", response_model=Document, tags=["documents"], status_code=201)
 def create_document(payload: DocumentCreate) -> Document:
+    memory = get_memory()
     document = memory.add(payload)
     logger.info("Added document %s", document.id)
     return document
@@ -56,6 +73,7 @@ def create_document(payload: DocumentCreate) -> Document:
 
 @app.delete("/documents/{document_id}", tags=["documents"])
 def delete_document(document_id: str) -> JSONResponse:
+    memory = get_memory()
     if not memory.remove(document_id):
         raise HTTPException(status_code=404, detail="Document not found")
     logger.info("Removed document %s", document_id)
@@ -64,6 +82,7 @@ def delete_document(document_id: str) -> JSONResponse:
 
 @app.post("/query", response_model=QueryResponse, tags=["retrieval"])
 def query(payload: QueryRequest) -> QueryResponse:
+    memory = get_memory()
     matches = retrieve(payload.question, memory.all(), limit=payload.limit)
     documents = [item[0] for item in matches]
     if not documents:
