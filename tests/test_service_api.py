@@ -12,11 +12,9 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
-        codex/add-test-for-api-docs-upload
 from tests.demo_assets import ensure_demo_assets
 
 from tests.service_stubs import install_service_stubs
-        main
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SERVICE_ROOT = PROJECT_ROOT / "srv" / "projects" / "kb" / "app"
@@ -196,7 +194,6 @@ def test_chat_returns_citations(service_app: Any):
         assert data["citations_insufficient"] is True
 
 
-        codex/add-test-for-api-docs-upload
 def test_upload_returns_expected_response(
     service_app: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
@@ -262,4 +259,3 @@ def test_root_serves_index_html(service_app: Any):
     assert "/api/docs/upload" in response.text
     assert "/api/chat" in response.text
     assert "/health" in response.text
-        main

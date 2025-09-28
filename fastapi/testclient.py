@@ -1,10 +1,10 @@
-"""Simple HTTP client for the FastAPI compatibility layer."""
+"""Minimal test client compatible with the subset of FastAPI used in tests."""
 
 from __future__ import annotations
 
 import asyncio
 import inspect
-from typing import Any, TYPE_CHECKING, Iterable
+from typing import TYPE_CHECKING, Any, Iterable
 
 from . import HTTPException, UploadFile, _build_call_arguments, _serialise
 from .responses import HTMLResponse, JSONResponse, Response
@@ -37,16 +37,10 @@ class TestClient:
     def __enter__(self) -> "TestClient":
         return self
 
-        codex/add-test-for-api-docs-upload
-    def __exit__(self, exc_type, exc, tb) -> None:
-        for handler in self.app._event_handlers.get("shutdown", []):  # type: ignore[attr-defined]
-            handler()
-
     def __exit__(self, exc_type, exc, tb) -> bool:
         for handler in reversed(self.app._event_handlers.get("shutdown", [])):  # type: ignore[attr-defined]
             handler()
         return False
-        main
 
     # ------------------------------------------------------------------
     # Public request helpers
