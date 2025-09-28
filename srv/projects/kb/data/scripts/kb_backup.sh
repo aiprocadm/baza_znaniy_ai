@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-PROJECT_ROOT="/srv/projects/kb"
-BACKUP_ROOT="/srv/backups"
+PROJECT_ROOT="${PROJECT_ROOT:-/srv/projects/kb}"
+BACKUP_ROOT="${BACKUP_ROOT:-/srv/backups}"
 TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
 DEST_DIR="$BACKUP_ROOT/$TIMESTAMP"
 TARGET="$DEST_DIR/kb.tar.gz"
-LOG_FILE="/var/log/kb_backup.log"
+LOG_FILE="${LOG_FILE:-/var/log/kb_backup.log}"
 APP_PORT="${APP_PORT:-8000}"
 BASIC_USER="${BASIC_USER:-admin}"
 
