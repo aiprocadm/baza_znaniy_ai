@@ -28,6 +28,9 @@ CHAT_HISTORY_LIMIT = int(os.getenv("CHAT_HISTORY_LIMIT", "12"))
 CHAT_SUMMARY_TRIGGER = int(os.getenv("CHAT_SUMMARY_TRIGGER", "10"))
 MIN_CITATIONS = max(1, int(os.getenv("CHAT_MIN_CITATIONS", "3")))
 MAX_CITATIONS = max(MIN_CITATIONS, int(os.getenv("CHAT_MAX_CITATIONS", "5")))
+RETRIEVE_TOPK = max(1, int(os.getenv("RETRIEVE_TOPK", "10")))
+_configured_rerank = int(os.getenv("RERANK_TOPK", str(RETRIEVE_TOPK)))
+RERANK_TOPK = max(1, min(RETRIEVE_TOPK, _configured_rerank))
 
 chat_store = ChatStore(str(CHAT_DB_PATH))
 summarizer = ConversationSummarizer(chat_store, generate)
@@ -211,7 +214,9 @@ def chat(
             logger.exception("Failed to load memory context")
             memory_text = ""
 
-    hits = search_chunks(inp.message, top_k=int(os.getenv("RETRIEVE_TOPK", "10")))
+    hits = search_chunks(inp.message, top_k=RETRIEVE_TOPK)
+    if len(hits) > RERANK_TOPK:
+        hits = hits[:RERANK_TOPK]
     context = build_context(hits, token_limit=3000)
 
     prompt_parts = [
