@@ -15,6 +15,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.auth import (
+    get_current_user as _auth_get_current_user,
     require_admin,
     require_staff,
     router as auth_router,
@@ -33,6 +34,8 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(title="kb")
 app.include_router(auth_router)
+
+get_current_user = _auth_get_current_user
 
 templates = Jinja2Templates(directory=str(Path(__file__).resolve().parent / "templates"))
 
@@ -214,4 +217,4 @@ def chat_logs(
     )
 
 
-__all__ = ["app"]
+__all__ = ["app", "get_current_user"]
