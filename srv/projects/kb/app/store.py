@@ -18,7 +18,11 @@ class ConversationAccessError(RuntimeError):
 class ChatStore:
     """Persist chat conversations and summaries in SQLite."""
 
+        codex/add-test-for-api-docs-upload
+    def __init__(self, db_path: str, secret: str | None = None) -> None:
+
     def __init__(self, db_path: str, *, secret: str | None = None) -> None:
+        main
         self.db_path = db_path
         self._secret = secret.encode("utf-8") if secret else None
         os.makedirs(os.path.dirname(self.db_path), exist_ok=True)

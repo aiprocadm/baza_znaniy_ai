@@ -11,6 +11,8 @@ from types import SimpleNamespace
 from pydantic import BaseModel
 
 from . import status
+from types import SimpleNamespace
+
 from .responses import HTMLResponse, JSONResponse
 
 
