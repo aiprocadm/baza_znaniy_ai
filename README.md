@@ -100,6 +100,7 @@ FastAPI записывает события чата в таблицу `chat_log
 
 Локально можно запустить unit-тесты (без Docker):
 ```bash
+pip install -r requirements.txt
 pip install -r app/requirements.txt
 pytest
 ```
