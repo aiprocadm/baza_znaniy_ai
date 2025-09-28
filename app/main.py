@@ -57,8 +57,7 @@ def _init_memory_store() -> MemoryStore | None:
         return None
 
 
-memory_store = _init_memory_store()
-app.mem = memory_store
+app.mem = _init_memory_store()
 
 class ChatIn(BaseModel):
     user_id: str
