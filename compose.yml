@@ -9,9 +9,33 @@ services:
     env_file:
       - .env
     environment:
+        codex/update-compose.yml-and-dockerfile
       FILES_ROOT: /srv/projects/kb/data/files
       OLLAMA_BASE_URL: http://127.0.0.1:11434
       QDRANT_URL: http://127.0.0.1:6333
+
+      QDRANT_HOST: qdrant
+      QDRANT_PORT: "6333"
+      OLLAMA_BASE_URL: http://ollama:11434
+    volumes:
+      - /opt/knowlab/data/files:/opt/knowlab/data/files
+      - /opt/knowlab/data/logs/api:/opt/knowlab/data/logs/api
+    depends_on:
+      qdrant:
+        condition: service_healthy
+      ollama:
+        condition: service_healthy
+    networks:
+      - internal
+    restart: unless-stopped
+
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: knowlab_nginx
+    depends_on:
+      api:
+        condition: service_started
+        main
     ports:
       - "80:80"
       - "443:443"
@@ -30,3 +54,40 @@ services:
       - /srv/projects/kb/data/logs/qdrant:/srv/projects/kb/data/logs/qdrant
       - /srv/projects/kb/data/logs/supervisor:/srv/projects/kb/data/logs/supervisor
     restart: unless-stopped
+        codex/update-compose.yml-and-dockerfile
+
+
+  qdrant:
+    image: qdrant/qdrant:v1.9.1
+    container_name: knowlab_qdrant
+    volumes:
+      - /opt/knowlab/data/qdrant:/qdrant/storage
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6333/ready"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  ollama:
+    image: ollama/ollama:0.3.12
+    container_name: knowlab_ollama
+    environment:
+      OLLAMA_HOST: 0.0.0.0
+    volumes:
+      - /opt/knowlab/data/ollama:/root/.ollama
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    restart: unless-stopped
+
+networks:
+  internal:
+  proxy:
+        main

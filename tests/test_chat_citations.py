@@ -5,12 +5,8 @@ from __future__ import annotations
 from fastapi.testclient import TestClient
 
 # Provide lightweight stubs for optional heavy dependencies before importing the app.
-import os
 import sys
 import types
-
-os.environ.setdefault("DATABASE_URL", "sqlite+pysqlite:///:memory:")
-
 
 if "qdrant_client" not in sys.modules:
     fake_qdrant = types.ModuleType("qdrant_client")
@@ -90,34 +86,20 @@ if "sentence_transformers" not in sys.modules:
     fake_st.SentenceTransformer = FakeSentenceTransformer
     sys.modules["sentence_transformers"] = fake_st
 
-from app.db.models import UserRole
-from app.main import app, get_current_user, get_session
+from app.main import app
+from app.memory.store import MemoryStore
 
 
-class DummySession:
-    def add(self, _obj):
-        self.saved = True
-
-    def commit(self):
-        self.committed = True
-
-    def rollback(self):  # pragma: no cover - defensive branch
-        self.rolled_back = True
-
-
-class DummyUser:
-    id = 1
-    role = UserRole.STAFF
-    must_change_password = False
-
-
-def test_chat_returns_unique_citations_and_shortage_flag(monkeypatch):
+def test_chat_returns_unique_citations_and_shortage_flag(tmp_path, monkeypatch):
     client = TestClient(app)
 
-    dummy_session = DummySession()
-
-    app.dependency_overrides[get_session] = lambda: dummy_session
-    app.dependency_overrides[get_current_user] = lambda: DummyUser()
+    memory_path = tmp_path / "memory.sqlite"
+    app.mem = MemoryStore(
+        db_path=str(memory_path),
+        ttl_days=90,
+        summary_trigger=10,
+        max_tokens=2000,
+    )
 
     monkeypatch.setattr("app.main.ensure_model", lambda: None)
     monkeypatch.setattr("app.main.ensure_collection", lambda: None)
@@ -134,12 +116,12 @@ def test_chat_returns_unique_citations_and_shortage_flag(monkeypatch):
 
     monkeypatch.setattr("app.main.search_chunks", fake_search_chunks)
 
-    response = client.post("/api/chat", json={"message": "Привет"})
+    response = client.post(
+        "/api/chat",
+        json={"user_id": "tester", "message": "Привет", "conversation_id": "conv"},
+    )
 
-    try:
-        payload = response.json()
-    finally:
-        app.dependency_overrides.clear()
+    payload = response.json()
 
     assert response.status_code == 200
     assert [c["file"] for c in payload["citations"]] == ["doc1.pdf", "doc2.pdf"]
