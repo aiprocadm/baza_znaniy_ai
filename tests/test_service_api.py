@@ -12,6 +12,8 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
+from tests.demo_assets import ensure_demo_assets
+
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SERVICE_ROOT = PROJECT_ROOT / "srv" / "projects" / "kb" / "app"
 
@@ -26,6 +28,68 @@ def _load_service_app(tmp_path: Path) -> Any:
     package = types.ModuleType(package_name)
     package.__path__ = [str(SERVICE_ROOT)]  # type: ignore[attr-defined]
     sys.modules[package_name] = package
+
+    if "qdrant_client" not in sys.modules:
+        qdrant_package = types.ModuleType("qdrant_client")
+        qdrant_package.__path__ = []  # type: ignore[attr-defined]
+
+        class _DummyQdrantClient:
+            def __init__(self, *args: Any, **kwargs: Any) -> None: ...
+
+        http_module = types.ModuleType("qdrant_client.http")
+        http_module.__path__ = []  # type: ignore[attr-defined]
+
+        models_module = types.ModuleType("qdrant_client.http.models")
+
+        class _VectorParams:
+            def __init__(self, *args: Any, **kwargs: Any) -> None:
+                self.args = args
+                self.kwargs = kwargs
+
+        class _HnswConfigDiff:
+            def __init__(self, *args: Any, **kwargs: Any) -> None:
+                self.args = args
+                self.kwargs = kwargs
+
+        class _SearchParams:
+            def __init__(self, *args: Any, **kwargs: Any) -> None:
+                self.args = args
+                self.kwargs = kwargs
+
+        class _PointStruct:
+            def __init__(self, *args: Any, **kwargs: Any) -> None:
+                self.args = args
+                self.kwargs = kwargs
+
+        class _Distance:
+            COSINE = "cosine"
+
+        class _PayloadSchemaType:
+            KEYWORD = "keyword"
+            INTEGER = "integer"
+
+        models_module.VectorParams = _VectorParams
+        models_module.Distance = _Distance
+        models_module.HnswConfigDiff = _HnswConfigDiff
+        models_module.PayloadSchemaType = _PayloadSchemaType
+        models_module.PointStruct = _PointStruct
+        models_module.SearchParams = _SearchParams
+
+        exceptions_module = types.ModuleType("qdrant_client.http.exceptions")
+
+        class _UnexpectedResponse(Exception):
+            pass
+
+        exceptions_module.UnexpectedResponse = _UnexpectedResponse
+
+        qdrant_package.QdrantClient = _DummyQdrantClient
+        http_module.models = models_module
+        http_module.exceptions = exceptions_module
+
+        sys.modules["qdrant_client"] = qdrant_package
+        sys.modules["qdrant_client.http"] = http_module
+        sys.modules["qdrant_client.http.models"] = models_module
+        sys.modules["qdrant_client.http.exceptions"] = exceptions_module
 
     config_spec = importlib.util.spec_from_file_location(
         f"{package_name}.config", SERVICE_ROOT / "config.py"
@@ -54,6 +118,10 @@ def service_app(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("CHAT_MEMORY_ENABLED", "0")
 
     app_module = _load_service_app(tmp_path)
+
+    settings = app_module.get_settings()
+    settings.data_dir = Path(settings.data_dir)
+    monkeypatch.setattr(app_module, "get_settings", lambda: settings)
 
     monkeypatch.setattr(app_module, "ensure_collection", lambda: None)
     monkeypatch.setattr(app_module, "ensure_model", lambda: None)
@@ -97,3 +165,58 @@ def test_chat_returns_citations(service_app: Any):
         assert data["citations"]
         assert len(data["citations"]) == 2
         assert data["citations_insufficient"] is True
+
+
+def test_upload_returns_expected_response(
+    service_app: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    sample_dir = tmp_path / "samples"
+    ensure_demo_assets(sample_dir)
+    sample_path = sample_dir / "demo_notes.txt"
+    sample_bytes = sample_path.read_bytes()
+
+    captured_chunks: list[list[dict[str, Any]]] = []
+    call_counts = {"parse": 0, "upsert": 0}
+
+    def fake_parse_and_chunk(filename: str, data: bytes):
+        call_counts["parse"] += 1
+        assert data == sample_bytes
+        return [
+            {"file": filename, "page": 1, "content": "chunk-1"},
+            {"file": filename, "page": 2, "content": "chunk-2"},
+        ]
+
+    def fake_upsert_chunks(chunks: list[dict[str, Any]]):
+        call_counts["upsert"] += 1
+        captured_chunks.append(list(chunks))
+
+    monkeypatch.setattr(service_app, "parse_and_chunk", fake_parse_and_chunk)
+    monkeypatch.setattr(service_app, "upsert_chunks", fake_upsert_chunks)
+
+    settings = service_app.get_settings()
+    settings.data_dir = tmp_path
+    monkeypatch.setattr(service_app, "get_settings", lambda: settings)
+
+    with TestClient(service_app.app) as client:
+        response = client.post(
+            "/api/docs/upload",
+            data={"user_id": "tester"},
+            files={"files": (sample_path.name, sample_bytes, "text/plain")},
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+
+    assert payload == {
+        "ok": True,
+        "files": [sample_path.name],
+        "chunks": 2,
+    }
+
+    assert call_counts == {"parse": 1, "upsert": 1}
+    assert captured_chunks == [
+        [
+            {"file": sample_path.name, "page": 1, "content": "chunk-1"},
+            {"file": sample_path.name, "page": 2, "content": "chunk-2"},
+        ]
+    ]

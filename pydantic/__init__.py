@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Callable, Dict, Optional, Tuple, Type, TypeVar
 
 
@@ -51,11 +52,13 @@ class BaseModel:
 
     def __init__(self, **data: Any) -> None:
         annotations = getattr(self, "__annotations__", {})
-        for name in annotations:
+        for name, annotation in annotations.items():
             if name in data:
                 value = data[name]
             else:
                 value = self._default_for(name)
+            if annotation is Path and not isinstance(value, Path):
+                value = Path(value)
             setattr(self, name, value)
 
     @classmethod

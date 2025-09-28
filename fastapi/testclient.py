@@ -6,7 +6,7 @@ import asyncio
 import inspect
 from typing import Any, TYPE_CHECKING
 
-from . import HTTPException, _build_call_arguments, _serialise
+from . import HTTPException, UploadFile, _build_call_arguments, _serialise
 from .responses import HTMLResponse, JSONResponse, Response
 
 if TYPE_CHECKING:  # pragma: no cover - used for type checkers only
@@ -34,6 +34,13 @@ class TestClient:
         for handler in self.app._event_handlers.get("startup", []):  # type: ignore[attr-defined]
             handler()
 
+    def __enter__(self) -> "TestClient":
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        for handler in self.app._event_handlers.get("shutdown", []):  # type: ignore[attr-defined]
+            handler()
+
     # ------------------------------------------------------------------
     # Public request helpers
     # ------------------------------------------------------------------
@@ -49,12 +56,32 @@ class TestClient:
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
-    def _request(self, method: str, path: str, *, body: Any | None = None, **_: Any) -> _SimpleResponse:
+    def _request(
+        self,
+        method: str,
+        path: str,
+        *,
+        body: Any | None = None,
+        data: dict[str, Any] | None = None,
+        files: dict[str, Any] | None = None,
+        **_: Any,
+    ) -> _SimpleResponse:
         route, params = self.app._find_route(method, path)  # type: ignore[attr-defined]
         if route is None or params is None:
             raise AssertionError(f"No route registered for {method} {path}")
 
         kwargs = _build_call_arguments(route.handler, body, params, self.app)
+        if data:
+            for key, value in data.items():
+                kwargs.setdefault(key, value)
+        if files:
+            for key, value in files.items():
+                if isinstance(value, list):
+                    uploads = [UploadFile(filename=item[0], content=item[1]) for item in value]
+                else:
+                    filename, content, *_ = value
+                    uploads = [UploadFile(filename=filename, content=content)]
+                kwargs[key] = uploads
         try:
             result = route.handler(**kwargs)
             if inspect.isawaitable(result):

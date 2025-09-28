@@ -10,6 +10,8 @@ from typing import Annotated, Any, Callable, Dict, List, Optional, get_args, get
 from pydantic import BaseModel
 
 from . import status
+from types import SimpleNamespace
+
 from .responses import HTMLResponse, JSONResponse
 
 
@@ -154,6 +156,8 @@ class FastAPI(_RouterBase):
         self.version = version
         self._middlewares: List[Any] = []
         self.dependency_overrides: Dict[Callable[..., Any], Callable[..., Any]] = {}
+        self.state = SimpleNamespace()
+        self.extra: Dict[str, Any] = {}
 
     def add_middleware(self, middleware_cls: Any, **options: Any) -> None:
         self._middlewares.append((middleware_cls, options))
