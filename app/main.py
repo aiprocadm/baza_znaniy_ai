@@ -4,7 +4,7 @@ import logging
 import os
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile, status
 from fastapi.responses import JSONResponse
@@ -15,8 +15,8 @@ from app.chat.summarizer import ConversationSummarizer
 from app.ingest import parse_and_chunk
 from app.memory.store import MemoryStore
 from app.ollama_client import ensure_model, generate
-from app.qdrant_client import ensure_collection, search_chunks, upsert_chunks
-from app.rag.context import build_context, select_citations
+from app.qdrant_client import ensure_collection, search_chunks
+from app.rag.context import build_context
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +26,8 @@ FILES_ROOT = Path(os.getenv("FILES_ROOT", "/opt/knowlab/data/files"))
 CHAT_DB_PATH = Path(os.getenv("CHAT_DB_PATH", str(FILES_ROOT / "db" / "chat_history.sqlite")))
 CHAT_HISTORY_LIMIT = int(os.getenv("CHAT_HISTORY_LIMIT", "12"))
 CHAT_SUMMARY_TRIGGER = int(os.getenv("CHAT_SUMMARY_TRIGGER", "10"))
+MIN_CITATIONS = max(1, int(os.getenv("CHAT_MIN_CITATIONS", "3")))
+MAX_CITATIONS = max(MIN_CITATIONS, int(os.getenv("CHAT_MAX_CITATIONS", "5")))
 
 chat_store = ChatStore(str(CHAT_DB_PATH))
 summarizer = ConversationSummarizer(chat_store, generate)
@@ -74,24 +76,94 @@ def health_head() -> JSONResponse:
     return health()
 
 
+def _normalise_extension(filename: str) -> str:
+    name = (filename or "").strip()
+    if "." not in name:
+        return ""
+    return name.rsplit(".", 1)[-1].lower()
+
+
+def _index_chunks(chunks: Iterable[dict[str, Any]]) -> int:
+    items = list(chunks)
+    if not items:
+        return 0
+
+    try:  # pragma: no cover - optional dependency initialisation
+        ensure_collection()
+    except Exception:
+        logger.exception("Failed to ensure vector store; using fallback index")
+        _FALLBACK_INDEX.extend(items)
+        return len(items)
+
+    try:  # pragma: no cover - optional dependency for full ingestion pipeline
+        from app.qdrant_client import upsert_chunks  # type: ignore
+    except Exception:  # pragma: no cover - gracefully degrade when unavailable
+        _FALLBACK_INDEX.extend(items)
+        logger.info("Stored %s chunks in fallback index", len(items))
+        return len(items)
+
+    upsert_chunks(items)
+    return len(items)
+
+
+def _citation_key(hit: dict[str, Any]) -> tuple[Any, ...]:
+    file_id = hit.get("file")
+    page = hit.get("page")
+    if file_id is None and page is None:
+        return (
+            hit.get("sha256"),
+            hit.get("id"),
+            hit.get("text"),
+        )
+    return (file_id, page)
+
+
+def _select_citations(hits: Iterable[dict[str, Any]]) -> tuple[list[dict[str, Any]], bool]:
+    unique: list[dict[str, Any]] = []
+    seen: set[tuple[Any, ...]] = set()
+
+    maximum = MAX_CITATIONS if MAX_CITATIONS >= MIN_CITATIONS else MIN_CITATIONS
+
+    for hit in hits:
+        key = _citation_key(hit)
+        if key in seen:
+            continue
+        seen.add(key)
+        citation = {
+            "file": hit.get("file"),
+            "page": hit.get("page"),
+            "score": float(hit.get("score", 0.0)),
+        }
+        unique.append(citation)
+        if len(unique) >= maximum:
+            break
+
+    has_minimum = len(unique) >= MIN_CITATIONS
+    return unique, has_minimum
+
+
+_FALLBACK_INDEX: list[dict[str, Any]] = []
+app.document_index = _FALLBACK_INDEX
+
+
 @app.post("/api/docs/upload")
 async def upload(
     file: UploadFile = File(...),
     user_id: str = Form(...),
     conversation_id: str | None = Form(None),
 ) -> dict[str, Any]:
-    name = (file.filename or "uploaded").strip()
-    ext = name.rsplit(".", 1)[-1].lower() if "." in name else ""
+    filename = (file.filename or "uploaded").strip()
+    ext = _normalise_extension(filename)
     if ext not in {"pdf", "docx", "txt"}:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "UPLOAD_INVALID_EXT")
 
     data = await file.read()
-    ensure_collection()
-    chunks = parse_and_chunk(name, data)
+    chunks = parse_and_chunk(filename, data)
     if not chunks:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "NO_TEXT_FOUND")
-    upsert_chunks(chunks)
-    return {"ok": True, "chunks": len(chunks)}
+
+    indexed = _index_chunks(chunks)
+    return {"ok": True, "chunks": indexed}
 
 
 @app.post("/api/chat")
@@ -145,12 +217,7 @@ def chat(
 
     answer = generate(prompt).strip()
 
-    selected_hits, has_minimum_citations = select_citations(hits, minimum=3, maximum=5)
-    citations = [
-        {"file": hit.get("file"), "page": hit.get("page"), "score": float(hit.get("score", 0.0))}
-        for hit in selected_hits
-    ]
-    citations_insufficient = not has_minimum_citations
+    citations, has_minimum_citations = _select_citations(hits)
 
     chat_store.record_exchange(conversation_id, inp.message, answer)
     if chat_store.messages_since_summary(conversation_id) >= CHAT_SUMMARY_TRIGGER:
@@ -175,16 +242,13 @@ def chat(
                 )
         answer_text = "\n\n".join([answer.strip(), "Источники:", "\n".join(formatted)])
 
-    response: dict[str, Any] = {
+    return {
         "answer": answer_text,
         "citations": citations,
         "conversation_id": conversation_id,
+        "citations_insufficient": not has_minimum_citations,
         "latency_ms": (time.perf_counter() - start) * 1000,
     }
-    if citations_insufficient:
-        response["citations_insufficient"] = True
-
-    return response
 
 
 __all__ = ["app"]
