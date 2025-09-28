@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, Optional, Tuple, Type, TypeVar
+from pathlib import Path
+from typing import Any, Callable, Dict, Optional, Tuple, Type, TypeVar, get_type_hints
 
 
 @dataclass
@@ -50,12 +51,25 @@ class BaseModel:
     """Minimal model implementation supporting validation and dumping."""
 
     def __init__(self, **data: Any) -> None:
-        annotations = getattr(self, "__annotations__", {})
-        for name in annotations:
+        raw_annotations = getattr(self, "__annotations__", {})
+        resolved_annotations = get_type_hints(self.__class__, include_extras=True)
+
+        for name, annotation in raw_annotations.items():
+            resolved = resolved_annotations.get(name, annotation)
             if name in data:
                 value = data[name]
             else:
                 value = self._default_for(name)
+
+            target = resolved
+
+            if target is Path and isinstance(value, str):
+                value = Path(value)
+            elif target is bool and isinstance(value, str):
+                value = value.lower() in {"1", "true", "yes", "on"}
+            elif target is int and isinstance(value, str):
+                value = int(value)
+
             setattr(self, name, value)
 
     @classmethod
@@ -92,4 +106,11 @@ __all__ = [
     "AliasChoices",
     "BaseModel",
     "Field",
+    "ValidationError",
 ]
+
+
+class ValidationError(Exception):
+    """Compatibility exception used by third-party clients."""
+
+    pass
