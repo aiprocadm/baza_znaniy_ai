@@ -18,6 +18,144 @@
         <li>Monitor service health via <code>/api/health</code>.</li>
       </ol>
     </section>
+
+    <section>
+      <h2>Chat</h2>
+      <form id="chat-form">
+        <label>
+          User ID
+          <input type="text" id="user-id" name="user_id" required />
+        </label>
+        <label>
+          Conversation ID
+          <input type="text" id="conversation-id" name="conversation_id" required />
+        </label>
+        <label>
+          Message
+          <textarea id="message" name="message" rows="3" required></textarea>
+        </label>
+        <button type="submit">Send</button>
+      </form>
+      <div id="chat-status" role="status"></div>
+      <div id="chat-response"></div>
+      <div id="chat-citations"></div>
+    </section>
+
+    <section>
+      <h2>Upload documents</h2>
+      <form id="upload-form">
+        <label>
+          Documents
+          <input type="file" id="documents" name="files" multiple required />
+        </label>
+        <button type="submit">Upload</button>
+      </form>
+      <div id="upload-status" role="status"></div>
+    </section>
   </main>
+
+  <script>
+    const chatForm = document.getElementById('chat-form');
+    const chatStatus = document.getElementById('chat-status');
+    const chatResponse = document.getElementById('chat-response');
+    const chatCitations = document.getElementById('chat-citations');
+    const uploadForm = document.getElementById('upload-form');
+    const uploadStatus = document.getElementById('upload-status');
+
+    chatForm?.addEventListener('submit', async (event) => {
+      event.preventDefault();
+
+      const userId = document.getElementById('user-id').value.trim();
+      const conversationId = document.getElementById('conversation-id').value.trim();
+      const message = document.getElementById('message').value.trim();
+
+      chatStatus.textContent = 'Sending message…';
+      chatResponse.innerHTML = '';
+      chatCitations.innerHTML = '';
+
+      try {
+        const response = await fetch('/api/chat', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ user_id: userId, conversation_id: conversationId, message })
+        });
+
+        if (!response.ok) {
+          throw new Error(`Request failed with status ${response.status}`);
+        }
+
+        const data = await response.json();
+        const answer = data.answer ?? data.message ?? 'No answer received.';
+        const citations = Array.isArray(data.citations) ? data.citations : [];
+
+        chatResponse.innerHTML = `<h3>Answer</h3><p>${answer}</p>`;
+
+        if (citations.length) {
+          const list = document.createElement('ul');
+          citations.forEach((citation, index) => {
+            const item = document.createElement('li');
+            if (typeof citation === 'string') {
+              item.textContent = citation;
+            } else if (citation && typeof citation === 'object') {
+              const parts = [citation.title, citation.source, citation.snippet]
+                .filter(Boolean)
+                .join(' — ');
+              item.textContent = parts || `Citation ${index + 1}`;
+            } else {
+              item.textContent = `Citation ${index + 1}`;
+            }
+            list.appendChild(item);
+          });
+          chatCitations.innerHTML = '<h3>Citations</h3>';
+          chatCitations.appendChild(list);
+        } else {
+          chatCitations.textContent = '';
+        }
+
+        chatStatus.textContent = 'Response received.';
+      } catch (error) {
+        console.error(error);
+        chatStatus.textContent = `Error: ${error.message}`;
+      }
+    });
+
+    uploadForm?.addEventListener('submit', async (event) => {
+      event.preventDefault();
+
+      const input = document.getElementById('documents');
+      if (!input.files?.length) {
+        uploadStatus.textContent = 'Please select at least one file to upload.';
+        return;
+      }
+
+      const formData = new FormData();
+      for (const file of input.files) {
+        formData.append('files', file);
+      }
+
+      uploadStatus.textContent = 'Uploading…';
+
+      try {
+        const response = await fetch('/api/docs/upload', {
+          method: 'POST',
+          body: formData
+        });
+
+        if (!response.ok) {
+          throw new Error(`Upload failed with status ${response.status}`);
+        }
+
+        const data = await response.json().catch(() => ({}));
+        const statusMessage = data.detail || data.message || 'Upload completed successfully.';
+        uploadStatus.textContent = statusMessage;
+        input.value = '';
+      } catch (error) {
+        console.error(error);
+        uploadStatus.textContent = `Error: ${error.message}`;
+      }
+    });
+  </script>
 </body>
 </html>

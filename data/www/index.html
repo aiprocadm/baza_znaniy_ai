@@ -8,197 +8,104 @@ legend { font-weight: 600; }
 input, button, textarea { font: inherit; padding: 0.4rem 0.6rem; }
 textarea { resize: vertical; min-height: 4rem; }
 #out { white-space: pre-wrap; background: #f8f9fa; padding: 1rem; border-radius: 0.5rem; border: 1px solid #e5e7eb; }
-.hidden { display: none !important; }
-.status { color: #b91c1c; }
+.status { color: #b91c1c; min-height: 1.2rem; }
 </style>
 <h1>KB Chat</h1>
 
-<section id="auth">
-  <fieldset id="login-box">
-    <legend>Вход</legend>
-    <form id="login-form">
-      <input id="login" placeholder="Логин" autocomplete="username" required>
-      <input id="password" type="password" placeholder="Пароль" autocomplete="current-password" required>
-      <button>Войти</button>
-    </form>
-    <div id="login-status" class="status"></div>
-  </fieldset>
-
-  <fieldset id="change-box" class="hidden">
-    <legend>Смена пароля</legend>
-    <p>Для продолжения необходимо обновить учётные данные.</p>
-    <form id="change-form">
-      <input id="new-login" placeholder="Новый логин (необязательно)">
-      <input id="new-password" type="password" placeholder="Новый пароль" autocomplete="new-password" required>
-      <button>Сохранить</button>
-    </form>
-    <div id="change-status" class="status"></div>
+<section>
+  <fieldset>
+    <legend>Параметры запроса</legend>
+    <label>
+      User ID
+      <input id="user-id" placeholder="Например, user-123" required>
+    </label>
+    <label>
+      Conversation ID (необязательно)
+      <input id="conversation-id" placeholder="general">
+    </label>
   </fieldset>
 </section>
 
-<button id="logout" class="hidden">Выйти</button>
-
-<section id="chat" class="hidden">
+<section>
   <fieldset>
     <legend>Чат</legend>
     <form id="chat-form">
-      <input id="cid" value="general" placeholder="ID диалога (необязательно)">
-      <textarea id="q" placeholder="Введите вопрос" required></textarea>
+      <textarea id="message" placeholder="Введите вопрос" required></textarea>
       <button>Отправить</button>
     </form>
+    <div id="chat-status" class="status"></div>
   </fieldset>
   <pre id="out"></pre>
 </section>
 
-<section id="admin" class="hidden">
+<section>
   <fieldset>
     <legend>Загрузка документов</legend>
     <form id="upload-form">
-      <input id="file" type="file" accept=".pdf,.docx,.txt" required>
+      <input id="upload-file" type="file" accept=".pdf,.docx,.txt" required>
       <button>Загрузить</button>
     </form>
-    <div id="upload-status"></div>
+    <div id="upload-status" class="status"></div>
   </fieldset>
 </section>
 
 <script>
-const authKey = 'kb_auth';
-const loginForm = document.getElementById('login-form');
-const changeForm = document.getElementById('change-form');
+const userInput = document.getElementById('user-id');
+const conversationInput = document.getElementById('conversation-id');
+const messageInput = document.getElementById('message');
+const chatStatus = document.getElementById('chat-status');
+const uploadStatus = document.getElementById('upload-status');
+const output = document.getElementById('out');
 const chatForm = document.getElementById('chat-form');
 const uploadForm = document.getElementById('upload-form');
-const logoutBtn = document.getElementById('logout');
-const loginBox = document.getElementById('login-box');
-const changeBox = document.getElementById('change-box');
-const chatBox = document.getElementById('chat');
-const adminBox = document.getElementById('admin');
-const loginStatus = document.getElementById('login-status');
-const changeStatus = document.getElementById('change-status');
-const uploadStatus = document.getElementById('upload-status');
-const cid = document.getElementById('cid');
-const question = document.getElementById('q');
-const output = document.getElementById('out');
-const fileInput = document.getElementById('file');
+const fileInput = document.getElementById('upload-file');
 
-let auth = null;
-
-function loadAuth() {
-  try {
-    const raw = localStorage.getItem(authKey);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw);
-    if (!parsed.token || !parsed.role) return null;
-    return parsed;
-  } catch (err) {
-    console.warn('Failed to parse auth state', err);
-    return null;
+function requireUserId() {
+  const value = userInput.value.trim();
+  if (!value) {
+    throw new Error('Укажите user_id.');
   }
+  return value;
 }
 
-function saveAuth(data) {
-  auth = data;
-  if (data) {
-    localStorage.setItem(authKey, JSON.stringify(data));
-  } else {
-    localStorage.removeItem(authKey);
-  }
-  updateVisibility();
+function buildConversationId() {
+  const raw = conversationInput.value.trim();
+  return raw || null;
 }
-
-function updateVisibility() {
-  const isLogged = Boolean(auth);
-  const mustChange = auth?.mustChange;
-  const role = auth?.role;
-  loginBox.classList.toggle('hidden', isLogged);
-  logoutBtn.classList.toggle('hidden', !isLogged);
-  chatBox.classList.toggle('hidden', !isLogged || mustChange);
-  adminBox.classList.toggle('hidden', !isLogged || mustChange || role !== 'admin');
-  changeBox.classList.toggle('hidden', !isLogged || !mustChange);
-  if (!isLogged) {
-    loginStatus.textContent = '';
-    changeStatus.textContent = '';
-    uploadStatus.textContent = '';
-    output.textContent = '';
-  }
-}
-
-function authHeaders(extra = {}) {
-  if (!auth) return extra;
-  return { ...extra, Authorization: `Bearer ${auth.token}` };
-}
-
-async function request(path, options = {}) {
-  const res = await fetch(path, options);
-  if (res.status === 401) {
-    saveAuth(null);
-    throw new Error('AUTH_REQUIRED');
-  }
-  if (res.status === 403) {
-    const detail = await res.json().catch(() => ({}));
-    if (detail?.detail === 'PASSWORD_CHANGE_REQUIRED') {
-      if (auth) {
-        saveAuth({ ...auth, mustChange: true });
-      }
-      throw new Error('PASSWORD_CHANGE_REQUIRED');
-    }
-    throw new Error(detail?.detail || 'FORBIDDEN');
-  }
-  if (!res.ok) {
-    const detail = await res.json().catch(() => ({}));
-    throw new Error(detail?.detail || `HTTP_${res.status}`);
-  }
-  return res.json();
-}
-
-loginForm.addEventListener('submit', async (event) => {
-  event.preventDefault();
-  loginStatus.textContent = '';
-  const login = document.getElementById('login').value.trim();
-  const password = document.getElementById('password').value;
-  try {
-    const data = await request('/api/auth/login', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ login, password })
-    });
-    saveAuth({ token: data.token, role: data.role, mustChange: data.must_change_password, login: data.login });
-  } catch (err) {
-    loginStatus.textContent = 'Ошибка входа';
-    console.error(err);
-  }
-});
-
-changeForm.addEventListener('submit', async (event) => {
-  event.preventDefault();
-  changeStatus.textContent = '';
-  const newLogin = document.getElementById('new-login').value.trim();
-  const newPassword = document.getElementById('new-password').value;
-  try {
-    const data = await request('/api/auth/change-password', {
-      method: 'POST',
-      headers: authHeaders({ 'Content-Type': 'application/json' }),
-      body: JSON.stringify({ new_login: newLogin || null, new_password: newPassword })
-    });
-    document.getElementById('new-password').value = '';
-    changeStatus.textContent = 'Пароль обновлён';
-    saveAuth({ token: data.token, role: data.role, mustChange: data.must_change_password, login: data.login });
-  } catch (err) {
-    changeStatus.textContent = 'Не удалось обновить пароль';
-    console.error(err);
-  }
-});
 
 chatForm.addEventListener('submit', async (event) => {
   event.preventDefault();
+  chatStatus.textContent = '';
   output.textContent = 'Загрузка...';
-  const payload = { conversation_id: cid.value || null, message: question.value };
+
+  let userId;
   try {
-    const data = await request('/api/chat', {
+    userId = requireUserId();
+  } catch (err) {
+    output.textContent = '';
+    chatStatus.textContent = err.message;
+    return;
+  }
+
+  const payload = {
+    user_id: userId,
+    conversation_id: buildConversationId(),
+    message: messageInput.value,
+  };
+
+  try {
+    const response = await fetch('/api/chat', {
       method: 'POST',
-      headers: authHeaders({ 'Content-Type': 'application/json' }),
-      body: JSON.stringify(payload)
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
     });
-    const lines = [data.answer.trim()];
+
+    if (!response.ok) {
+      throw new Error(`Ошибка ${response.status}`);
+    }
+
+    const data = await response.json();
+    const lines = [data.answer?.trim() || ''];
     lines.push('', 'Цитаты:');
     if (data.citations && data.citations.length) {
       lines.push(JSON.stringify(data.citations, null, 2));
@@ -210,7 +117,8 @@ chatForm.addEventListener('submit', async (event) => {
     }
     output.textContent = lines.join('\n');
   } catch (err) {
-    output.textContent = 'Ошибка: ' + err.message;
+    output.textContent = '';
+    chatStatus.textContent = err.message || 'Не удалось отправить сообщение';
     console.error(err);
   }
 });
@@ -218,41 +126,45 @@ chatForm.addEventListener('submit', async (event) => {
 uploadForm.addEventListener('submit', async (event) => {
   event.preventDefault();
   uploadStatus.textContent = '';
-  const file = fileInput.files[0];
+
+  let userId;
+  try {
+    userId = requireUserId();
+  } catch (err) {
+    uploadStatus.textContent = err.message;
+    return;
+  }
+
+  const file = fileInput.files?.[0];
   if (!file) {
     uploadStatus.textContent = 'Выберите файл';
     return;
   }
+
   const form = new FormData();
   form.append('file', file);
+  form.append('user_id', userId);
+  const conv = buildConversationId();
+  if (conv) {
+    form.append('conversation_id', conv);
+  }
+
   try {
-    const res = await fetch('/api/docs/upload', {
+    const response = await fetch('/api/docs/upload', {
       method: 'POST',
-      headers: authHeaders(),
-      body: form
+      body: form,
     });
-    if (!res.ok) {
-      if (res.status === 403) {
-        if (auth) {
-          saveAuth({ ...auth, mustChange: true });
-        }
-        throw new Error('PASSWORD_CHANGE_REQUIRED');
-      }
-      throw new Error('UPLOAD_FAILED');
+
+    if (!response.ok) {
+      throw new Error(`Ошибка ${response.status}`);
     }
-    const data = await res.json();
+
+    const data = await response.json();
     uploadStatus.textContent = `Загружено фрагментов: ${data.chunks}`;
     fileInput.value = '';
   } catch (err) {
-    uploadStatus.textContent = 'Ошибка загрузки: ' + err.message;
+    uploadStatus.textContent = err.message || 'Не удалось загрузить файл';
     console.error(err);
   }
 });
-
-logoutBtn.addEventListener('click', () => {
-  saveAuth(null);
-});
-
-auth = loadAuth();
-updateVisibility();
 </script>

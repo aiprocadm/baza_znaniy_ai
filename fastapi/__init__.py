@@ -48,6 +48,10 @@ def File(default: Any | None = None, **_: Any) -> Any | None:
     return default
 
 
+def Form(default: Any | None = None, **_: Any) -> Any | None:
+    return default
+
+
 def Query(default: Any | None = None, **_: Any) -> Any | None:
     return default
 
