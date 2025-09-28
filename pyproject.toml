@@ -1,3 +1,16 @@
+[project]
+name = "kb-ai"
+version = "0.1.0"
+dependencies = [
+    "SQLAlchemy==2.0.34",
+    "psycopg[binary]==3.2.1",
+    "argon2-cffi==23.1.0",
+]
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
 [tool.black]
 line-length = 100
 [tool.ruff]
