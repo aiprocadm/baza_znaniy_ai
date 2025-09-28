@@ -6,6 +6,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.service_stubs import install_service_stubs
+
 import importlib.util
 import sys
 import types
@@ -20,6 +22,8 @@ def _load_service_main(tmp_path: Path):
     for module_name in list(sys.modules):
         if module_name == package_name or module_name.startswith(f"{package_name}."):
             sys.modules.pop(module_name, None)
+
+    install_service_stubs()
 
     package = types.ModuleType(package_name)
     package.__path__ = [str(SERVICE_ROOT)]  # type: ignore[attr-defined]

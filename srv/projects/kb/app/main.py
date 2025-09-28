@@ -11,7 +11,7 @@ from typing import Any, Iterable, List
 from dotenv import load_dotenv
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 
 from .store import ChatStore, ConversationAccessError
 from .summarizer import ConversationSummarizer
@@ -26,6 +26,9 @@ from .rag import build_context, select_citations
 load_dotenv()
 
 logger = logging.getLogger("kb.service")
+
+BASE_DIR = Path(__file__).resolve().parents[1]
+WEB_ROOT = BASE_DIR / "data" / "www"
 
 app = FastAPI(title="Knowledge Base API", version="2.0.0")
 app.add_middleware(
@@ -123,9 +126,18 @@ def _index_chunks(chunks: Iterable[dict[str, Any]]) -> int:
     return len(chunk_list)
 
 
+def _health_response() -> JSONResponse:
+    return JSONResponse({"status": "ok", "ts": int(time.time())})
+
+
 @app.get("/health", response_class=JSONResponse, tags=["system"])
 def health() -> JSONResponse:
-    return JSONResponse({"status": "ok", "ts": int(time.time())})
+    return _health_response()
+
+
+@app.head("/health", response_class=JSONResponse, tags=["system"])
+def health_head() -> JSONResponse:
+    return _health_response()
 
 
 @app.post("/api/docs/upload", response_model=UploadResponse, tags=["documents"])
@@ -267,6 +279,19 @@ def chat(payload: ChatRequest) -> ChatResponse:
         citations_insufficient=not has_minimum,
         latency_ms=latency_ms,
     )
+
+
+def _load_index_html() -> str:
+    index_path = WEB_ROOT / "index.html"
+    try:
+        return index_path.read_text(encoding="utf-8")
+    except FileNotFoundError:  # pragma: no cover - defensive fallback
+        return "<h1>Knowledge Base</h1>"
+
+
+@app.get("/", response_class=HTMLResponse, include_in_schema=False)
+def index() -> HTMLResponse:
+    return HTMLResponse(_load_index_html())
 
 
 __all__ = ["app"]
