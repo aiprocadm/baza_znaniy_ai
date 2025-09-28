@@ -33,17 +33,36 @@ chat_store = ChatStore(str(CHAT_DB_PATH))
 summarizer = ConversationSummarizer(chat_store, generate)
 
 
+def _get_env_value(*names: str, default: str | None = None) -> str | None:
+    for name in names:
+        value = os.getenv(name)
+        if value is not None:
+            return value
+    return default
+
+
 def _init_memory_store() -> MemoryStore | None:
-    enabled = os.getenv("MEMORY_ENABLED", "").lower() in {"1", "true", "yes", "on"}
+    enabled_value = _get_env_value("CHAT_MEMORY_ENABLED", "MEMORY_ENABLED", default="")
+    enabled = str(enabled_value or "").lower() in {"1", "true", "yes", "on"}
     if not enabled:
         return None
 
     memory_db_path = Path(
         os.getenv("MEMORY_DB_PATH", str(FILES_ROOT / "db" / "memory.sqlite"))
     )
-    ttl_days = int(os.getenv("MEMORY_TTL_DAYS", "90"))
-    summary_trigger = int(os.getenv("MEMORY_SUMMARY_TRIGGER", str(CHAT_SUMMARY_TRIGGER)))
-    max_tokens = int(os.getenv("MEMORY_MAX_TOKENS", "2000"))
+    ttl_days = int(_get_env_value("CHAT_MEMORY_TTL_DAYS", "MEMORY_TTL_DAYS", default="90") or "90")
+    summary_trigger = int(
+        _get_env_value(
+            "CHAT_SUMMARY_TRIGGER",
+            "MEMORY_SUMMARY_TRIGGER",
+            default=str(CHAT_SUMMARY_TRIGGER),
+        )
+        or str(CHAT_SUMMARY_TRIGGER)
+    )
+    max_tokens = int(
+        _get_env_value("CHAT_MEMORY_MAXTOK", "MEMORY_MAX_TOKENS", default="2000")
+        or "2000"
+    )
 
     try:
         return MemoryStore(
