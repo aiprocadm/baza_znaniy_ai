@@ -8,7 +8,23 @@ from typing import Any
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
+        codex/add-post-/api/chat-endpoint
+from sqlalchemy.orm import Session
+
+from app.auth import (
+    get_current_user as _auth_get_current_user,
+    require_admin,
+    require_staff,
+    router as auth_router,
+    setup_defaults,
+)
+from app.db.models import ChatLog, User
+from app.db.session import get_session, init_db
+from app.chat.store import ChatStore, ConversationAccessError
+from app.chat.summarizer import ConversationSummarizer
+
 from app.memory.store import MemoryStore
+        main
 from app.models.ollama_client import ensure_model, generate
 from app.models.qdrant_client import ensure_collection, search_chunks, upsert_chunks
 from app.rag.context import build_context, select_citations
@@ -17,15 +33,12 @@ from app.rag.ingest import parse_and_chunk
 app = FastAPI(title="kb")
 
 FILES_ROOT = Path(os.getenv("FILES_ROOT", "/opt/knowlab/data/files"))
-DB_PATH = FILES_ROOT / "db" / "kb.sqlite"
-MEMORY_ENABLED = os.getenv("CHAT_MEMORY_ENABLED", "true").lower() == "true"
+CHAT_DB_PATH = Path(os.getenv("CHAT_DB_PATH", str(FILES_ROOT / "db" / "chat_history.sqlite")))
+CHAT_HISTORY_LIMIT = int(os.getenv("CHAT_HISTORY_LIMIT", "12"))
+CHAT_SUMMARY_TRIGGER = int(os.getenv("CHAT_SUMMARY_TRIGGER", "10"))
 
-mem = MemoryStore(
-    db_path=str(DB_PATH),
-    ttl_days=int(os.getenv("CHAT_MEMORY_TTL_DAYS", "90")),
-    summary_trigger=int(os.getenv("CHAT_SUMMARY_TRIGGER", "10")),
-    max_tokens=int(os.getenv("CHAT_MEMORY_MAXTOK", "2000")),
-)
+chat_store = ChatStore(str(CHAT_DB_PATH))
+summarizer = ConversationSummarizer(chat_store, lambda prompt: generate(prompt))
 
 class ChatIn(BaseModel):
     user_id: str
@@ -71,26 +84,44 @@ def chat(
     ensure_collection()
 
     start = time.perf_counter()
+        codex/add-post-/api/chat-endpoint
+    if str(user.id) != inp.user_id:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, detail="USER_MISMATCH")
+
+    try:
+        conversation_id = chat_store.ensure_conversation(inp.user_id, inp.conversation_id)
+    except ConversationAccessError as exc:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, detail="CONVERSATION_FORBIDDEN") from exc
+
+    summary_text = chat_store.get_summary(conversation_id) or ""
+    history = chat_store.get_recent_messages(conversation_id, limit=CHAT_HISTORY_LIMIT)
+    history_text = "\n".join(f"{role}: {content}" for role, content in history) if history else ""
+
     memory_key = inp.user_id
     memory_text = mem.load_context(memory_key, inp.conversation_id) if MEMORY_ENABLED else ""
+        main
 
     hits = search_chunks(inp.message, top_k=int(os.getenv("RETRIEVE_TOPK", "10")))
     context = build_context(hits, token_limit=3000)
 
-    prompt = "\n".join(
-        [
-            "You are a helpful assistant providing concise answers based on documentation.",
-            "Context:",
-            context,
-            "",
-            "Memory:",
-            memory_text,
-            "",
-            f"Question: {inp.message}",
-        ]
-    )
+    prompt_parts = [
+        "You are a helpful assistant providing concise answers based on the provided documentation context.",
+        "Always answer in Russian.",
+    ]
+    if summary_text:
+        prompt_parts.extend(["Conversation summary:", summary_text])
+    if history_text:
+        prompt_parts.extend(["Recent chat history:", history_text])
+    prompt_parts.extend([
+        "Retrieved context:",
+        context or "(нет подходящего контекста)",
+        "",
+        f"User message: {inp.message}",
+        "Сформулируй точный ответ, используя контекст, если он релевантен. Если данных недостаточно, сообщи об этом.",
+    ])
+    prompt = "\n".join(part for part in prompt_parts if part is not None)
 
-    answer = generate(prompt)
+    answer = generate(prompt).strip()
 
     selected_hits, has_minimum_citations = select_citations(hits, minimum=3, maximum=5)
     citations = [
@@ -99,8 +130,9 @@ def chat(
     ]
     citations_insufficient = not has_minimum_citations
 
-    if MEMORY_ENABLED:
-        mem.record(memory_key, inp.conversation_id, inp.message, answer)
+    chat_store.record_exchange(conversation_id, inp.message, answer)
+    if chat_store.messages_since_summary(conversation_id) >= CHAT_SUMMARY_TRIGGER:
+        summarizer.summarize(conversation_id)
 
     latency_ms = (time.perf_counter() - start) * 1000
 
@@ -108,7 +140,43 @@ def chat(
     if len(summary) > 200:
         summary = summary[:197].rstrip() + "..."
 
+        codex/add-post-/api/chat-endpoint
+    log = ChatLog(
+        user_id=user.id,
+        conversation_id=conversation_id,
+        question=inp.message,
+        response_summary=summary,
+        citations=citations,
+        latency_ms=latency_ms,
+    )
+    try:
+        db.add(log)
+        db.commit()
+    except Exception:  # pragma: no cover - defensive persistence handling
+        db.rollback()
+        logger.exception("Failed to persist chat log")
+
+    answer_text = answer
+    if citations:
+        formatted = []
+        for idx, citation in enumerate(citations, start=1):
+            location = citation.get("page")
+            if location is None:
+                formatted.append(f"[{idx}] {citation.get('file', 'неизвестный источник')}")
+            else:
+                formatted.append(
+                    f"[{idx}] {citation.get('file', 'неизвестный источник')} — страница {location}"
+                )
+        answer_text = "\n\n".join([answer.strip(), "Источники:", "\n".join(formatted)])
+
+    response: dict[str, Any] = {
+        "answer": answer_text,
+        "citations": citations,
+        "conversation_id": conversation_id,
+    }
+
     response: dict[str, Any] = {"answer": answer, "citations": citations}
+        main
     if citations_insufficient:
         response["citations_insufficient"] = True
 
