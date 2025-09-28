@@ -54,7 +54,7 @@ class TestClient:
         if route is None or params is None:
             raise AssertionError(f"No route registered for {method} {path}")
 
-        kwargs = _build_call_arguments(route.handler, body, params)
+        kwargs = _build_call_arguments(route.handler, body, params, self.app)
         try:
             result = route.handler(**kwargs)
             if inspect.isawaitable(result):
