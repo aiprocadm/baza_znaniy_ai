@@ -2,18 +2,40 @@
 
 from __future__ import annotations
 
-import importlib
+import importlib.util
 import pathlib
 import sys
+import types
 from typing import List
 
 import pytest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
+SERVICE_ROOT = ROOT / "srv" / "projects" / "kb" / "app"
 
-ingest = importlib.import_module("app.rag.ingest")
+
+def _load_ingest():
+    package_name = "kb_service_ingest"
+
+    for module_name in list(sys.modules):
+        if module_name == package_name or module_name.startswith(f"{package_name}."):
+            sys.modules.pop(module_name, None)
+
+    package = types.ModuleType(package_name)
+    package.__path__ = [str(SERVICE_ROOT)]  # type: ignore[attr-defined]
+    sys.modules[package_name] = package
+
+    ingest_spec = importlib.util.spec_from_file_location(
+        f"{package_name}.ingest", SERVICE_ROOT / "ingest.py"
+    )
+    assert ingest_spec and ingest_spec.loader
+    ingest_module = importlib.util.module_from_spec(ingest_spec)
+    sys.modules[ingest_spec.name] = ingest_module
+    ingest_spec.loader.exec_module(ingest_module)
+    return ingest_module
+
+
+ingest = _load_ingest()
 _chunk = ingest._chunk
 _clean = ingest._clean
 _get_tokenizer = ingest._get_tokenizer

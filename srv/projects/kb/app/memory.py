@@ -1,173 +1,83 @@
-"""Simple JSON-backed persistence for service documents."""
+"""Persistence layer for chat conversation memory using SQLite only."""
 
 from __future__ import annotations
 
-import json
-import logging
-import re
-import unicodedata
-from pathlib import Path
-from threading import RLock
-from typing import Dict, Iterable, List
-from uuid import uuid4
-
-from .models import Document, DocumentCreate
-
-LOGGER = logging.getLogger(__name__)
+import os
+import sqlite3
+import time
+from contextlib import contextmanager
+from typing import Iterable, Iterator, Optional
 
 
-class DocumentMemory:
-    """Thread-safe in-memory document store with disk persistence."""
+class MemoryStore:
+    """Persist chat conversations in a lightweight SQLite database."""
 
-    def __init__(self, storage_path: Path) -> None:
-        self._storage_path = Path(storage_path)
-        self._documents: Dict[str, Document] = {}
-        self._slug_counters: Dict[str, int] = {}
-        self._lock = RLock()
-        self._storage_path.parent.mkdir(parents=True, exist_ok=True)
-        self._load()
+    def __init__(self, db_path: str, ttl_days: int, summary_trigger: int, max_tokens: int) -> None:
+        self.db_path = db_path
+        self.ttl = ttl_days * 86400
+        self.trigger = summary_trigger
+        self.max_tokens = max_tokens
+        self._init_sqlite()
 
-    # ------------------------------------------------------------------
-    # Persistence helpers
-    # ------------------------------------------------------------------
-    def _load(self) -> None:
-        """Load documents from disk, resetting corrupt files if necessary."""
+    def _init_sqlite(self) -> None:
+        os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
+        with sqlite3.connect(self.db_path) as connection:
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS messages (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id TEXT,
+                    conv_id TEXT,
+                    role TEXT,
+                    content TEXT,
+                    ts INTEGER
+                )
+                """
+            )
+            connection.execute(
+                "CREATE INDEX IF NOT EXISTS ix_messages_lookup ON messages(user_id, conv_id, ts)"
+            )
+            connection.commit()
 
-        if not self._storage_path.exists():
-            self._persist()
-            return
-
+    @contextmanager
+    def _sqlite_connection(self) -> Iterator[sqlite3.Connection]:
+        connection = sqlite3.connect(self.db_path)
         try:
-            with self._storage_path.open("r", encoding="utf-8") as handle:
-                raw_items = json.load(handle)
-        except (json.JSONDecodeError, OSError) as exc:
-            LOGGER.warning(
-                "Failed to load documents from %s: %s. Resetting storage.",
-                self._storage_path,
-                exc,
+            yield connection
+        finally:
+            connection.close()
+
+    def record(self, user_id: str, conv_id: Optional[str], message: str, answer: str) -> None:
+        conv = conv_id or "default"
+        timestamp = int(time.time())
+        with self._sqlite_connection() as connection:
+            connection.execute(
+                "INSERT INTO messages(user_id, conv_id, role, content, ts) VALUES(?,?,?,?,?)",
+                (user_id, conv, "user", message, timestamp),
             )
-            self._documents.clear()
-            self._slug_counters.clear()
-            self._persist()
-            return
-
-        documents: Dict[str, Document] = {}
-        for item in raw_items:
-            try:
-                document = Document.model_validate(item)
-            except Exception as exc:  # pragma: no cover - defensive branch
-                LOGGER.warning("Discarding invalid document entry: %s", exc)
-                continue
-            documents[document.id] = document
-
-        self._documents = documents
-        self._rebuild_slug_counters()
-
-    def _persist(self) -> None:
-        """Persist the current documents to disk as JSON."""
-
-        with self._storage_path.open("w", encoding="utf-8") as handle:
-            payload = []
-            for document in self._documents.values():
-                data = document.model_dump()
-                created_at = data.get("created_at")
-                if hasattr(created_at, "isoformat"):
-                    data["created_at"] = created_at.isoformat()
-                payload.append(data)
-            json.dump(payload, handle, ensure_ascii=False, indent=2)
-
-    # ------------------------------------------------------------------
-    # Public API
-    # ------------------------------------------------------------------
-    def all(self) -> List[Document]:
-        with self._lock:
-            return list(self._documents.values())
-
-    def get(self, document_id: str) -> Document | None:
-        with self._lock:
-            return self._documents.get(document_id)
-
-    def add(self, payload: DocumentCreate) -> Document:
-        with self._lock:
-            candidate = payload.id or payload.content
-            document_id = self._generate_unique_id(candidate)
-            document = Document(
-                id=document_id,
-                content=payload.content,
-                tags=payload.tags,
+            connection.execute(
+                "INSERT INTO messages(user_id, conv_id, role, content, ts) VALUES(?,?,?,?,?)",
+                (user_id, conv, "assistant", answer, timestamp),
             )
-            self._documents[document.id] = document
-            self._update_slug_counter(document.id)
-            self._persist()
-            return document
+            connection.commit()
 
-    def bulk_add(self, payloads: Iterable[DocumentCreate]) -> List[Document]:
-        return [self.add(item) for item in payloads]
+    def load_context(self, user_id: str, conv_id: Optional[str]) -> str:
+        conv = conv_id or "default"
+        cutoff = int(time.time()) - self.ttl
 
-    def remove(self, document_id: str) -> bool:
-        with self._lock:
-            removed = self._documents.pop(document_id, None) is not None
-            if removed:
-                self._persist()
-                self._rebuild_slug_counters()
-            return removed
+        with self._sqlite_connection() as connection:
+            rows: Iterable[tuple[str, str]] = connection.execute(
+                """
+                SELECT role, content FROM messages
+                WHERE user_id=? AND conv_id=? AND ts>=?
+                ORDER BY id DESC LIMIT 10
+                """,
+                (user_id, conv, cutoff),
+            ).fetchall()
 
-    # ------------------------------------------------------------------
-    # Identifier helpers
-    # ------------------------------------------------------------------
-    def _generate_unique_id(self, source: str | None) -> str:
-        """Generate a URL-safe identifier that does not collide with existing ones."""
-
-        base = self._slugify(source or "")
-        if not base:
-            base = uuid4().hex
-
-        counter = self._slug_counters.get(base, 1)
-        while True:
-            candidate = base if counter == 1 else f"{base}-{counter}"
-            if candidate not in self._documents:
-                break
-            counter += 1
-        self._slug_counters[base] = counter + 1
-        return candidate
-
-    def _rebuild_slug_counters(self) -> None:
-        counters: Dict[str, int] = {}
-        for document_id in self._documents:
-            base, next_value = self._slug_counter_values(document_id)
-            if base:
-                counters[base] = max(counters.get(base, 1), next_value)
-        self._slug_counters = counters
-
-    def _update_slug_counter(self, document_id: str) -> None:
-        base, next_value = self._slug_counter_values(document_id)
-        if base:
-            self._slug_counters[base] = max(self._slug_counters.get(base, 1), next_value)
-
-    @staticmethod
-    def _slug_counter_values(document_id: str) -> tuple[str | None, int]:
-        match = re.fullmatch(r"(?P<base>[a-z0-9_-]+?)(?:-(?P<suffix>\d+))?", document_id)
-        if not match:
-            return None, 1
-        base = match.group("base")
-        suffix = match.group("suffix")
-        if suffix is None:
-            return base, 2
-        return base, int(suffix) + 1
-
-    @staticmethod
-    def _slugify(value: str) -> str:
-        """Return a lowercase slug limited to URL-safe characters."""
-
-        normalized = (
-            unicodedata.normalize("NFKD", value)
-            .encode("ascii", "ignore")
-            .decode("ascii")
-        )
-        normalized = normalized.replace(" ", "-")
-        slug = re.sub(r"[^A-Za-z0-9_-]+", "-", normalized)
-        slug = slug.strip("-_")
-        return slug.lower()
+        ordered = list(rows)[::-1]
+        transcript = "\n".join(f"{role}: {content}" for role, content in ordered)
+        return transcript[: self.max_tokens * 2]
 
 
-__all__ = ["DocumentMemory"]
+__all__ = ["MemoryStore"]

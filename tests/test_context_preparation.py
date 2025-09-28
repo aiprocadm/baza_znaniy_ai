@@ -1,11 +1,36 @@
+import importlib.util
 from pathlib import Path
 import sys
+import types
 
 ROOT = Path(__file__).resolve().parents[1]
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
+SERVICE_ROOT = ROOT / "srv" / "projects" / "kb" / "app"
 
-from app.rag.context import build_context, select_citations
+
+def _load_rag():
+    package_name = "kb_service_rag"
+
+    for module_name in list(sys.modules):
+        if module_name == package_name or module_name.startswith(f"{package_name}."):
+            sys.modules.pop(module_name, None)
+
+    package = types.ModuleType(package_name)
+    package.__path__ = [str(SERVICE_ROOT)]  # type: ignore[attr-defined]
+    sys.modules[package_name] = package
+
+    rag_spec = importlib.util.spec_from_file_location(
+        f"{package_name}.rag", SERVICE_ROOT / "rag.py"
+    )
+    assert rag_spec and rag_spec.loader
+    rag_module = importlib.util.module_from_spec(rag_spec)
+    sys.modules[rag_spec.name] = rag_module
+    rag_spec.loader.exec_module(rag_module)
+    return rag_module
+
+
+rag = _load_rag()
+build_context = rag.build_context
+select_citations = rag.select_citations
 
 
 def test_build_context_respects_token_limit():

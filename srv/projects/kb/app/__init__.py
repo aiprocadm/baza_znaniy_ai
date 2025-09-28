@@ -1,6 +1,5 @@
 """Knowledge base application package."""
 
-from .memory import DocumentMemory
-from .models import DocumentCreate
+from .main import app
 
-__all__ = ["DocumentMemory", "DocumentCreate"]
+__all__ = ["app"]

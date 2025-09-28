@@ -1,54 +1,87 @@
-"""Minimal retrieval utilities used by the service API."""
+"""Utilities for preparing retrieval context and citations."""
 
 from __future__ import annotations
 
-import math
-import re
-from collections import Counter
-from typing import Iterable, List, Tuple
+from typing import Dict, Iterable, List, Sequence, Tuple
 
-from .models import Document
-
-_WORD_RE = re.compile(r"[\w']+")
+from .ingest import _get_tokenizer
 
 
 def _tokenize(text: str) -> List[str]:
-    """Tokenise ``text`` into lowercase word tokens."""
-
-    return [token.lower() for token in _WORD_RE.findall(text)]
-
-
-def _tf(tokens: Iterable[str]) -> Counter[str]:
-    """Return a term-frequency vector for the provided tokens."""
-
-    return Counter(tokens)
+    tokenizer = _get_tokenizer()
+    return tokenizer.encode(text)
 
 
-def _cosine_similarity(vec_a: Counter[str], vec_b: Counter[str]) -> float:
-    """Compute cosine similarity between two sparse vectors."""
-
-    common = set(vec_a.keys()) & set(vec_b.keys())
-    numerator = sum(vec_a[token] * vec_b[token] for token in common)
-    if numerator == 0:
-        return 0.0
-    sum1 = sum(value**2 for value in vec_a.values())
-    sum2 = sum(value**2 for value in vec_b.values())
-    if sum1 == 0 or sum2 == 0:
-        return 0.0
-    return numerator / math.sqrt(sum1 * sum2)
+def _detokenize(tokens: Iterable[int]) -> str:
+    tokenizer = _get_tokenizer()
+    return tokenizer.decode(list(tokens))
 
 
-def retrieve(
-    query: str, documents: Iterable[Document], limit: int = 3
-) -> List[Tuple[Document, float]]:
-    """Return the top matching documents for the query."""
+def build_context(hits: Iterable[Dict], token_limit: int = 3000) -> str:
+    """Build a context string from *hits* while respecting *token_limit*."""
 
-    query_vec = _tf(_tokenize(query))
-    scored: List[Tuple[Document, float]] = []
-    for document in documents:
-        doc_vec = _tf(_tokenize(document.content))
-        score = _cosine_similarity(query_vec, doc_vec)
-        if score > 0:
-            scored.append((document, score))
-    scored.sort(key=lambda item: item[1], reverse=True)
-    return scored[:limit]
+    remaining = token_limit
+    context_tokens: List[int] = []
+    first = True
+
+    for hit in hits:
+        text = hit.get("text", "") or ""
+        if not text:
+            continue
+
+        text_tokens = _tokenize(text)
+        if not text_tokens:
+            continue
+
+        if not first:
+            separator = _tokenize("\n\n")
+            take = min(len(separator), remaining)
+            context_tokens.extend(separator[:take])
+            remaining -= take
+            if remaining <= 0:
+                break
+        first = False
+
+        take = min(len(text_tokens), remaining)
+        context_tokens.extend(text_tokens[:take])
+        remaining -= take
+        if remaining <= 0:
+            break
+
+    return _detokenize(context_tokens)
+
+
+def _citation_key(hit: Dict) -> Tuple:
+    file_id = hit.get("file")
+    page = hit.get("page")
+    if file_id is None and page is None:
+        return (
+            hit.get("sha256"),
+            hit.get("id"),
+            hit.get("text"),
+        )
+    return (file_id, page)
+
+
+def select_citations(
+    hits: Sequence[Dict], minimum: int = 3, maximum: int = 5
+) -> Tuple[List[Dict], bool]:
+    if maximum < minimum:
+        raise ValueError("maximum cannot be smaller than minimum")
+
+    unique: List[Dict] = []
+    seen = set()
+    for hit in hits:
+        key = _citation_key(hit)
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(hit)
+        if len(unique) >= maximum:
+            break
+
+    has_minimum = len(unique) >= minimum
+    return unique, has_minimum
+
+
+__all__ = ["build_context", "select_citations"]
