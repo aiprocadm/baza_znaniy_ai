@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SERVICE_URL="http://127.0.0.1:8000/health"
+APP_PORT="${APP_PORT:-8000}"
+SERVICE_URL="http://127.0.0.1:${APP_PORT}/health"
 MAX_RETRIES=5
 INTERVAL=5
 

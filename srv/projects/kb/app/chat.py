@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import os
 import sqlite3
 import time
@@ -18,8 +20,9 @@ class ConversationAccessError(RuntimeError):
 class ChatStore:
     """Persist chat conversations and summaries in SQLite."""
 
-    def __init__(self, db_path: str) -> None:
+    def __init__(self, db_path: str, *, secret: str | None = None) -> None:
         self.db_path = db_path
+        self._secret = secret.encode("utf-8") if secret else None
         os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
         self._init_schema()
 
@@ -57,10 +60,17 @@ class ChatStore:
                 "CREATE INDEX IF NOT EXISTS ix_messages_conversation ON messages(conversation_id, created_at)"
             )
 
+    def _generate_conversation_id(self, user_id: str) -> str:
+        seed = f"{user_id}:{time.time_ns()}:{uuid.uuid4().hex}".encode("utf-8")
+        if self._secret:
+            digest = hmac.new(self._secret, seed, hashlib.sha256).hexdigest()
+            return digest
+        return uuid.uuid4().hex
+
     def ensure_conversation(self, user_id: str, conversation_id: Optional[str]) -> str:
         """Return *conversation_id* for the given user, creating a new one when needed."""
 
-        conv_id = conversation_id or uuid.uuid4().hex
+        conv_id = conversation_id or self._generate_conversation_id(user_id)
         timestamp = int(time.time())
         with self._connect() as connection:
             row = connection.execute(

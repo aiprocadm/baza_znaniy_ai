@@ -87,9 +87,19 @@ def bootstrap() -> None:
 
     _ensure_directories(settings.data_dir)
 
-    app.state.chat_store = ChatStore(str(settings.chat_database))
+    app.state.chat_store = ChatStore(
+        str(settings.chat_database),
+        secret=settings.app_secret or None,
+    )
     app.state.summarizer = ConversationSummarizer(app.state.chat_store, generate)
     app.state.memory_store = _init_memory_store(settings)
+    app.extra.update(
+        {
+            "public_host": settings.app_host,
+            "rate_limit": settings.rate_limit,
+            "rate_burst": settings.rate_burst,
+        }
+    )
 
 
 def _normalise_extension(filename: str) -> str:
@@ -207,6 +217,8 @@ def chat(payload: ChatRequest) -> ChatResponse:
             memory_text = ""
 
     hits = search_chunks(payload.message, top_k=settings.retrieve_topk)
+    if settings.rerank_topk and settings.rerank_topk > 0:
+        hits = list(hits)[: settings.rerank_topk]
     context = build_context(hits, token_limit=3000)
 
     prompt_parts = [
