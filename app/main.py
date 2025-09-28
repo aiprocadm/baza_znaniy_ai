@@ -15,7 +15,11 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.auth import (
+        codex/import-get_current_user-in-main.py
+    get_current_user as _auth_get_current_user,
+
     get_current_user as _get_current_user,
+        main
     require_admin,
     require_staff,
     router as auth_router,
@@ -34,6 +38,8 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(title="kb")
 app.include_router(auth_router)
+
+get_current_user = _auth_get_current_user
 
 templates = Jinja2Templates(directory=str(Path(__file__).resolve().parent / "templates"))
 
