@@ -4,9 +4,9 @@ from __future__ import annotations
 import os
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Dict, Type
+from typing import Any, Dict, Iterable, Tuple, Type
 
-from pydantic import BaseModel, Field
+from pydantic import AliasChoices, BaseModel, Field
 
 
 class Settings(BaseModel):
@@ -18,19 +18,26 @@ class Settings(BaseModel):
     app_reload: bool = Field(default=False, alias="APP_RELOAD")
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")
     data_dir: Path = Field(default=Path("/data/storage"), alias="DATA_DIR")
+    app_secret: str = Field(default="", alias="APP_SECRET")
+    basic_user: str = Field(default="admin", alias="BASIC_USER")
+    rate_limit: str = Field(default="30r/m", alias="RATE_LIMIT")
+    rate_burst: int = Field(default=20, alias="RATE_BURST")
 
     # Retrieval settings
     rag_chunk: int = Field(default=900, alias="RAG_CHUNK")
     rag_overlap: int = Field(default=140, alias="RAG_OVERLAP")
     rag_tokenizer_name: str = Field(default="cl100k_base", alias="RAG_TOKENIZER_NAME")
     retrieve_topk: int = Field(default=10, alias="RETRIEVE_TOPK")
+    rerank_topk: int = Field(default=10, alias="RERANK_TOPK")
 
     # Qdrant configuration
     qdrant_url: str = Field(default="http://qdrant:6333", alias="QDRANT_URL")
     qdrant_api_key: str | None = Field(default=None, alias="QDRANT_API_KEY")
     qdrant_collection: str = Field(default="kb_chunks", alias="QDRANT_COLLECTION")
     embed_model: str = Field(default="intfloat/multilingual-e5-small", alias="EMBED_MODEL")
-    embed_dimension: int = Field(default=384, alias="EMBED_DIMENSION")
+    embed_dimension: int = Field(
+        default=384, alias=AliasChoices("EMBED_DIMENSION", "VECTOR_SIZE")
+    )
 
     # Ollama / generation
     ollama_base_url: str = Field(default="http://ollama:11434", alias="OLLAMA_BASE_URL")
@@ -69,6 +76,14 @@ class Settings(BaseModel):
         return self.data_dir / "db" / "memory.sqlite"
 
 
+def _normalise_aliases(alias_value: Any, fallback: str) -> Tuple[str, ...]:
+    if alias_value is None:
+        return (fallback,)
+    if isinstance(alias_value, (tuple, list, set)):
+        return tuple(str(item) for item in alias_value)
+    return (str(alias_value),)
+
+
 def _build_field_metadata() -> Dict[str, Dict[str, Any]]:
     """Return settings field metadata keyed by attribute name."""
 
@@ -76,14 +91,26 @@ def _build_field_metadata() -> Dict[str, Dict[str, Any]]:
     fields = getattr(Settings, "model_fields", None)
     if fields:
         for name, field in fields.items():
-            alias = getattr(field, "alias", None) or name.upper()
-            metadata[name] = {"alias": alias, "annotation": field.annotation}
+            alias_value = getattr(field, "alias", None)
+            aliases = _normalise_aliases(alias_value, name.upper())
+            annotation = getattr(field, "annotation", Any)
+            metadata[name] = {"aliases": aliases, "annotation": annotation}
         return metadata
 
     legacy_fields = getattr(Settings, "__fields__", {})
     for name, field in legacy_fields.items():
-        alias = getattr(field, "alias", None) or name.upper()
-        metadata[name] = {"alias": alias, "annotation": getattr(field, "type_", Any)}
+        alias_value = getattr(field, "alias", None)
+        aliases = _normalise_aliases(alias_value, name.upper())
+        metadata[name] = {"aliases": aliases, "annotation": getattr(field, "type_", Any)}
+    if metadata:
+        return metadata
+
+    annotations = getattr(Settings, "__annotations__", {})
+    for name, annotation in annotations.items():
+        field = getattr(Settings, name, ...)
+        alias_value = getattr(field, "alias", None) if field is not ... else None
+        aliases = _normalise_aliases(alias_value, name.upper())
+        metadata[name] = {"aliases": aliases, "annotation": annotation}
     return metadata
 
 
@@ -108,7 +135,9 @@ def get_settings() -> Settings:
 
     overrides: Dict[str, Any] = {}
     for name, info in _FIELD_METADATA.items():
-        alias = info["alias"]
-        if alias in os.environ:
-            overrides[name] = _coerce_value(os.environ[alias], info["annotation"])
+        aliases: Iterable[str] = info["aliases"]
+        for alias in aliases:
+            if alias in os.environ:
+                overrides[name] = _coerce_value(os.environ[alias], info["annotation"])
+                break
     return Settings(**overrides)

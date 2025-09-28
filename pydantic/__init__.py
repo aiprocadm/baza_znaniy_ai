@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, Optional, Type, TypeVar
+from typing import Any, Callable, Dict, Optional, Tuple, Type, TypeVar
 
 
 @dataclass
@@ -11,15 +11,36 @@ class FieldInfo:
     default: Any = ...
     default_factory: Optional[Callable[[], Any]] = None
     metadata: Dict[str, Any] | None = None
+    alias: Any | None = None
+
+
+class AliasChoices(tuple):
+    """Minimal stand-in for :class:`pydantic.alias_generators.AliasChoices`."""
+
+    def __new__(cls, *choices: str) -> "AliasChoices":
+        if not choices:
+            raise ValueError("AliasChoices requires at least one value")
+        normalised: Tuple[str, ...] = tuple(str(choice) for choice in choices)
+        return super().__new__(cls, normalised)
+
+    def __repr__(self) -> str:  # pragma: no cover - debugging helper
+        values = ", ".join(repr(choice) for choice in self)
+        return f"AliasChoices({values})"
 
 
 def Field(
     default: Any = ...,
     *,
     default_factory: Optional[Callable[[], Any]] = None,
+    alias: Any | None = None,
     **metadata: Any,
 ) -> FieldInfo:
-    return FieldInfo(default=default, default_factory=default_factory, metadata=metadata)
+    return FieldInfo(
+        default=default,
+        default_factory=default_factory,
+        metadata=metadata,
+        alias=alias,
+    )
 
 
 T = TypeVar("T", bound="BaseModel")
@@ -65,3 +86,10 @@ class BaseModel:
     def __repr__(self) -> str:  # pragma: no cover - debugging helper
         values = ", ".join(f"{name}={getattr(self, name)!r}" for name in self.__annotations__)
         return f"{self.__class__.__name__}({values})"
+
+
+__all__ = [
+    "AliasChoices",
+    "BaseModel",
+    "Field",
+]

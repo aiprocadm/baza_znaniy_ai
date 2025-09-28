@@ -7,6 +7,8 @@ TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
 DEST_DIR="$BACKUP_ROOT/$TIMESTAMP"
 TARGET="$DEST_DIR/kb.tar.gz"
 LOG_FILE="/var/log/kb_backup.log"
+APP_PORT="${APP_PORT:-8000}"
+BASIC_USER="${BASIC_USER:-admin}"
 
 log_exit_code() {
   local exit_code=$?
@@ -17,15 +19,19 @@ trap log_exit_code EXIT
 
 mkdir -p "$DEST_DIR"
 
-_tar() {
-  tar -czf "$TARGET" -C "$PROJECT_ROOT" \
-    .env \
-    data/db \
-    data/storage \
-    data/www \
-    data/nginx.conf
-}
+INCLUDE_PATHS=(
+  .env
+  data/db
+  data/storage
+  data/www
+  data/nginx.conf
+)
 
-_tar
+HTPASSWD_PATH="data/ssl/${BASIC_USER}"
+if [ -f "$PROJECT_ROOT/$HTPASSWD_PATH" ]; then
+  INCLUDE_PATHS+=("$HTPASSWD_PATH")
+fi
 
-echo "Backup created at $TARGET"
+tar -czf "$TARGET" -C "$PROJECT_ROOT" "${INCLUDE_PATHS[@]}"
+
+echo "Backup created at $TARGET (service port ${APP_PORT})"
