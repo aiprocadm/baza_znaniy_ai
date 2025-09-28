@@ -9,20 +9,25 @@ from typing import Annotated, Any
 
 from fastapi import Depends, FastAPI, File, HTTPException, Query, Request, UploadFile, status
 from fastapi.responses import HTMLResponse, JSONResponse
-from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
+from fastapi.security import OAuth2PasswordRequestForm
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.auth import router as auth_router, require_admin, setup_defaults
-from app.db.models import ChatLog, User, UserRole
+from app.auth import (
+    require_admin,
+    require_staff,
+    router as auth_router,
+    setup_defaults,
+)
+from app.db.models import ChatLog, User
 from app.db.session import get_session, init_db
 from app.memory.store import MemoryStore
 from app.models.ollama_client import ensure_model, generate
 from app.models.qdrant_client import ensure_collection, search_chunks, upsert_chunks
 from app.rag.context import build_context, select_citations
 from app.rag.ingest import parse_and_chunk
-from app.security import create_access_token, decode_token, hash_password, verify_password
+from app.security import create_access_token, verify_password
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +47,6 @@ mem = MemoryStore(
     max_tokens=int(os.getenv("CHAT_MEMORY_MAXTOK", "2000")),
 )
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/token")
 SessionDep = Annotated[Session, Depends(get_session)]
 
 
@@ -50,11 +54,6 @@ class TokenOut(BaseModel):
     access_token: str
     token_type: str = "bearer"
     must_change_password: bool
-
-
-class ChangePasswordIn(BaseModel):
-    current_password: str
-    new_password: str
 
 
 class ChatIn(BaseModel):
@@ -78,32 +77,6 @@ def health_head() -> JSONResponse:
     return health()
 
 
-def get_current_user(token: Annotated[str, Depends(oauth2_scheme)], db: SessionDep) -> User:
-    try:
-        payload = decode_token(token)
-        user_id = int(payload.get("sub"))
-    except Exception as exc:  # pragma: no cover - defensive branch
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="INVALID_TOKEN") from exc
-
-    user = db.get(User, user_id)
-    if not user:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="USER_NOT_FOUND")
-    if user.must_change_password:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="PASSWORD_CHANGE_REQUIRED")
-    return user
-
-
-def require_role(required: UserRole):
-    def dependency(user: Annotated[User, Depends(get_current_user)]) -> User:
-        if required == UserRole.ADMIN and user.role != UserRole.ADMIN:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="INSUFFICIENT_ROLE")
-        if required == UserRole.STAFF and user.role not in {UserRole.STAFF, UserRole.ADMIN}:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="INSUFFICIENT_ROLE")
-        return user
-
-    return dependency
-
-
 @app.post("/api/auth/token", response_model=TokenOut)
 def login(db: SessionDep, form: Annotated[OAuth2PasswordRequestForm, Depends()]) -> TokenOut:
     user = db.query(User).filter(User.username == form.username).first()
@@ -114,22 +87,10 @@ def login(db: SessionDep, form: Annotated[OAuth2PasswordRequestForm, Depends()])
     return TokenOut(access_token=token, must_change_password=user.must_change_password)
 
 
-@app.post("/api/auth/change-password")
-def change_password(payload: ChangePasswordIn, db: SessionDep, user: Annotated[User, Depends(get_current_user)]):
-    if not verify_password(payload.current_password, user.password_hash):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="INVALID_PASSWORD")
-
-    user.password_hash = hash_password(payload.new_password)
-    user.must_change_password = False
-    db.add(user)
-    db.commit()
-    return {"ok": True}
-
-
 @app.post("/api/docs/upload")
 async def upload(
     file: UploadFile = File(...),
-    _: Annotated[User, Depends(require_role(UserRole.ADMIN))] = None,
+    _: Annotated[User, Depends(require_admin)] = None,
 ) -> dict[str, Any]:
     name = (file.filename or "uploaded").strip()
     ext = name.rsplit(".", 1)[-1].lower() if "." in name else ""
@@ -148,7 +109,7 @@ async def upload(
 @app.post("/api/chat")
 def chat(
     inp: ChatIn,
-    user: Annotated[User, Depends(require_role(UserRole.STAFF))],
+    user: Annotated[User, Depends(require_staff)],
     db: SessionDep,
 ) -> dict[str, Any]:
     ensure_model()

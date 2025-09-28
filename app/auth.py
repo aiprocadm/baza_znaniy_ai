@@ -88,6 +88,12 @@ def require_admin(user: models.User = Depends(require_active_user)) -> models.Us
     return user
 
 
+def require_staff(user: models.User = Depends(require_active_user)) -> models.User:
+    if user.role not in {models.UserRole.STAFF, models.UserRole.ADMIN}:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="STAFF_REQUIRED")
+    return user
+
+
 @router.post("/login", response_model=TokenResponse)
 def login(payload: LoginRequest, session: UserSession) -> TokenResponse:
     stmt = select(models.User).where(models.User.username == payload.login)
