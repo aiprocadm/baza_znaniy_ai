@@ -9,85 +9,40 @@ services:
     env_file:
       - .env
     environment:
-        codex/update-compose.yml-and-dockerfile
       FILES_ROOT: /srv/projects/kb/data/files
-      OLLAMA_BASE_URL: http://127.0.0.1:11434
+      GEN_MODEL: qwen2.5:3b-instruct
+      EMBED_MODEL: intfloat/multilingual-e5-small
+      RAG_CHUNK: "900"
+      RAG_OVERLAP: "140"
+      RETRIEVE_TOPK: "10"
+      CHAT_MEMORY_ENABLED: "true"
+      CHAT_MEMORY_TTL_DAYS: "90"
+      CHAT_SUMMARY_TRIGGER: "10"
+      CHAT_MEMORY_MAXTOK: "2000"
       QDRANT_URL: http://127.0.0.1:6333
-
-      QDRANT_HOST: qdrant
-      QDRANT_PORT: "6333"
-      OLLAMA_BASE_URL: http://ollama:11434
-    volumes:
-      - /opt/knowlab/data/files:/opt/knowlab/data/files
-      - /opt/knowlab/data/logs/api:/opt/knowlab/data/logs/api
-    depends_on:
-      qdrant:
-        condition: service_healthy
-      ollama:
-        condition: service_healthy
-    networks:
-      - internal
-    restart: unless-stopped
-
-  nginx:
-    image: nginx:1.27-alpine
-    container_name: knowlab_nginx
-    depends_on:
-      api:
-        condition: service_started
-        main
+      QDRANT_COLLECTION: kb_chunks
+      QDRANT_API_KEY: ""
+      OLLAMA_HOST: http://127.0.0.1:11434
     ports:
       - "80:80"
       - "443:443"
       - "11434:11434"
       - "6333:6333"
     volumes:
-      - ./data/nginx.conf:/etc/nginx/nginx.conf:ro
       - /srv/projects/kb/data/files:/srv/projects/kb/data/files
       - /srv/projects/kb/data/www:/srv/projects/kb/data/www
       - /srv/projects/kb/data/ssl:/etc/nginx/ssl:ro
       - /srv/projects/kb/data/storage/ollama:/srv/projects/kb/data/storage/ollama
       - /srv/projects/kb/data/storage/qdrant:/srv/projects/kb/data/storage/qdrant
       - /srv/projects/kb/data/logs/api:/srv/projects/kb/data/logs/api
-      - /srv/projects/kb/data/logs/nginx:/var/log/nginx
+      - /srv/projects/kb/data/logs/nginx:/srv/projects/kb/data/logs/nginx
       - /srv/projects/kb/data/logs/ollama:/srv/projects/kb/data/logs/ollama
       - /srv/projects/kb/data/logs/qdrant:/srv/projects/kb/data/logs/qdrant
       - /srv/projects/kb/data/logs/supervisor:/srv/projects/kb/data/logs/supervisor
     restart: unless-stopped
-        codex/update-compose.yml-and-dockerfile
-
-
-  qdrant:
-    image: qdrant/qdrant:v1.9.1
-    container_name: knowlab_qdrant
-    volumes:
-      - /opt/knowlab/data/qdrant:/qdrant/storage
     networks:
-      - internal
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:6333/ready"]
-      interval: 30s
-      timeout: 5s
-      retries: 5
-    restart: unless-stopped
-
-  ollama:
-    image: ollama/ollama:0.3.12
-    container_name: knowlab_ollama
-    environment:
-      OLLAMA_HOST: 0.0.0.0
-    volumes:
-      - /opt/knowlab/data/ollama:/root/.ollama
-    networks:
-      - internal
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-    restart: unless-stopped
+      - web
 
 networks:
-  internal:
-  proxy:
-        main
+  web:
+    external: true
