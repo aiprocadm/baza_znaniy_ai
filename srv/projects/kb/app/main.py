@@ -163,16 +163,16 @@ async def upload_document(
         if not data:
             continue
 
+        chunks = parse_and_chunk(filename, data)
+        if not chunks:
+            continue
+
         safe_name = filename or f"upload-{int(time.time())}.txt"
         save_path = target_dir / safe_name
         if save_path.exists():
             suffix = int(time.time())
             save_path = target_dir / f"{safe_name}.{suffix}"
         _save_file(save_path, data)
-
-        chunks = parse_and_chunk(filename, data)
-        if not chunks:
-            continue
         indexed = _index_chunks(chunks)
         if indexed:
             processed.append(filename)
