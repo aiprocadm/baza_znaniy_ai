@@ -162,7 +162,7 @@ def search_chunks(query: str, top_k: int = 10) -> List[dict[str, object]]:
                 "score": float(item.score),
             }
         )
-    return hits
+    return hits[:top_k]
 
 
 __all__ = ["ensure_collection", "search_chunks", "upsert_chunks"]
