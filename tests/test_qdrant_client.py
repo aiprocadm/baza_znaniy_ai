@@ -78,6 +78,7 @@ def _install_qdrant_stubs() -> None:
 _install_qdrant_stubs()
 
 from app import qdrant_client as qc
+from qdrant_client.http import models as qmodels
 
 
 @pytest.fixture(autouse=True)
@@ -202,20 +203,73 @@ def test_upsert_chunks_raises_without_sha(monkeypatch: pytest.MonkeyPatch, mocke
 
 
 def test_search_chunks_returns_payload_with_float_scores(monkeypatch: pytest.MonkeyPatch, mocked_qdrant: MagicMock) -> None:
-    monkeypatch.setattr(qc, "ensure_collection", MagicMock())
+    ensure_mock = MagicMock()
+    monkeypatch.setattr(qc, "ensure_collection", ensure_mock)
     query_vector = np.full((1, qc.EMBED_DIMENSION), 1 / np.sqrt(qc.EMBED_DIMENSION), dtype=np.float32)
     monkeypatch.setattr(qc, "_encode_texts", MagicMock(return_value=query_vector))
 
-    mocked_qdrant.search.return_value = [
-        SimpleNamespace(payload={"file": "doc", "page": 1, "sha256": "x", "text": "chunk"}, score=np.float32(0.5))
-    ]
+    point1 = qmodels.PointStruct(id="1", vector=[0.0], payload={
+        "file": "doc1",
+        "page": 1,
+        "sha256": "sha1",
+        "text": "first",
+    })
+    point1.score = np.float32(0.5)
 
-    results = qc.search_chunks("question", top_k=5)
+    point2 = qmodels.PointStruct(id="2", vector=[0.0], payload={
+        "file": "doc2",
+        "page": 2,
+        "sha256": "sha2",
+        "text": "second",
+    })
+    point2.score = np.float32(0.4)
 
+    point3 = qmodels.PointStruct(id="3", vector=[0.0], payload={
+        "file": "doc3",
+        "page": 3,
+        "sha256": "sha3",
+        "text": "third",
+    })
+    point3.score = np.float32(0.3)
+
+    mocked_qdrant.search.return_value = [point1, point2, point3]
+
+    results = qc.search_chunks("question", top_k=2)
+
+    ensure_mock.assert_called_once()
     mocked_qdrant.search.assert_called_once()
-    assert results == [
-        {"file": "doc", "page": 1, "sha256": "x", "text": "chunk", "score": 0.5}
-    ]
+    assert len(results) == 2
+    first, second = results
+    assert first == {
+        "file": "doc1",
+        "page": 1,
+        "sha256": "sha1",
+        "text": "first",
+        "score": pytest.approx(0.5),
+    }
+    assert second == {
+        "file": "doc2",
+        "page": 2,
+        "sha256": "sha2",
+        "text": "second",
+        "score": pytest.approx(0.4),
+    }
+
+
+def test_search_chunks_skips_search_for_empty_query(monkeypatch: pytest.MonkeyPatch, mocked_qdrant: MagicMock) -> None:
+    ensure_mock = MagicMock()
+    monkeypatch.setattr(qc, "ensure_collection", ensure_mock)
+    monkeypatch.setattr(
+        qc,
+        "_encode_texts",
+        MagicMock(return_value=np.zeros((0, qc.EMBED_DIMENSION), dtype=np.float32)),
+    )
+
+    results = qc.search_chunks("", top_k=3)
+
+    ensure_mock.assert_called_once()
+    mocked_qdrant.search.assert_not_called()
+    assert results == []
 
 
 def test_encode_texts_returns_zeros_for_empty_input() -> None:
