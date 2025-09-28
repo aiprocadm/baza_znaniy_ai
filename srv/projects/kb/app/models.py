@@ -1,38 +1,33 @@
-"""Pydantic models and domain objects for the knowledge base."""
+"""Pydantic models used by the service API."""
+
 from __future__ import annotations
 
-from datetime import datetime
 from typing import List, Optional
 
 from pydantic import BaseModel, Field
 
 
-class Document(BaseModel):
-    """A single knowledge base document."""
-
-    id: str = Field(..., description="Unique document identifier")
-    content: str = Field(..., description="Raw document text")
-    tags: List[str] = Field(default_factory=list, description="List of tags")
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+class UploadResponse(BaseModel):
+    ok: bool
+    files: List[str]
+    chunks: int
 
 
-class DocumentCreate(BaseModel):
-    """Payload for creating a document."""
-
-    id: Optional[str] = Field(None, description="Optional document id")
-    content: str = Field(..., min_length=1, description="Document body")
-    tags: List[str] = Field(default_factory=list)
+class ChatRequest(BaseModel):
+    user_id: str = Field(..., min_length=1)
+    message: str = Field(..., min_length=1)
+    conversation_id: Optional[str] = None
 
 
-class QueryRequest(BaseModel):
-    """Query payload for retrieval."""
+class Citation(BaseModel):
+    file: Optional[str]
+    page: Optional[int]
+    score: Optional[float]
 
-    question: str = Field(..., min_length=1, description="User question")
-    limit: int = Field(default=3, ge=1, le=10, description="Number of hits to return")
 
-
-class QueryResponse(BaseModel):
-    """Retrieval results."""
-
-    question: str
-    matches: List[Document]
+class ChatResponse(BaseModel):
+    answer: str
+    citations: List[Citation]
+    conversation_id: str
+    citations_insufficient: bool
+    latency_ms: float
