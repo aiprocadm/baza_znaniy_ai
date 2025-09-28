@@ -176,11 +176,12 @@ def chat(
 
     answer = generate(prompt)
 
-    selected_hits = select_citations(hits, minimum=3, maximum=5)
+    selected_hits, has_minimum_citations = select_citations(hits, minimum=3, maximum=5)
     citations = [
         {"file": hit.get("file"), "page": hit.get("page"), "score": float(hit.get("score", 0.0))}
         for hit in selected_hits
     ]
+    citations_insufficient = not has_minimum_citations
 
     if MEMORY_ENABLED:
         mem.record(memory_key, inp.conversation_id, inp.message, answer)
@@ -206,7 +207,11 @@ def chat(
         db.rollback()
         logger.exception("Failed to persist chat log")
 
-    return {"answer": answer, "citations": citations}
+    response: dict[str, Any] = {"answer": answer, "citations": citations}
+    if citations_insufficient:
+        response["citations_insufficient"] = True
+
+    return response
 
 
 @app.get("/admin/chat-logs", response_class=HTMLResponse)

@@ -1,7 +1,7 @@
 """Utilities for preparing retrieval context and citations."""
 from __future__ import annotations
 
-from typing import Dict, Iterable, List, Sequence
+from typing import Dict, Iterable, List, Sequence, Tuple
 
 from .tokenizer import detokenize, tokenize
 
@@ -44,26 +44,45 @@ def build_context(hits: Iterable[Dict], token_limit: int = 3000) -> str:
     return detokenize(context_tokens)
 
 
-def select_citations(hits: Sequence[Dict], minimum: int = 3, maximum: int = 5) -> List[Dict]:
-    """Return a slice of *hits* for citation output.
+def _citation_key(hit: Dict) -> Tuple:
+    """Build a key for identifying unique citation hits."""
 
-    The function guarantees at least *minimum* items by duplicating the last
-    available hit when the search does not return enough distinct results.  This
-    fulfils the API contract that the client can always expect a fixed number of
-    citations.
+    file_id = hit.get("file")
+    page = hit.get("page")
+    if file_id is None and page is None:
+        # Fall back to stable identifiers when available to avoid treating
+        # different documents as the same citation.
+        return (
+            hit.get("chunk_id"),
+            hit.get("id"),
+            hit.get("text"),
+        )
+    return (file_id, page)
+
+
+def select_citations(
+    hits: Sequence[Dict], minimum: int = 3, maximum: int = 5
+) -> Tuple[List[Dict], bool]:
+    """Return distinct citation hits and whether the minimum was satisfied.
+
+    The function filters duplicate citations based on their document and page,
+    ensures that no more than *maximum* items are returned, and reports whether
+    at least *minimum* unique citations were available.
     """
 
     if maximum < minimum:
         raise ValueError("maximum cannot be smaller than minimum")
 
-    if not hits:
-        return []
+    unique: List[Dict] = []
+    seen = set()
+    for hit in hits:
+        key = _citation_key(hit)
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(hit)
+        if len(unique) >= maximum:
+            break
 
-    count = min(len(hits), maximum)
-    count = max(count, minimum)
-
-    selected = list(hits[: min(len(hits), count)])
-    while len(selected) < count:
-        selected.append(hits[-1])
-
-    return selected
+    has_minimum = len(unique) >= minimum
+    return unique, has_minimum

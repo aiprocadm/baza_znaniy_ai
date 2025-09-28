@@ -198,7 +198,17 @@ chatForm.addEventListener('submit', async (event) => {
       headers: authHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify(payload)
     });
-    output.textContent = `${data.answer}\n\nЦитаты:\n${JSON.stringify(data.citations, null, 2)}`;
+    const lines = [data.answer.trim()];
+    lines.push('', 'Цитаты:');
+    if (data.citations && data.citations.length) {
+      lines.push(JSON.stringify(data.citations, null, 2));
+    } else {
+      lines.push('Нет доступных ссылок');
+    }
+    if (data.citations_insufficient) {
+      lines.push('', '⚠️ Найдено меньше трёх релевантных цитат');
+    }
+    output.textContent = lines.join('\n');
   } catch (err) {
     output.textContent = 'Ошибка: ' + err.message;
     console.error(err);

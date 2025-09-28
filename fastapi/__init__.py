@@ -5,7 +5,7 @@ from __future__ import annotations
 import inspect
 from dataclasses import dataclass
 from datetime import date, datetime
-from typing import Any, Callable, Dict, List, Optional
+from typing import Annotated, Any, Callable, Dict, List, Optional, get_args, get_origin, get_type_hints
 
 from pydantic import BaseModel
 
@@ -112,6 +112,9 @@ class _RouterBase:
     def delete(self, path: str, **options: Any) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
         return self._add_route("DELETE", path, **options)
 
+    def head(self, path: str, **options: Any) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+        return self._add_route("HEAD", path, **options)
+
     def include_router(self, router: "APIRouter") -> None:
         for route in router._routes:
             self._routes.append(route)
@@ -146,6 +149,7 @@ class FastAPI(_RouterBase):
         self.title = title
         self.version = version
         self._middlewares: List[Any] = []
+        self.dependency_overrides: Dict[Callable[..., Any], Callable[..., Any]] = {}
 
     def add_middleware(self, middleware_cls: Any, **options: Any) -> None:
         self._middlewares.append((middleware_cls, options))
@@ -167,28 +171,84 @@ def _serialise(data: Any) -> Any:
     return data
 
 
+def _resolve_dependency(
+    dependency: Callable[..., Any] | Any, app: "FastAPI"
+) -> Any:
+    if not callable(dependency):
+        return dependency
+
+    override = app.dependency_overrides.get(dependency) if hasattr(app, "dependency_overrides") else None
+    target = override or dependency
+
+    signature = inspect.signature(target)
+    type_hints = get_type_hints(target, include_extras=True)
+    kwargs: Dict[str, Any] = {}
+    for name, parameter in signature.parameters.items():
+        annotation = type_hints.get(name, parameter.annotation)
+        metadata: List[Any] = []
+        if get_origin(annotation) is Annotated:
+            args = list(get_args(annotation))
+            if args:
+                annotation = args.pop(0)
+            metadata.extend(args)
+
+        dependency_callable = next((meta for meta in metadata if callable(meta)), None)
+        if dependency_callable is not None:
+            kwargs[name] = _resolve_dependency(dependency_callable, app)
+            continue
+
+        default = parameter.default
+        if default is inspect._empty:
+            raise RuntimeError(f"Dependency '{target.__name__}' requires parameter '{name}'")
+        kwargs[name] = _resolve_dependency(default, app)
+
+    result = target(**kwargs)
+    if inspect.isgenerator(result):
+        try:
+            return next(result)
+        finally:  # pragma: no cover - generator cleanup is best-effort
+            try:
+                result.close()
+            except Exception:
+                pass
+    return result
+
+
 def _build_call_arguments(
-    handler: Callable[..., Any], body: Any, path_params: Dict[str, str]
+    handler: Callable[..., Any], body: Any, path_params: Dict[str, str], app: "FastAPI"
 ) -> Dict[str, Any]:
     signature = inspect.signature(handler)
+    type_hints = get_type_hints(handler, include_extras=True)
     kwargs: Dict[str, Any] = {}
     body_assigned = False
     for name, parameter in signature.parameters.items():
         if name in path_params:
             kwargs[name] = path_params[name]
             continue
+
+        annotation = type_hints.get(name, parameter.annotation)
+        metadata: List[Any] = []
+        if get_origin(annotation) is Annotated:
+            args = list(get_args(annotation))
+            if args:
+                annotation = args.pop(0)
+            metadata.extend(args)
+
+        dependency_callable = next((meta for meta in metadata if callable(meta)), None)
+        if dependency_callable is not None:
+            kwargs[name] = _resolve_dependency(dependency_callable, app)
+            continue
+
         if not body_assigned and body is not None:
-            annotation = parameter.annotation
-            if isinstance(annotation, str):
-                annotation = handler.__globals__.get(annotation, annotation)
             if isinstance(annotation, type) and issubclass(annotation, BaseModel):
                 kwargs[name] = annotation.model_validate(body)
             else:
                 kwargs[name] = body
             body_assigned = True
             continue
+
         if parameter.default is not inspect._empty:
-            kwargs[name] = parameter.default
+            kwargs[name] = _resolve_dependency(parameter.default, app)
     return kwargs
 
 

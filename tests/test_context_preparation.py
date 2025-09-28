@@ -35,16 +35,18 @@ def test_build_context_skips_empty_hits():
     assert context == "useful"
 
 
-def test_select_citations_guarantees_minimum_with_duplicates():
+def test_select_citations_filters_duplicates_and_flags_shortage():
     hits = [
         {"file": "doc1.pdf", "page": 1, "score": 0.9},
-        {"file": "doc2.pdf", "page": 3, "score": 0.8},
+        {"file": "doc1.pdf", "page": 1, "score": 0.8},
+        {"file": "doc2.pdf", "page": 4, "score": 0.7},
     ]
 
-    citations = select_citations(hits, minimum=3, maximum=5)
+    citations, has_minimum = select_citations(hits, minimum=3, maximum=5)
 
-    assert len(citations) == 3
-    assert citations[-1]["file"] == "doc2.pdf"
+    assert len(citations) == 2
+    assert [c["file"] for c in citations] == ["doc1.pdf", "doc2.pdf"]
+    assert has_minimum is False
 
 
 def test_select_citations_caps_at_maximum():
@@ -53,8 +55,9 @@ def test_select_citations_caps_at_maximum():
         for i in range(10)
     ]
 
-    citations = select_citations(hits, minimum=3, maximum=5)
+    citations, has_minimum = select_citations(hits, minimum=3, maximum=5)
 
     assert len(citations) == 5
     assert citations[0]["file"] == "doc0.pdf"
     assert citations[-1]["file"] == "doc4.pdf"
+    assert has_minimum is True
