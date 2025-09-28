@@ -248,6 +248,91 @@ def test_upload_returns_expected_response(
         ]
     ]
 
+
+@pytest.mark.parametrize(
+    "asset_specs",
+    [
+        [
+            (
+                "demo_contract.pdf",
+                "application/pdf",
+                [
+                    {"file": "demo_contract.pdf", "page": 1, "content": "contract-chunk-1"},
+                    {"file": "demo_contract.pdf", "page": 2, "content": "contract-chunk-2"},
+                ],
+            ),
+            (
+                "demo_overview.docx",
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                [
+                    {"file": "demo_overview.docx", "page": 1, "content": "overview-chunk-1"},
+                    {"file": "demo_overview.docx", "page": 2, "content": "overview-chunk-2"},
+                ],
+            ),
+        ]
+    ],
+)
+def test_docs_upload_indexes_each_demo_asset(
+    service_app: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, asset_specs: list[tuple[str, str, list[dict[str, Any]]]]
+):
+    sample_dir = tmp_path / "samples"
+    ensure_demo_assets(sample_dir)
+
+    files_payload: list[tuple[str, tuple[str, bytes, str]]] = []
+    asset_bytes: dict[str, bytes] = {}
+    fake_chunks_map: dict[str, list[dict[str, Any]]] = {}
+
+    for asset_name, content_type, fake_chunks in asset_specs:
+        file_path = sample_dir / asset_name
+        data = file_path.read_bytes()
+        files_payload.append(("files", (asset_name, data, content_type)))
+        asset_bytes[asset_name] = data
+        fake_chunks_map[asset_name] = fake_chunks
+
+    parse_calls: list[str] = []
+    upsert_call_counts: dict[str, int] = {}
+    captured_chunks: dict[str, list[dict[str, Any]]] = {}
+
+    def fake_parse_and_chunk(filename: str, data: bytes):
+        parse_calls.append(filename)
+        assert data == asset_bytes[filename]
+        return fake_chunks_map[filename]
+
+    def fake_upsert_chunks(chunks: list[dict[str, Any]]):
+        assert chunks
+        files_in_chunk = {chunk["file"] for chunk in chunks}
+        assert len(files_in_chunk) == 1
+        file_name = next(iter(files_in_chunk))
+        upsert_call_counts[file_name] = upsert_call_counts.get(file_name, 0) + 1
+        captured_chunks[file_name] = list(chunks)
+
+    monkeypatch.setattr(service_app, "parse_and_chunk", fake_parse_and_chunk)
+    monkeypatch.setattr(service_app, "upsert_chunks", fake_upsert_chunks)
+
+    settings = service_app.get_settings()
+    settings.data_dir = tmp_path
+    monkeypatch.setattr(service_app, "get_settings", lambda: settings)
+
+    with TestClient(service_app.app) as client:
+        response = client.post(
+            "/api/docs/upload",
+            data={"user_id": "tester"},
+            files=files_payload,
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+
+    expected_files = [asset_name for asset_name, *_ in asset_specs]
+    assert payload["files"] == expected_files
+    assert payload["chunks"] > 0
+
+    assert sorted(parse_calls) == sorted(expected_files)
+    for asset_name, *_ in asset_specs:
+        assert upsert_call_counts.get(asset_name) == 1
+        assert captured_chunks[asset_name] == fake_chunks_map[asset_name]
+
+
 def test_root_serves_index_html(service_app: Any):
     expected = INDEX_HTML.read_text(encoding="utf-8")
 
