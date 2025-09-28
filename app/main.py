@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 import time
 from pathlib import Path
@@ -8,37 +9,16 @@ from typing import Any
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
-        codex/add-post-/api/chat-endpoint
-from sqlalchemy.orm import Session
 
-from app.auth import (
-    get_current_user as _auth_get_current_user,
-    require_admin,
-    require_staff,
-    router as auth_router,
-    setup_defaults,
-)
-from app.db.models import ChatLog, User
-from app.db.session import get_session, init_db
 from app.chat.store import ChatStore, ConversationAccessError
 from app.chat.summarizer import ConversationSummarizer
-
+from app.ingest import parse_and_chunk
 from app.memory.store import MemoryStore
-        codex/create-qdrant-and-ingest-modules
 from app.ollama_client import ensure_model, generate
 from app.qdrant_client import ensure_collection, search_chunks, upsert_chunks
 from app.rag.context import build_context, select_citations
-from app.ingest import parse_and_chunk
-from app.security import create_access_token, verify_password
 
 logger = logging.getLogger(__name__)
-
-        main
-from app.models.ollama_client import ensure_model, generate
-from app.models.qdrant_client import ensure_collection, search_chunks, upsert_chunks
-from app.rag.context import build_context, select_citations
-from app.rag.ingest import parse_and_chunk
-        main
 
 app = FastAPI(title="kb")
 
@@ -48,7 +28,35 @@ CHAT_HISTORY_LIMIT = int(os.getenv("CHAT_HISTORY_LIMIT", "12"))
 CHAT_SUMMARY_TRIGGER = int(os.getenv("CHAT_SUMMARY_TRIGGER", "10"))
 
 chat_store = ChatStore(str(CHAT_DB_PATH))
-summarizer = ConversationSummarizer(chat_store, lambda prompt: generate(prompt))
+summarizer = ConversationSummarizer(chat_store, generate)
+
+
+def _init_memory_store() -> MemoryStore | None:
+    enabled = os.getenv("MEMORY_ENABLED", "").lower() in {"1", "true", "yes", "on"}
+    if not enabled:
+        return None
+
+    memory_db_path = Path(
+        os.getenv("MEMORY_DB_PATH", str(FILES_ROOT / "db" / "memory.sqlite"))
+    )
+    ttl_days = int(os.getenv("MEMORY_TTL_DAYS", "90"))
+    summary_trigger = int(os.getenv("MEMORY_SUMMARY_TRIGGER", str(CHAT_SUMMARY_TRIGGER)))
+    max_tokens = int(os.getenv("MEMORY_MAX_TOKENS", "2000"))
+
+    try:
+        return MemoryStore(
+            db_path=str(memory_db_path),
+            ttl_days=ttl_days,
+            summary_trigger=summary_trigger,
+            max_tokens=max_tokens,
+        )
+    except Exception:  # pragma: no cover - defensive initialisation
+        logger.exception("Failed to initialise memory store")
+        return None
+
+
+memory_store = _init_memory_store()
+app.mem = memory_store
 
 class ChatIn(BaseModel):
     user_id: str
@@ -94,9 +102,6 @@ def chat(
     ensure_collection()
 
     start = time.perf_counter()
-        codex/add-post-/api/chat-endpoint
-    if str(user.id) != inp.user_id:
-        raise HTTPException(status.HTTP_403_FORBIDDEN, detail="USER_MISMATCH")
 
     try:
         conversation_id = chat_store.ensure_conversation(inp.user_id, inp.conversation_id)
@@ -107,9 +112,14 @@ def chat(
     history = chat_store.get_recent_messages(conversation_id, limit=CHAT_HISTORY_LIMIT)
     history_text = "\n".join(f"{role}: {content}" for role, content in history) if history else ""
 
-    memory_key = inp.user_id
-    memory_text = mem.load_context(memory_key, inp.conversation_id) if MEMORY_ENABLED else ""
-        main
+    memory_text = ""
+    active_memory = getattr(app, "mem", None)
+    if isinstance(active_memory, MemoryStore):
+        try:
+            memory_text = active_memory.load_context(inp.user_id, conversation_id)
+        except Exception:  # pragma: no cover - defensive lookup
+            logger.exception("Failed to load memory context")
+            memory_text = ""
 
     hits = search_chunks(inp.message, top_k=int(os.getenv("RETRIEVE_TOPK", "10")))
     context = build_context(hits, token_limit=3000)
@@ -122,6 +132,8 @@ def chat(
         prompt_parts.extend(["Conversation summary:", summary_text])
     if history_text:
         prompt_parts.extend(["Recent chat history:", history_text])
+    if memory_text:
+        prompt_parts.extend(["Long-term memory:", memory_text])
     prompt_parts.extend([
         "Retrieved context:",
         context or "(нет подходящего контекста)",
@@ -144,27 +156,11 @@ def chat(
     if chat_store.messages_since_summary(conversation_id) >= CHAT_SUMMARY_TRIGGER:
         summarizer.summarize(conversation_id)
 
-    latency_ms = (time.perf_counter() - start) * 1000
-
-    summary = answer.strip()
-    if len(summary) > 200:
-        summary = summary[:197].rstrip() + "..."
-
-        codex/add-post-/api/chat-endpoint
-    log = ChatLog(
-        user_id=user.id,
-        conversation_id=conversation_id,
-        question=inp.message,
-        response_summary=summary,
-        citations=citations,
-        latency_ms=latency_ms,
-    )
-    try:
-        db.add(log)
-        db.commit()
-    except Exception:  # pragma: no cover - defensive persistence handling
-        db.rollback()
-        logger.exception("Failed to persist chat log")
+    if isinstance(active_memory, MemoryStore):
+        try:
+            active_memory.record(inp.user_id, conversation_id, inp.message, answer)
+        except Exception:  # pragma: no cover - defensive persistence handling
+            logger.exception("Failed to persist memory entry")
 
     answer_text = answer
     if citations:
@@ -183,10 +179,8 @@ def chat(
         "answer": answer_text,
         "citations": citations,
         "conversation_id": conversation_id,
+        "latency_ms": (time.perf_counter() - start) * 1000,
     }
-
-    response: dict[str, Any] = {"answer": answer, "citations": citations}
-        main
     if citations_insufficient:
         response["citations_insufficient"] = True
 

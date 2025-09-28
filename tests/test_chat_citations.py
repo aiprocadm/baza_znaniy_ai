@@ -2,24 +2,22 @@
 
 from __future__ import annotations
 
+import os
+import sys
+import tempfile
+import types
+from pathlib import Path
+
 from fastapi.testclient import TestClient
 
 # Provide lightweight stubs for optional heavy dependencies before importing the app.
-        codex/add-post-/api/chat-endpoint
-import os
-import tempfile
-import sys
-import types
-
 os.environ.setdefault("DATABASE_URL", "sqlite+pysqlite:///:memory:")
 os.environ.setdefault("CHAT_DB_PATH", os.path.join(tempfile.gettempdir(), "chat_store_test.sqlite"))
 
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
-
-import sys
-import types
-
-        main
 if "qdrant_client" not in sys.modules:
     fake_qdrant = types.ModuleType("qdrant_client")
     fake_http = types.ModuleType("qdrant_client.http")
@@ -127,14 +125,10 @@ def test_chat_returns_unique_citations_and_shortage_flag(tmp_path, monkeypatch):
 
     monkeypatch.setattr("app.main.search_chunks", fake_search_chunks)
 
-        codex/add-post-/api/chat-endpoint
-    response = client.post("/api/chat", json={"user_id": "1", "message": "Привет"})
-
     response = client.post(
         "/api/chat",
         json={"user_id": "tester", "message": "Привет", "conversation_id": "conv"},
     )
-        main
 
     payload = response.json()
 
