@@ -24,10 +24,10 @@ from app.auth import (
 from app.db.models import ChatLog, User
 from app.db.session import get_session, init_db
 from app.memory.store import MemoryStore
-from app.models.ollama_client import ensure_model, generate
-from app.models.qdrant_client import ensure_collection, search_chunks, upsert_chunks
+from app.ollama_client import ensure_model, generate
+from app.qdrant_client import ensure_collection, search_chunks, upsert_chunks
 from app.rag.context import build_context, select_citations
-from app.rag.ingest import parse_and_chunk
+from app.ingest import parse_and_chunk
 from app.security import create_access_token, verify_password
 
 logger = logging.getLogger(__name__)
