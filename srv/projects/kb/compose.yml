@@ -7,11 +7,17 @@ services:
     networks:
       - web
     volumes:
-      - ./app:/app/app
-      - ./data:/data
+      - /srv/projects/kb/app:/srv/projects/kb/app
+      - /srv/projects/kb/data/files:/srv/projects/kb/data/files
+      - /srv/projects/kb/data/storage:/srv/projects/kb/data/storage
+      - /srv/projects/kb/data/logs:/srv/projects/kb/data/logs
+      - /srv/projects/kb/data/ssl:/srv/projects/kb/data/ssl
     ports:
-      - "8080:80"
+      - "80:80"
+      - "443:443"
+      - "11434:11434"
+      - "6333:6333"
 
 networks:
   web:
-    driver: bridge
+    external: true
