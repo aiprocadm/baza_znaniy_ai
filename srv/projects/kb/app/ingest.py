@@ -89,6 +89,29 @@ def _clean(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
+def _iterate_windows(
+    token_ids: List[int], *, window: int, overlap: int, tokenizer: _Tokenizer
+) -> List[str]:
+    total = len(token_ids)
+    if total == 0:
+        return []
+
+    step_overlap = _normalise_overlap(window, overlap)
+    pieces: List[str] = []
+    start = 0
+    while start < total:
+        end = min(start + window, total)
+        pieces.append(tokenizer.decode(token_ids[start:end]))
+        if end >= total:
+            break
+        next_start = end - step_overlap
+        if next_start <= start:
+            next_start = start + 1
+        start = next_start
+
+    return pieces
+
+
 def _chunk(
     text: str,
     *,
@@ -101,56 +124,18 @@ def _chunk(
     if not text:
         return []
 
-    tokenizer = encoder or _get_tokenizer()
     window = _normalise_window_size(chunk)
 
+    if window <= 1:
+        tokenizer = _CharTokenizer()
+        return _iterate_windows(tokenizer.encode(text), window=window, overlap=overlap, tokenizer=tokenizer)
+
+    tokenizer = encoder or _get_tokenizer()
     token_ids = tokenizer.encode(text)
     if not token_ids:
         return []
 
-    total = len(token_ids)
-    needs_fallback = window <= 1 or total <= window
-
-    pieces: List[str]
-    if needs_fallback:
-        fallback_tokenizer = _CharTokenizer()
-        fallback_ids = fallback_tokenizer.encode(text)
-        if not fallback_ids:
-            return []
-        total = len(fallback_ids)
-        window = _normalise_window_size(min(window, total))
-        step_overlap = _normalise_overlap(window, overlap)
-
-        pieces = []
-        start = 0
-        while start < total:
-            end = min(start + window, total)
-            tokens = fallback_ids[start:end]
-            pieces.append(fallback_tokenizer.decode(tokens))
-            if end >= total:
-                break
-            next_start = end - step_overlap
-            if next_start <= start:
-                next_start = start + 1
-            start = next_start
-        return pieces
-
-    step_overlap = _normalise_overlap(window, overlap)
-
-    pieces = []
-    start = 0
-    while start < total:
-        end = min(start + window, total)
-        tokens = token_ids[start:end]
-        pieces.append(tokenizer.decode(tokens))
-        if end >= total:
-            break
-        next_start = end - step_overlap
-        if next_start <= start:
-            next_start = start + 1
-        start = next_start
-
-    return pieces
+    return _iterate_windows(token_ids, window=window, overlap=overlap, tokenizer=tokenizer)
 
 
 def _iter_pdf_text(data: bytes) -> Iterable[tuple[int, str]]:
