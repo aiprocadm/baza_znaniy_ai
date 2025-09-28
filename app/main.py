@@ -24,11 +24,21 @@ from app.chat.store import ChatStore, ConversationAccessError
 from app.chat.summarizer import ConversationSummarizer
 
 from app.memory.store import MemoryStore
+        codex/create-qdrant-and-ingest-modules
+from app.ollama_client import ensure_model, generate
+from app.qdrant_client import ensure_collection, search_chunks, upsert_chunks
+from app.rag.context import build_context, select_citations
+from app.ingest import parse_and_chunk
+from app.security import create_access_token, verify_password
+
+logger = logging.getLogger(__name__)
+
         main
 from app.models.ollama_client import ensure_model, generate
 from app.models.qdrant_client import ensure_collection, search_chunks, upsert_chunks
 from app.rag.context import build_context, select_citations
 from app.rag.ingest import parse_and_chunk
+        main
 
 app = FastAPI(title="kb")
 
