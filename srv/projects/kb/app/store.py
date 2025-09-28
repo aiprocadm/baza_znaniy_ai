@@ -1,17 +1,14 @@
-"""Chat conversation storage and summarisation utilities."""
+"""Chat conversation storage utilities."""
 
 from __future__ import annotations
 
-        codex/add-configuration-fields-and-environmental-variables
-import hashlib
-import hmac
 import os
 import sqlite3
 import time
 import uuid
-from typing import Callable, List, Optional, Sequence, Tuple
+from typing import List, Optional, Tuple
 
-__all__ = ["ChatStore", "ConversationAccessError", "ConversationSummarizer"]
+__all__ = ["ChatStore", "ConversationAccessError"]
 
 
 class ConversationAccessError(RuntimeError):
@@ -21,9 +18,8 @@ class ConversationAccessError(RuntimeError):
 class ChatStore:
     """Persist chat conversations and summaries in SQLite."""
 
-    def __init__(self, db_path: str, *, secret: str | None = None) -> None:
+    def __init__(self, db_path: str) -> None:
         self.db_path = db_path
-        self._secret = secret.encode("utf-8") if secret else None
         os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
         self._init_schema()
 
@@ -61,17 +57,10 @@ class ChatStore:
                 "CREATE INDEX IF NOT EXISTS ix_messages_conversation ON messages(conversation_id, created_at)"
             )
 
-    def _generate_conversation_id(self, user_id: str) -> str:
-        seed = f"{user_id}:{time.time_ns()}:{uuid.uuid4().hex}".encode("utf-8")
-        if self._secret:
-            digest = hmac.new(self._secret, seed, hashlib.sha256).hexdigest()
-            return digest
-        return uuid.uuid4().hex
-
     def ensure_conversation(self, user_id: str, conversation_id: Optional[str]) -> str:
         """Return *conversation_id* for the given user, creating a new one when needed."""
 
-        conv_id = conversation_id or self._generate_conversation_id(user_id)
+        conv_id = conversation_id or uuid.uuid4().hex
         timestamp = int(time.time())
         with self._connect() as connection:
             row = connection.execute(
@@ -155,59 +144,3 @@ class ChatStore:
                 """,
                 (summary, conversation_id),
             )
-
-
-class ConversationSummarizer:
-    """Summarise chat conversations using a language model."""
-
-    def __init__(
-        self,
-        store: ChatStore,
-        llm_generate: Callable[[str], str],
-        max_history: int = 50,
-    ) -> None:
-        self.store = store
-        self._llm_generate = llm_generate
-        self.max_history = max_history
-
-    def _format_history(self, history: Sequence[Tuple[str, str]]) -> str:
-        if not history:
-            return ""
-        lines = [f"{role}: {content}" for role, content in history]
-        return "\n".join(lines)
-
-    def summarize(self, conversation_id: str) -> str | None:
-        """Generate and persist a short summary for *conversation_id*."""
-
-        history = self.store.get_recent_messages(conversation_id, limit=self.max_history)
-        if not history:
-            return None
-        current_summary = self.store.get_summary(conversation_id) or ""
-
-        prompt_parts = [
-            "Суммаризируй приведённый ниже диалог на русском языке.",
-            "Выдели ключевые решения и контекст для следующих сообщений.",
-        ]
-        if current_summary:
-            prompt_parts.append(f"Текущее саммари: {current_summary}")
-        prompt_parts.append("Диалог:")
-        prompt_parts.append(self._format_history(history))
-        prompt_parts.append("Новая краткая выжимка:")
-        prompt = "\n\n".join(part for part in prompt_parts if part)
-
-        try:
-            summary = self._llm_generate(prompt).strip()
-        except Exception:  # pragma: no cover - defensive logging
-            return None
-
-        if not summary:
-            return None
-
-        self.store.save_summary(conversation_id, summary)
-        return summary
-
-from .store import ChatStore, ConversationAccessError
-from .summarizer import ConversationSummarizer
-
-__all__ = ["ChatStore", "ConversationAccessError", "ConversationSummarizer"]
-      main

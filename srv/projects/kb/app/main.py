@@ -13,7 +13,8 @@ from fastapi import FastAPI, File, Form, HTTPException, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from .chat import ChatStore, ConversationAccessError, ConversationSummarizer
+from .store import ChatStore, ConversationAccessError
+from .summarizer import ConversationSummarizer
 from .config import get_settings
 from .ingest import parse_and_chunk
 from .memory import MemoryStore
