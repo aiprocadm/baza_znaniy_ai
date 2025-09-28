@@ -12,10 +12,15 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
+        codex/add-test-for-api-docs-upload
 from tests.demo_assets import ensure_demo_assets
+
+from tests.service_stubs import install_service_stubs
+        main
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SERVICE_ROOT = PROJECT_ROOT / "srv" / "projects" / "kb" / "app"
+INDEX_HTML = PROJECT_ROOT / "srv" / "projects" / "kb" / "data" / "www" / "index.html"
 
 
 def _load_service_app(tmp_path: Path) -> Any:
@@ -24,6 +29,8 @@ def _load_service_app(tmp_path: Path) -> Any:
     for module_name in list(sys.modules):
         if module_name == package_name or module_name.startswith(f"{package_name}."):
             sys.modules.pop(module_name, None)
+
+    install_service_stubs()
 
     package = types.ModuleType(package_name)
     package.__path__ = [str(SERVICE_ROOT)]  # type: ignore[attr-defined]
@@ -140,6 +147,28 @@ def service_app(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     return app_module
 
 
+def test_health_get_returns_status_and_timestamp(service_app: Any):
+    with TestClient(service_app.app) as client:
+        response = client.get("/health")
+        data = response.json()
+
+        assert response.status_code == 200
+        assert data["status"] == "ok"
+        assert isinstance(data["ts"], int)
+        assert data["ts"] > 0
+
+
+def test_health_head_returns_status_and_timestamp(service_app: Any):
+    with TestClient(service_app.app) as client:
+        response = client._request("HEAD", "/health")
+        data = response.json()
+
+        assert response.status_code == 200
+        assert data["status"] == "ok"
+        assert isinstance(data["ts"], int)
+        assert data["ts"] > 0
+
+
 def test_upload_rejects_invalid_extension(service_app: Any):
     with TestClient(service_app.app) as client:
         response = client.post(
@@ -167,6 +196,7 @@ def test_chat_returns_citations(service_app: Any):
         assert data["citations_insufficient"] is True
 
 
+        codex/add-test-for-api-docs-upload
 def test_upload_returns_expected_response(
     service_app: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
@@ -220,3 +250,16 @@ def test_upload_returns_expected_response(
             {"file": sample_path.name, "page": 2, "content": "chunk-2"},
         ]
     ]
+
+def test_root_serves_index_html(service_app: Any):
+    expected = INDEX_HTML.read_text(encoding="utf-8")
+
+    with TestClient(service_app.app) as client:
+        response = client.get("/")
+
+    assert response.status_code == 200
+    assert response.text == expected
+    assert "/api/docs/upload" in response.text
+    assert "/api/chat" in response.text
+    assert "/health" in response.text
+        main

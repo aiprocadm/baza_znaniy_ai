@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
-from typing import Any, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING, Iterable
 
 from . import HTTPException, UploadFile, _build_call_arguments, _serialise
 from .responses import HTMLResponse, JSONResponse, Response
@@ -37,9 +37,16 @@ class TestClient:
     def __enter__(self) -> "TestClient":
         return self
 
+        codex/add-test-for-api-docs-upload
     def __exit__(self, exc_type, exc, tb) -> None:
         for handler in self.app._event_handlers.get("shutdown", []):  # type: ignore[attr-defined]
             handler()
+
+    def __exit__(self, exc_type, exc, tb) -> bool:
+        for handler in reversed(self.app._event_handlers.get("shutdown", [])):  # type: ignore[attr-defined]
+            handler()
+        return False
+        main
 
     # ------------------------------------------------------------------
     # Public request helpers
@@ -47,7 +54,43 @@ class TestClient:
     def get(self, path: str, **options: Any) -> _SimpleResponse:
         return self._request("GET", path, **options)
 
-    def post(self, path: str, json: Any | None = None, **options: Any) -> _SimpleResponse:
+    def post(
+        self,
+        path: str,
+        json: Any | None = None,
+        data: dict[str, Any] | None = None,
+        files: Any | None = None,
+        **options: Any,
+    ) -> _SimpleResponse:
+        if data is not None or files is not None:
+            payload: dict[str, Any] = dict(data or {})
+            if files:
+                upload_list: list[UploadFile] = []
+
+                def _iter_files(items: Any) -> Iterable[tuple[str, Any]]:
+                    if isinstance(items, dict):
+                        return items.items()
+                    return list(items)
+
+                for key, value in _iter_files(files):
+                    if isinstance(value, (list, tuple)) and value and isinstance(value[0], (list, tuple)):
+                        entries = value  # type: ignore[assignment]
+                    else:
+                        entries = [value]
+
+                    for entry in entries:  # type: ignore[assignment]
+                        if isinstance(entry, (list, tuple)):
+                            filename = entry[0]
+                            content = entry[1] if len(entry) > 1 else b""
+                        else:
+                            filename = str(entry)
+                            content = b""
+                        upload_list.append(UploadFile(filename=filename, content=content))
+
+                if upload_list:
+                    payload["files"] = upload_list
+            return self._request("POST", path, body=payload, **options)
+
         return self._request("POST", path, body=json, **options)
 
     def delete(self, path: str, **options: Any) -> _SimpleResponse:

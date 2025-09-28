@@ -6,6 +6,7 @@ import inspect
 from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Annotated, Any, Callable, Dict, List, Optional, get_args, get_origin, get_type_hints
+from types import SimpleNamespace
 
 from pydantic import BaseModel
 
@@ -245,6 +246,10 @@ def _build_call_arguments(
         dependency_callable = next((meta for meta in metadata if callable(meta)), None)
         if dependency_callable is not None:
             kwargs[name] = _resolve_dependency(dependency_callable, app)
+            continue
+
+        if body is not None and isinstance(body, dict) and name in body:
+            kwargs[name] = body[name]
             continue
 
         if not body_assigned and body is not None:

@@ -4,7 +4,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+        codex/add-test-for-api-docs-upload
 from typing import Any, Callable, Dict, Optional, Tuple, Type, TypeVar
+
+from typing import Any, Callable, Dict, Optional, Tuple, Type, TypeVar, get_type_hints
+        main
 
 
 @dataclass
@@ -51,14 +55,35 @@ class BaseModel:
     """Minimal model implementation supporting validation and dumping."""
 
     def __init__(self, **data: Any) -> None:
+        codex/add-test-for-api-docs-upload
         annotations = getattr(self, "__annotations__", {})
         for name, annotation in annotations.items():
+
+        raw_annotations = getattr(self, "__annotations__", {})
+        resolved_annotations = get_type_hints(self.__class__, include_extras=True)
+
+        for name, annotation in raw_annotations.items():
+            resolved = resolved_annotations.get(name, annotation)
+        main
             if name in data:
                 value = data[name]
             else:
                 value = self._default_for(name)
+       codex/add-test-for-api-docs-upload
             if annotation is Path and not isinstance(value, Path):
                 value = Path(value)
+
+
+            target = resolved
+
+            if target is Path and isinstance(value, str):
+                value = Path(value)
+            elif target is bool and isinstance(value, str):
+                value = value.lower() in {"1", "true", "yes", "on"}
+            elif target is int and isinstance(value, str):
+                value = int(value)
+
+        main
             setattr(self, name, value)
 
     @classmethod
@@ -95,4 +120,11 @@ __all__ = [
     "AliasChoices",
     "BaseModel",
     "Field",
+    "ValidationError",
 ]
+
+
+class ValidationError(Exception):
+    """Compatibility exception used by third-party clients."""
+
+    pass
