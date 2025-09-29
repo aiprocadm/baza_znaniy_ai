@@ -162,13 +162,6 @@ def _chunk(
         if not text:
             return []
 
-        step_overlap = _normalise_overlap(window, overlap)
-        step = window - step_overlap
-        if step <= 0:
-            step = 1
-
-        pieces: List[str] = []
-
         return pieces
 
     tokenizer = encoder or _get_tokenizer()
