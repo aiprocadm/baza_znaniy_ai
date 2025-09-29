@@ -127,6 +127,7 @@ def _chunk(
     window = _normalise_window_size(chunk)
 
     if window <= 1:
+        codex/refactor-ingest.py-for-tokenization-logic
         char_tokenizer = _CharTokenizer()
         char_ids = char_tokenizer.encode(text)
         if not char_ids:
@@ -136,6 +137,17 @@ def _chunk(
             window=window,
             overlap=overlap,
             tokenizer=char_tokenizer,
+
+        tokenizer = _CharTokenizer()
+        token_ids = tokenizer.encode(text)
+        if not token_ids:
+            return []
+        return _iterate_windows(
+            token_ids,
+            window=window,
+            overlap=overlap,
+            tokenizer=tokenizer,
+        main
         )
 
     tokenizer = encoder or _get_tokenizer()
@@ -144,6 +156,7 @@ def _chunk(
         return []
 
     if len(token_ids) <= window:
+        codex/refactor-ingest.py-for-tokenization-logic
         char_tokenizer = _CharTokenizer()
         char_ids = char_tokenizer.encode(text)
         if not char_ids:
@@ -154,6 +167,9 @@ def _chunk(
             overlap=overlap,
             tokenizer=char_tokenizer,
         )
+
+        return [text]
+        main
 
     return _iterate_windows(
         token_ids,
