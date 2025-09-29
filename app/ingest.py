@@ -125,71 +125,33 @@ def _chunk(
         return []
 
     window = _normalise_window_size(chunk)
-        codex/guard-_chunk-with-early-return-in-ingest.py
-
-    if window <= 1:
-        fallback = _CharTokenizer()
-        fallback_ids = fallback.encode(text)
-        if not fallback_ids:
-            return []
-        return [fallback.decode([token]) for token in fallback_ids]
-
-    step_overlap = _normalise_overlap(window, overlap)
-
-        main
 
     if window <= 1:
         tokenizer = _CharTokenizer()
-        return _iterate_windows(tokenizer.encode(text), window=window, overlap=overlap, tokenizer=tokenizer)
+        token_ids = tokenizer.encode(text)
+        if not token_ids:
+            return []
+        return _iterate_windows(
+            token_ids,
+            window=window,
+            overlap=overlap,
+            tokenizer=tokenizer,
+        )
 
     tokenizer = encoder or _get_tokenizer()
     token_ids = tokenizer.encode(text)
     if not token_ids:
         return []
 
-        codex/guard-_chunk-with-early-return-in-ingest.py
-        codex/guard-_chunk-with-early-return-in-ingest.py
-    total = len(token_ids)
-    if total <= window:
-
-        codex/update-ingest.py-for-fallback-conditions
-    total = len(token_ids)
-    if total <= window:
+    if len(token_ids) <= window:
         return [text]
 
-    if window <= 1:
-        main
-        fallback = _CharTokenizer()
-        token_ids = fallback.encode(text)
-        if not token_ids:
-            return []
-        tokenizer = fallback
-        total = len(token_ids)
-        window = _normalise_window_size(min(window, total))
-        codex/guard-_chunk-with-early-return-in-ingest.py
-        step_overlap = _normalise_overlap(window, overlap)
-
-
-    step_overlap = _normalise_overlap(window, overlap)
-        main
-
-    pieces = []
-    start = 0
-    while start < total:
-        end = min(start + window, total)
-        tokens = token_ids[start:end]
-        pieces.append(tokenizer.decode(tokens))
-        if end >= total:
-            break
-        next_start = end - step_overlap
-        if next_start <= start:
-            next_start = start + 1
-        start = next_start
-
-    return pieces
-
-    return _iterate_windows(token_ids, window=window, overlap=overlap, tokenizer=tokenizer)
-        main
+    return _iterate_windows(
+        token_ids,
+        window=window,
+        overlap=overlap,
+        tokenizer=tokenizer,
+    )
 
 
 def _iter_pdf_text(data: bytes) -> Iterable[tuple[int, str]]:
