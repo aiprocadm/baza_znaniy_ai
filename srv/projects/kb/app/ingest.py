@@ -145,6 +145,7 @@ def _chunk(
         return []
 
         codex/guard-_chunk-with-early-return-in-ingest.py
+        codex/guard-_chunk-with-early-return-in-ingest.py
     total = len(token_ids)
     needs_fallback = total <= window
 
@@ -175,6 +176,25 @@ def _chunk(
     step_overlap = _normalise_overlap(window, overlap)
 
     pieces = []
+
+        codex/update-ingest.py-for-fallback-conditions
+    total = len(token_ids)
+    if total <= window:
+        return [text]
+
+    if window <= 1:
+        fallback_tokenizer = _CharTokenizer()
+        token_ids = fallback_tokenizer.encode(text)
+        if not token_ids:
+            return []
+        tokenizer = fallback_tokenizer
+        total = len(token_ids)
+        window = _normalise_window_size(min(window, total))
+
+    step_overlap = _normalise_overlap(window, overlap)
+
+    pieces: List[str] = []
+        main
     start = 0
     while start < total:
         end = min(start + window, total)
