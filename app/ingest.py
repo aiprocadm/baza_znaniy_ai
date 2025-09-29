@@ -112,6 +112,35 @@ def _iterate_windows(
     return pieces
 
 
+def _handle_small_token_window(
+    text: str,
+    token_ids: List[int],
+    *,
+    window: int,
+    overlap: int,
+    tokenizer: _Tokenizer,
+) -> Optional[List[str]]:
+    if len(token_ids) > window:
+        return None
+
+    decoded_text = tokenizer.decode(token_ids)
+    if len(decoded_text) <= window and len(text) <= window:
+        return [text]
+
+    fallback_text = decoded_text or text
+    char_tokenizer = _CharTokenizer()
+    char_token_ids = char_tokenizer.encode(fallback_text)
+    if not char_token_ids:
+        return []
+
+    return _iterate_windows(
+        char_token_ids,
+        window=window,
+        overlap=overlap,
+        tokenizer=char_tokenizer,
+    )
+
+
 def _chunk(
     text: str,
     *,
@@ -143,8 +172,15 @@ def _chunk(
     if not token_ids:
         return []
 
-    if len(token_ids) <= window:
-        return [text]
+    small_window_chunks = _handle_small_token_window(
+        text,
+        token_ids,
+        window=window,
+        overlap=overlap,
+        tokenizer=tokenizer,
+    )
+    if small_window_chunks is not None:
+        return small_window_chunks
 
     return _iterate_windows(
         token_ids,
