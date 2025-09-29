@@ -71,15 +71,12 @@ def _expected_windows(text: str, chunk: int, overlap: int) -> List[List[int]]:
     return windows
 
 
-@pytest.mark.parametrize(
-    ("text", "chunk", "overlap", "expected"),
-    [
-        ("abcd", 1, 1, list("abcd")),
-        ("hello", 0, 2, list("hello")),
-    ],
-)
-def test_chunk_small_sizes(text: str, chunk: int, overlap: int, expected: List[str]) -> None:
-    assert _chunk(text, chunk=chunk, overlap=overlap) == expected
+def test_chunk_returns_single_char_windows_when_chunk_is_one() -> None:
+    assert _chunk("abcd", chunk=1, overlap=1) == ["a", "b", "c", "d"]
+
+
+def test_chunk_returns_single_char_windows_when_chunk_is_zero() -> None:
+    assert _chunk("hello", chunk=0, overlap=2) == list("hello")
 
 
 def test_chunk_progress_with_high_overlap() -> None:
