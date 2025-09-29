@@ -82,6 +82,11 @@ def test_chunk_small_sizes(text: str, chunk: int, overlap: int, expected: List[s
     assert _chunk(text, chunk=chunk, overlap=overlap) == expected
 
 
+def test_chunk_single_character_windows_return_characters() -> None:
+    assert _chunk("abcd", chunk=1, overlap=1) == list("abcd")
+    assert _chunk("hello", chunk=0, overlap=2) == list("hello")
+
+
 def test_chunk_progress_with_high_overlap() -> None:
     text = "abcdef"
     chunks = _chunk(text, chunk=2, overlap=5)
