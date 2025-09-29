@@ -103,6 +103,14 @@ def _chunk(
 
     tokenizer = encoder or _get_tokenizer()
     window = _normalise_window_size(chunk)
+
+    if window <= 1:
+        fallback = _CharTokenizer()
+        fallback_ids = fallback.encode(text)
+        if not fallback_ids:
+            return []
+        return [fallback.decode([token]) for token in fallback_ids]
+
     step_overlap = _normalise_overlap(window, overlap)
 
     token_ids = tokenizer.encode(text)
@@ -110,7 +118,7 @@ def _chunk(
         return []
 
     total = len(token_ids)
-    if window <= 1 or total <= window:
+    if total <= window:
         fallback = _CharTokenizer()
         token_ids = fallback.encode(text)
         if not token_ids:

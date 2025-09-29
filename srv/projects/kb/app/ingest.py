@@ -104,12 +104,19 @@ def _chunk(
     tokenizer = encoder or _get_tokenizer()
     window = _normalise_window_size(chunk)
 
+    if window <= 1:
+        fallback = _CharTokenizer()
+        fallback_ids = fallback.encode(text)
+        if not fallback_ids:
+            return []
+        return [fallback.decode([token]) for token in fallback_ids]
+
     token_ids = tokenizer.encode(text)
     if not token_ids:
         return []
 
     total = len(token_ids)
-    needs_fallback = window <= 1 or total <= window
+    needs_fallback = total <= window
 
     pieces: List[str]
     if needs_fallback:
