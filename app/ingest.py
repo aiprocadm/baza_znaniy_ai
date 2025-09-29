@@ -159,16 +159,17 @@ def _chunk(
     window = _normalise_window_size(chunk)
 
     if window <= 1:
-        tokenizer = _CharTokenizer()
-        token_ids = tokenizer.encode(text)
-        if not token_ids:
+        if not text:
             return []
-        return _iterate_windows(
-            token_ids,
-            window=window,
-            overlap=overlap,
-            tokenizer=tokenizer,
-        )
+        step_overlap = _normalise_overlap(window, overlap)
+        step = max(window - step_overlap, 1)
+        pieces: List[str] = []
+        index = 0
+        total = len(text)
+        while index < total:
+            pieces.append(text[index])
+            index += step
+        return pieces
 
     tokenizer = encoder or _get_tokenizer()
     token_ids = tokenizer.encode(text)
