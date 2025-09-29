@@ -124,8 +124,11 @@ def _handle_small_token_window(
         return None
 
     decoded_text = tokenizer.decode(token_ids)
-    if len(decoded_text) <= window and len(text) <= window:
-        return [text]
+    if decoded_text and len(decoded_text) <= window:
+        return [decoded_text]
+
+    if not decoded_text and not text:
+        return []
 
     fallback_text = decoded_text or text
     char_tokenizer = _CharTokenizer()
