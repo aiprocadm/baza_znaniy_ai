@@ -50,8 +50,10 @@ def _make_text_with_tokens(count: int, token_id: int = 100) -> tuple[str, List[i
     return text, token_ids
 
 
-def _expected_windows(text: str, chunk: int, overlap: int) -> List[List[int]]:
-    tokens = TOKENIZER.encode(text)
+def _expected_windows(
+    text: str, chunk: int, overlap: int, *, tokenizer=TOKENIZER
+) -> List[List[int]]:
+    tokens = tokenizer.encode(text)
     if not tokens:
         return []
 
@@ -100,6 +102,36 @@ def test_chunk_respects_token_window_size() -> None:
     assert encoded_chunks[1] == original_tokens[760:1660]
     assert encoded_chunks[2] == original_tokens[1520:]
     assert all(len(tokens) <= 900 for tokens in encoded_chunks)
+
+
+def test_chunk_fallback_respects_token_window_slices() -> None:
+    class ExpandingTokenizer:
+        def encode(self, text: str) -> List[int]:
+            if text == "<expand>":
+                return [1]
+            return [2] * len(text)
+
+        def decode(self, tokens: List[int]) -> str:
+            if tokens == [1]:
+                return "x" * 1800
+            return "x" * len(tokens)
+
+    tokenizer = ExpandingTokenizer()
+    chunk = 900
+    overlap = 140
+    text = "<expand>"
+
+    chunks = _chunk(text, chunk=chunk, overlap=overlap, encoder=tokenizer)
+
+    assert len(chunks) == 3
+
+    encoded_chunks = [tokenizer.encode(chunk) for chunk in chunks]
+    expanded_text = tokenizer.decode(tokenizer.encode(text))
+    expected = _expected_windows(expanded_text, chunk, overlap, tokenizer=tokenizer)
+
+    assert encoded_chunks == expected
+    for current, nxt in zip(encoded_chunks, encoded_chunks[1:]):
+        assert current[-overlap:] == nxt[:overlap]
 
 
 def test_chunk_overlap_consistency() -> None:
