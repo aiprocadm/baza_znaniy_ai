@@ -169,7 +169,6 @@ def _chunk(
 
         pieces: List[str] = []
 
-
         return pieces
 
     tokenizer = encoder or _get_tokenizer()
