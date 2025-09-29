@@ -135,7 +135,39 @@ def _chunk(
     if not token_ids:
         return []
 
+        codex/update-ingest.py-for-fallback-conditions
+    total = len(token_ids)
+    if total <= window:
+        return [text]
+
+    if window <= 1:
+        fallback = _CharTokenizer()
+        token_ids = fallback.encode(text)
+        if not token_ids:
+            return []
+        tokenizer = fallback
+        total = len(token_ids)
+        window = _normalise_window_size(min(window, total))
+
+    step_overlap = _normalise_overlap(window, overlap)
+
+    pieces = []
+    start = 0
+    while start < total:
+        end = min(start + window, total)
+        tokens = token_ids[start:end]
+        pieces.append(tokenizer.decode(tokens))
+        if end >= total:
+            break
+        next_start = end - step_overlap
+        if next_start <= start:
+            next_start = start + 1
+        start = next_start
+
+    return pieces
+
     return _iterate_windows(token_ids, window=window, overlap=overlap, tokenizer=tokenizer)
+        main
 
 
 def _iter_pdf_text(data: bytes) -> Iterable[tuple[int, str]]:
