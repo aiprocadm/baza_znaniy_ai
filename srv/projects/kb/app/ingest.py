@@ -144,7 +144,27 @@ def _chunk(
         return []
 
     if len(token_ids) <= window:
-        return [text]
+        decoded_text = tokenizer.decode(token_ids)
+        # Preserve the existing fast-path for truly small inputs where both the
+        # token-based and raw character lengths fit within the requested window.
+        if len(decoded_text) <= window and len(text) <= window:
+            return [text]
+
+        # Fall back to character-based chunking when the requested window implies
+        # further subdivision.  This covers scenarios where the tokenizer maps a
+        # large piece of text to a handful of tokens (or the window is extremely
+        # small), ensuring we still respect the user's desired window size.
+        fallback_text = decoded_text or text
+        char_tokenizer = _CharTokenizer()
+        char_token_ids = char_tokenizer.encode(fallback_text)
+        if not char_token_ids:
+            return []
+        return _iterate_windows(
+            char_token_ids,
+            window=window,
+            overlap=overlap,
+            tokenizer=char_tokenizer,
+        )
 
     return _iterate_windows(
         token_ids,
