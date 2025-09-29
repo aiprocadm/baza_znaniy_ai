@@ -109,35 +109,21 @@ def _chunk(
         return []
 
     total = len(token_ids)
-    needs_fallback = window <= 1 or total <= window
+    if total <= window:
+        return [text]
 
-    pieces: List[str]
-    if needs_fallback:
+    if window <= 1:
         fallback_tokenizer = _CharTokenizer()
-        fallback_ids = fallback_tokenizer.encode(text)
-        if not fallback_ids:
+        token_ids = fallback_tokenizer.encode(text)
+        if not token_ids:
             return []
-        total = len(fallback_ids)
+        tokenizer = fallback_tokenizer
+        total = len(token_ids)
         window = _normalise_window_size(min(window, total))
-        step_overlap = _normalise_overlap(window, overlap)
-
-        pieces = []
-        start = 0
-        while start < total:
-            end = min(start + window, total)
-            tokens = fallback_ids[start:end]
-            pieces.append(fallback_tokenizer.decode(tokens))
-            if end >= total:
-                break
-            next_start = end - step_overlap
-            if next_start <= start:
-                next_start = start + 1
-            start = next_start
-        return pieces
 
     step_overlap = _normalise_overlap(window, overlap)
 
-    pieces = []
+    pieces: List[str] = []
     start = 0
     while start < total:
         end = min(start + window, total)
