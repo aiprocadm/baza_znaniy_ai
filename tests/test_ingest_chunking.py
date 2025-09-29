@@ -134,6 +134,22 @@ def test_chunk_overlap_adjusts_when_chunk_is_small() -> None:
     assert all(len(tokens) == 1 for tokens in encoded)
 
 
+def test_chunk_handles_single_token_multi_char_text() -> None:
+    class SingleTokenTokenizer:
+        def encode(self, text: str) -> List[int]:
+            return [1] if text else []
+
+        def decode(self, tokens: List[int]) -> str:
+            return "window" if tokens else ""
+
+    tokenizer = SingleTokenTokenizer()
+    text = "window"
+
+    chunks = _chunk(text, chunk=1, overlap=0, encoder=tokenizer)
+
+    assert chunks == list(text)
+
+
 def test_parse_and_chunk_preserves_metadata_and_tokens() -> None:
     text = "page content " * 20
     payload = text.encode("utf-8")
