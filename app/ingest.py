@@ -161,14 +161,7 @@ def _chunk(
     if window <= 1:
         if not text:
             return []
-        step_overlap = _normalise_overlap(window, overlap)
-        step = max(window - step_overlap, 1)
-        pieces: List[str] = []
-        index = 0
-        total = len(text)
-        while index < total:
-            pieces.append(text[index])
-            index += step
+
         return pieces
 
     tokenizer = encoder or _get_tokenizer()

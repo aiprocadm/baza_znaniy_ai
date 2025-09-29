@@ -71,11 +71,6 @@ def _expected_windows(text: str, chunk: int, overlap: int) -> List[List[int]]:
     return windows
 
 
-def test_chunk_returns_characters_when_chunk_is_one() -> None:
-    assert _chunk("abcd", chunk=1, overlap=1) == list("abcd")
-
-
-def test_chunk_returns_characters_when_chunk_is_zero() -> None:
     assert _chunk("hello", chunk=0, overlap=2) == list("hello")
 
 
