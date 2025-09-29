@@ -124,13 +124,19 @@ def _handle_small_token_window(
         return None
 
     decoded_text = tokenizer.decode(token_ids)
-    if decoded_text and len(decoded_text) <= window:
-        return [decoded_text]
+    if decoded_text:
+        try:
+            reencoded = tokenizer.encode(decoded_text)
+        except Exception:  # pragma: no cover - defensive fallback
+            reencoded = []
+        if len(reencoded) <= window:
+            return [decoded_text]
+        fallback_text = decoded_text
+    else:
+        fallback_text = text
 
-    if not decoded_text and not text:
+    if not fallback_text:
         return []
-
-    fallback_text = decoded_text or text
     char_tokenizer = _CharTokenizer()
     char_token_ids = char_tokenizer.encode(fallback_text)
     if not char_token_ids:
