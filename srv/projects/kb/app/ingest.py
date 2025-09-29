@@ -89,6 +89,29 @@ def _clean(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
+def _iterate_windows(
+    token_ids: List[int], *, window: int, overlap: int, tokenizer: _Tokenizer
+) -> List[str]:
+    total = len(token_ids)
+    if total == 0:
+        return []
+
+    step_overlap = _normalise_overlap(window, overlap)
+    pieces: List[str] = []
+    start = 0
+    while start < total:
+        end = min(start + window, total)
+        pieces.append(tokenizer.decode(token_ids[start:end]))
+        if end >= total:
+            break
+        next_start = end - step_overlap
+        if next_start <= start:
+            next_start = start + 1
+        start = next_start
+
+    return pieces
+
+
 def _chunk(
     text: str,
     *,
@@ -101,13 +124,18 @@ def _chunk(
     if not text:
         return []
 
-    tokenizer = encoder or _get_tokenizer()
     window = _normalise_window_size(chunk)
 
+    if window <= 1:
+        tokenizer = _CharTokenizer()
+        return _iterate_windows(tokenizer.encode(text), window=window, overlap=overlap, tokenizer=tokenizer)
+
+    tokenizer = encoder or _get_tokenizer()
     token_ids = tokenizer.encode(text)
     if not token_ids:
         return []
 
+        codex/update-ingest.py-for-fallback-conditions
     total = len(token_ids)
     if total <= window:
         return [text]
@@ -137,6 +165,9 @@ def _chunk(
         start = next_start
 
     return pieces
+
+    return _iterate_windows(token_ids, window=window, overlap=overlap, tokenizer=tokenizer)
+        main
 
 
 def _iter_pdf_text(data: bytes) -> Iterable[tuple[int, str]]:
