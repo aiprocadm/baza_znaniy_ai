@@ -168,11 +168,7 @@ def _chunk(
             step = 1
 
         pieces: List[str] = []
-        index = 0
-        total = len(text)
-        while index < total:
-            pieces.append(text[index])
-            index += step
+
 
         return pieces
 
