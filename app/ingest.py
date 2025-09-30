@@ -171,17 +171,7 @@ def _chunk(
     window = _normalise_window_size(chunk)
 
     if window <= 1:
-        char_tokenizer = _CharTokenizer()
-        token_ids = char_tokenizer.encode(text)
-        if not token_ids:
-            return []
-
-        return _iterate_windows(
-            token_ids,
-            window=1,
-            overlap=overlap,
-            tokenizer=char_tokenizer,
-        )
+        return list(text)
 
     tokenizer = encoder or _get_tokenizer()
     working_token_ids = list(token_ids) if token_ids is not None else tokenizer.encode(text)

@@ -73,7 +73,7 @@ def _expected_windows(
     return windows
 
 
-        codex/update-tokenization-logic-in-ingest.py
+# codex/update-tokenization-logic-in-ingest.py
 def test_chunk_handles_zero_and_single_window_sizes() -> None:
     text = "hello"
 
@@ -82,7 +82,7 @@ def test_chunk_handles_zero_and_single_window_sizes() -> None:
 
 
 
-        main
+# main
 def test_chunk_progress_with_high_overlap() -> None:
     text = "abcdef"
     chunks = _chunk(text, chunk=2, overlap=5)
