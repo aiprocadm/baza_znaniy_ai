@@ -8,10 +8,18 @@ import logging
 import os
 import re
 from functools import lru_cache
-from typing import Iterable, List, NamedTuple, Optional, Protocol
+from typing import BinaryIO, Iterable, Iterator, List, NamedTuple, Optional, Protocol, Union
 
 from docx import Document
 from pypdf import PdfReader
+
+try:  # pragma: no cover - optional dependency used for spreadsheets
+    from openpyxl import load_workbook
+except Exception:  # pragma: no cover - fallback for minimal environments
+    load_workbook = None  # type: ignore[assignment]
+
+import zipfile
+from xml.etree import ElementTree as ET
 
 try:  # pragma: no cover - tokenizer optional in some environments
     import tiktoken
@@ -40,6 +48,19 @@ class _CharTokenizer:
 
 
 _TOKENIZER: Optional[_Tokenizer] = None
+
+
+def _ensure_binary_stream(data: Union[bytes, bytearray, BinaryIO]) -> BinaryIO:
+    if isinstance(data, (bytes, bytearray)):
+        return io.BytesIO(data)
+    if hasattr(data, "read"):
+        stream = data  # type: ignore[assignment]
+        try:  # pragma: no cover - not all streams are seekable
+            stream.seek(0)
+        except Exception:
+            pass
+        return stream
+    raise TypeError("Unsupported binary payload type")
 
 
 def _load_tiktoken(name: str) -> Optional[_Tokenizer]:
@@ -239,8 +260,8 @@ def _chunk(
     )
 
 
-def _iter_pdf_text(data: bytes) -> Iterable[tuple[int, str]]:
-    reader = PdfReader(io.BytesIO(data))
+def _iter_pdf_text(handle: BinaryIO) -> Iterator[tuple[int, str]]:
+    reader = PdfReader(handle)
     for page_number, page in enumerate(reader.pages, start=1):
         try:
             text = page.extract_text() or ""
@@ -251,17 +272,120 @@ def _iter_pdf_text(data: bytes) -> Iterable[tuple[int, str]]:
             yield page_number, cleaned
 
 
-def _iter_docx_text(data: bytes) -> Iterable[tuple[int, str]]:
-    document = Document(io.BytesIO(data))
-    text = _clean("\n".join(paragraph.text for paragraph in document.paragraphs))
-    if text:
-        yield 1, text
+def _iter_docx_text(handle: BinaryIO) -> Iterator[tuple[int, str]]:
+    document = Document(handle)
+    buffer = io.StringIO()
+    page_number = 1
+    for paragraph in document.paragraphs:
+        text = paragraph.text.strip()
+        if not text:
+            continue
+        if buffer.tell():
+            buffer.write("\n")
+        buffer.write(text)
+        if buffer.tell() > 8000:
+            cleaned = _clean(buffer.getvalue())
+            if cleaned:
+                yield page_number, cleaned
+                page_number += 1
+            buffer = io.StringIO()
+    remaining = _clean(buffer.getvalue())
+    if remaining:
+        yield page_number, remaining
 
 
-def _iter_txt_text(data: bytes) -> Iterable[tuple[int, str]]:
-    text = _clean(data.decode("utf-8", errors="ignore"))
-    if text:
-        yield 1, text
+def _iter_txt_text(handle: BinaryIO) -> Iterator[tuple[int, str]]:
+    wrapper = io.TextIOWrapper(handle, encoding="utf-8", errors="ignore")
+    try:
+        buffer = io.StringIO()
+        page_number = 1
+        for line in wrapper:
+            stripped = line.strip()
+            if not stripped:
+                continue
+            if buffer.tell():
+                buffer.write(" ")
+            buffer.write(stripped)
+            if buffer.tell() > 8000:
+                text = _clean(buffer.getvalue())
+                if text:
+                    yield page_number, text
+                    page_number += 1
+                buffer = io.StringIO()
+        remaining = _clean(buffer.getvalue())
+        if remaining:
+            yield page_number, remaining
+    finally:
+        try:  # pragma: no cover - best effort detach
+            wrapper.detach()
+        except Exception:
+            pass
+
+
+def _iter_markdown_text(handle: BinaryIO) -> Iterator[tuple[int, str]]:
+    wrapper = io.TextIOWrapper(handle, encoding="utf-8", errors="ignore")
+    try:
+        buffer = io.StringIO()
+        page_number = 1
+        for line in wrapper:
+            stripped = line.rstrip()
+            if stripped.startswith("#") and buffer.tell():
+                text = _clean(buffer.getvalue())
+                if text:
+                    yield page_number, text
+                    page_number += 1
+                buffer = io.StringIO()
+            if stripped:
+                if buffer.tell():
+                    buffer.write(" ")
+                buffer.write(stripped)
+        final = _clean(buffer.getvalue())
+        if final:
+            yield page_number, final
+    finally:
+        try:
+            wrapper.detach()
+        except Exception:
+            pass
+
+
+def _iter_pptx_text(handle: BinaryIO) -> Iterator[tuple[int, str]]:
+    with zipfile.ZipFile(handle) as archive:
+        slide_names = sorted(
+            name
+            for name in archive.namelist()
+            if name.startswith("ppt/slides/slide") and name.endswith(".xml")
+        )
+        for index, name in enumerate(slide_names, start=1):
+            with archive.open(name) as slide:
+                text_parts: List[str] = []
+                for event, element in ET.iterparse(slide, events=("end",)):
+                    if event == "end" and element.tag.endswith("}t"):
+                        if element.text:
+                            text_parts.append(element.text.strip())
+                        element.clear()
+                cleaned = _clean(" ".join(text_parts))
+                if cleaned:
+                    yield index, cleaned
+
+
+def _iter_xlsx_text(handle: BinaryIO) -> Iterator[tuple[int, str]]:
+    if load_workbook is None:  # pragma: no cover - dependency missing
+        raise RuntimeError("openpyxl is required to parse XLSX files")
+
+    workbook = load_workbook(handle, read_only=True, data_only=True)
+    for sheet_index, sheet in enumerate(workbook.worksheets, start=1):
+        buffer = io.StringIO()
+        for row in sheet.iter_rows(values_only=True):
+            values = [str(cell).strip() for cell in row if cell not in (None, "")]
+            if not values:
+                continue
+            if buffer.tell():
+                buffer.write("\n")
+            buffer.write(" ".join(values))
+        text = _clean(buffer.getvalue())
+        if text:
+            yield sheet_index, text
 
 
 def _hash_chunk(file: str, page: int, text: str) -> str:
@@ -269,23 +393,36 @@ def _hash_chunk(file: str, page: int, text: str) -> str:
     return hashlib.sha256(payload).hexdigest()
 
 
-def parse_and_chunk(filename: str, data: bytes) -> List[dict[str, object]]:
+def iter_document_pages(
+    filename: str, data: Union[bytes, bytearray, BinaryIO]
+) -> Iterator[tuple[int, str]]:
+    name = (filename or "").strip()
+    if not name or "." not in name:
+        return iter(())
+
+    ext = name.rsplit(".", 1)[-1].lower()
+    stream = _ensure_binary_stream(data)
+
+    if ext == "pdf":
+        return _iter_pdf_text(stream)
+    if ext == "docx":
+        return _iter_docx_text(stream)
+    if ext == "txt":
+        return _iter_txt_text(stream)
+    if ext in {"md", "markdown"}:
+        return _iter_markdown_text(stream)
+    if ext == "pptx":
+        return _iter_pptx_text(stream)
+    if ext == "xlsx":
+        return _iter_xlsx_text(stream)
+    return iter(())
+
+
+def parse_and_chunk(filename: str, data: Union[bytes, bytearray, BinaryIO]) -> List[dict[str, object]]:
     """Parse ``data`` according to ``filename`` extension and chunk the text."""
 
     name = (filename or "").strip()
-    if not name or "." not in name:
-        return []
-
-    ext = name.rsplit(".", 1)[-1].lower()
-    if ext == "pdf":
-        pages = list(_iter_pdf_text(data))
-    elif ext == "docx":
-        pages = list(_iter_docx_text(data))
-    elif ext == "txt":
-        pages = list(_iter_txt_text(data))
-    else:
-        return []
-
+    pages = list(iter_document_pages(name, data))
     if not pages:
         return []
 
@@ -308,4 +445,10 @@ def parse_and_chunk(filename: str, data: bytes) -> List[dict[str, object]]:
     return chunks
 
 
-__all__ = ["_chunk", "_clean", "_get_tokenizer", "parse_and_chunk"]
+__all__ = [
+    "_chunk",
+    "_clean",
+    "_get_tokenizer",
+    "iter_document_pages",
+    "parse_and_chunk",
+]
