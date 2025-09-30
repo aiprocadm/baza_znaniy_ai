@@ -171,20 +171,7 @@ def chat(request: Request, inp: ChatIn) -> dict[str, Any]:
             logger.exception("Vector search failed; using fallback index")
     if not hits and fallback_index:
         hits = fallback_index[: settings.retrieve_topk]
-        codex/implement-reranking-functionality-and-tests
-    rerank_limit = settings.rerank_limit
-    if hits:
-        if settings.rerank_enabled and reranker is not None:
-            try:
-                hits = reranker.rerank(inp.message, hits, rerank_limit)
-            except Exception:  # pragma: no cover - defensive fallback
-                logger.exception("Reranking failed; falling back to initial ordering")
-                hits = hits[:rerank_limit]
-        elif len(hits) > rerank_limit:
-            hits = hits[:rerank_limit]
 
-
-    reranker = getattr(request.app.state, "reranker", None)
     hits = apply_rerank(
         inp.message,
         hits,
@@ -192,7 +179,6 @@ def chat(request: Request, inp: ChatIn) -> dict[str, Any]:
         settings.rerank_enabled,
         reranker,
     )
-        main
     context = build_context(hits, token_limit=3000)
 
     prompt_parts = [
@@ -249,6 +235,8 @@ def chat(request: Request, inp: ChatIn) -> dict[str, Any]:
         "conversation_id": conversation_id,
         "citations_insufficient": not has_minimum_citations,
         "latency_ms": (time.perf_counter() - start) * 1000,
+        "max_context_tokens": settings.max_context_tokens,
+        "max_generation_tokens": settings.max_generation_tokens,
     }
 
 

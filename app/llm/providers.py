@@ -44,6 +44,10 @@ class OllamaProvider:
     def max_context_tokens(self) -> int:
         return self.settings.max_context_tokens
 
+    @property
+    def max_generation_tokens(self) -> int:
+        return self.settings.max_generation_tokens
+
     def ensure_model(self) -> None:
         """Ensure the configured model is available locally."""
 
@@ -73,6 +77,8 @@ class OllamaProvider:
         options: dict[str, Any] = {}
         if self.max_context_tokens:
             options["num_ctx"] = self.max_context_tokens
+        if self.max_generation_tokens:
+            options["num_predict"] = self.max_generation_tokens
         if options:
             payload["options"] = options
         if context:

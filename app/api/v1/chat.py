@@ -54,6 +54,7 @@ def chat(
     chat_store: ChatStoreProtocol = app_state.chat_store
     summarizer = app_state.summarizer
     memory_store = getattr(app_state, "memory_store", None)
+    settings = getattr(app_state, "settings", None)
     history_limit = getattr(app_state, "chat_history_limit", 12)
     retrieve_topk = payload.top_k or getattr(app_state, "retrieve_topk", 10)
 
@@ -63,8 +64,17 @@ def chat(
 
     min_citations = getattr(app_state, "min_citations", 3)
     max_citations = getattr(app_state, "max_citations", max(min_citations, 5))
+        codex/update-app.py-and-ingestion-workflow
     rerank_enabled = getattr(app_state, "rerank_enabled", False)
     reranker = getattr(app_state, "reranker", None)
+
+    max_context_tokens = (
+        getattr(settings, "max_context_tokens", None) if settings else None
+    )
+    max_generation_tokens = (
+        getattr(settings, "max_generation_tokens", None) if settings else None
+    )
+        main
 
     start = time.perf_counter()
 
@@ -150,4 +160,6 @@ def chat(
         conversation_id=conversation_id,
         citations_insufficient=not has_minimum,
         latency_ms=latency_ms,
+        max_context_tokens=max_context_tokens,
+        max_generation_tokens=max_generation_tokens,
     )
