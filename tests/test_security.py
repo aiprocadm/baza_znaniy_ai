@@ -27,11 +27,28 @@ def test_hash_and_verify_password_success(security):
     assert security.verify_password("password123", hashed)
 
 
+@pytest.mark.parametrize("value", [123, None, 12.3, ["list"], {"set"}])
+def test_hash_password_rejects_non_string_inputs(security, value):
+    with pytest.raises(TypeError):
+        security.hash_password(value)  # type: ignore[arg-type]
+
+
+def test_hash_password_rejects_empty_string(security):
+    with pytest.raises(ValueError):
+        security.hash_password("")
+
+
 def test_verify_password_rejects_invalid_input(security):
     hashed = security.hash_password("correct horse battery staple")
 
     assert not security.verify_password("wrong password", hashed)
     assert not security.verify_password("irrelevant", "not-a-valid-hash")
+
+
+def test_verify_password_handles_unknown_hash_error(security):
+    malformed_hash = "$2b$12$abcdefghijklmnopqrstuv12345678901234567890123456"
+
+    assert not security.verify_password("any-password", malformed_hash)
 
 
 def test_create_access_token_includes_expiry(security):
@@ -56,4 +73,13 @@ def test_decode_token_rejects_invalid_tokens(security):
     )
     with pytest.raises(security.InvalidTokenError):
         security.decode_token(expired_token)
+
+
+def test_create_access_token_allows_none_payload(security):
+    token = security.create_access_token(None, expires_delta=timedelta(minutes=1))
+
+    payload = security.decode_token(token)
+
+    assert set(payload.keys()) == {"exp"}
+    assert payload["exp"] > datetime.now(timezone.utc).timestamp()
 
