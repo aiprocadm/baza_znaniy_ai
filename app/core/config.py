@@ -8,11 +8,11 @@ from typing import Iterable
 
 from pydantic import AliasChoices, BaseModel, Field
 
-try:  # pragma: no cover - support for environments without computed_field
-    from pydantic import computed_field
-except ImportError:  # pragma: no cover - test stubs
+try:  # pragma: no cover - maintain compatibility with Pydantic v1
+    from pydantic import computed_field, field_validator
+except ImportError:  # pragma: no cover - fallback for test stubs
 
-    def computed_field(*args, **kwargs):  # type: ignore[no-redef]
+    def computed_field(*args, **kwargs):  # type: ignore[misc]
         def decorator(func):
             return property(func)
 
@@ -20,20 +20,17 @@ except ImportError:  # pragma: no cover - test stubs
             return decorator(args[0])
         return decorator
 
-try:  # pragma: no cover - support for environments without field_validator
-    from pydantic import field_validator
-except ImportError:  # pragma: no cover - test stubs
-
-    def field_validator(*args, **kwargs):  # type: ignore[no-redef]
+    def field_validator(*args, **kwargs):  # type: ignore[misc]
         def decorator(func):
             return func
 
         if args and callable(args[0]):
             return decorator(args[0])
         return decorator
-try:
+
+try:  # pragma: no cover - optional dependency during tests
     from pydantic_settings import BaseSettings, SettingsConfigDict
-except ImportError:  # pragma: no cover - test stubs
+except ImportError:  # pragma: no cover - lightweight fallback
     import os
     from dataclasses import dataclass
 
@@ -42,6 +39,7 @@ except ImportError:  # pragma: no cover - test stubs
         env_file: tuple[str, ...] | None = None
         env_file_encoding: str | None = None
         extra: str | None = None
+        populate_by_name: bool | None = None
 
     class BaseSettings(BaseModel):  # type: ignore[misc]
         model_config = SettingsConfigDict()
@@ -49,23 +47,16 @@ except ImportError:  # pragma: no cover - test stubs
         def __init__(self, **data: object) -> None:
             values: dict[str, object] = {}
             for name in getattr(self, "__annotations__", {}):
-                field = getattr(self.__class__, name, None)
-                aliases: list[str] = []
-                metadata = getattr(field, "metadata", None)
-                if metadata:
-                    alias_spec = metadata.get("validation_alias")
-                    if isinstance(alias_spec, AliasChoices):
-                        aliases.extend(alias_spec)
-                    elif isinstance(alias_spec, str):
-                        aliases.append(alias_spec)
-                if not aliases:
-                    aliases.append(name.upper())
+                aliases = [name.upper()]
                 for alias in aliases:
                     env_value = os.getenv(alias)
                     if env_value is not None:
                         values[name] = env_value
                         break
             values.update(data)
+            for key, value in data.items():
+                if isinstance(key, str):
+                    values.setdefault(key.upper(), value)
             super().__init__(**values)
 
 
@@ -76,12 +67,17 @@ class Settings(BaseSettings):
         env_file=(".env",),
         env_file_encoding="utf-8",
         extra="ignore",
+        populate_by_name=True,
     )
 
+    # Core paths ---------------------------------------------------------
     data_dir: Path = Field(
         default=Path("/opt/knowlab/data/files"),
         validation_alias=AliasChoices("DATA_DIR", "FILES_ROOT"),
     )
+    files_subdir: str = Field(default="files", validation_alias=AliasChoices("FILES_SUBDIR"))
+
+    # Chat storage -------------------------------------------------------
     chat_db_backend: str = Field(
         default="sqlite",
         validation_alias=AliasChoices("CHAT_DB_BACKEND"),
@@ -114,6 +110,8 @@ class Settings(BaseSettings):
         default=5,
         validation_alias=AliasChoices("CHAT_MAX_CITATIONS"),
     )
+
+    # Retrieval settings -------------------------------------------------
     retrieve_topk: int = Field(
         default=10,
         validation_alias=AliasChoices("RETRIEVE_TOPK"),
@@ -122,16 +120,12 @@ class Settings(BaseSettings):
         default=False,
         validation_alias=AliasChoices("RERANK_ENABLED"),
     )
-        codex/implement-reranking-functionality-and-tests
     rerank_topk: int | None = Field(
         default=None,
-        validation_alias=AliasChoices("RERANK_TOPK"),
-
-    rerank_topk: int = Field(
-        default=10,
-        validation_alias=AliasChoices("RERANK_TOP_K", "RERANK_TOPK"),
-        main
+        validation_alias=AliasChoices("RERANK_TOPK", "RERANK_TOP_K"),
     )
+
+    # Memory store -------------------------------------------------------
     chat_memory_enabled: bool = Field(
         default=False,
         validation_alias=AliasChoices("CHAT_MEMORY_ENABLED", "MEMORY_ENABLED"),
@@ -148,6 +142,8 @@ class Settings(BaseSettings):
         default=2000,
         validation_alias=AliasChoices("CHAT_MEMORY_MAXTOK", "MEMORY_MAX_TOKENS"),
     )
+
+    # Ingestion ----------------------------------------------------------
     rag_tokenizer_name: str = Field(
         default="cl100k_base",
         validation_alias=AliasChoices("RAG_TOKENIZER_NAME"),
@@ -160,6 +156,8 @@ class Settings(BaseSettings):
         default=140,
         validation_alias=AliasChoices("RAG_OVERLAP"),
     )
+
+    # Vector store -------------------------------------------------------
     vector_backend: str = Field(
         default="qdrant",
         validation_alias=AliasChoices("VECTOR_BACKEND"),
@@ -188,10 +186,8 @@ class Settings(BaseSettings):
         default=384,
         validation_alias=AliasChoices("VECTOR_EMBED_DIMENSION", "EMBED_DIMENSION"),
     )
-    embed_batch_size: int = Field(
-        default=32,
-        validation_alias=AliasChoices("EMBED_BATCH_SIZE"),
-    )
+
+    # LLM provider -------------------------------------------------------
     llm_provider: str = Field(
         default="ollama",
         validation_alias=AliasChoices("LLM_PROVIDER"),
@@ -208,6 +204,8 @@ class Settings(BaseSettings):
         default=4096,
         validation_alias=AliasChoices("MAX_CONTEXT_TOKENS"),
     )
+
+    # Security -----------------------------------------------------------
     secret_key: str = Field(
         default="change-me",
         validation_alias=AliasChoices("SECRET_KEY"),
@@ -221,32 +219,36 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("ACCESS_TOKEN_EXPIRE_MINUTES"),
     )
 
+    # Misc ----------------------------------------------------------------
+    log_level: str = Field(default="INFO", validation_alias=AliasChoices("LOG_LEVEL"))
+    rate_limit: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("RATE_LIMIT"),
+    )
+    rate_burst: int = Field(default=0, validation_alias=AliasChoices("RATE_BURST"))
+    app_host: str | None = Field(default=None, validation_alias=AliasChoices("APP_HOST"))
+
     @field_validator(
         "chat_history_limit",
         "chat_summary_trigger",
         "chat_min_citations",
         "chat_max_citations",
         "retrieve_topk",
-        "rerank_topk",
         "rag_chunk",
         "rag_overlap",
         "vector_embed_dimension",
         "embed_batch_size",
         "chat_memory_ttl_days",
         "chat_memory_max_tokens",
-        "embed_batch_size",
         "access_token_expire_minutes",
+        "rate_burst",
         mode="before",
     )
     @classmethod
     def _ensure_int(cls, value: object) -> int:
         return int(value) if value not in {None, ""} else 0
 
-    @field_validator(
-        "chat_memory_enabled",
-        "rerank_enabled",
-        mode="before",
-    )
+    @field_validator("chat_memory_enabled", "rerank_enabled", mode="before")
     @classmethod
     def _normalise_bool(cls, value: object) -> bool:
         if isinstance(value, str):
@@ -274,6 +276,35 @@ class Settings(BaseSettings):
     def _strip_trailing_slash(cls, value: str) -> str:
         return value.rstrip("/")
 
+    @field_validator("llm_provider", "vector_backend", "chat_db_backend", mode="after")
+    @classmethod
+    def _normalise_lower(cls, value: str) -> str:
+        return (value or "").strip().lower()
+
+    @field_validator("data_dir", "chat_db_path", "memory_db_path", mode="before")
+    @classmethod
+    def _expand_path(cls, value: object) -> object:
+        if isinstance(value, str) and value:
+            return Path(value).expanduser()
+        return value
+
+    @field_validator("data_dir", mode="after")
+    @classmethod
+    def _ensure_dir(cls, value: Path) -> Path:
+        return value.expanduser()
+
+    @field_validator("chat_db_path", "memory_db_path", mode="after")
+    @classmethod
+    def _absolute_path(cls, value: Path | None) -> Path | None:
+        if value is None:
+            return None
+        return value.expanduser().resolve()
+
+    @computed_field
+    @property
+    def files_dir(self) -> Path:
+        return self.data_dir / self.files_subdir
+
     @computed_field
     @property
     def chat_db_path_resolved(self) -> Path:
@@ -299,40 +330,6 @@ class Settings(BaseSettings):
         minimum = max(1, self.chat_min_citations)
         maximum = max(minimum, self.chat_max_citations)
         return minimum, maximum
-
-    @field_validator("chat_db_backend")
-    @classmethod
-    def _normalise_backend(cls, value: str) -> str:
-        return (value or "sqlite").strip().lower()
-
-    @field_validator("vector_backend")
-    @classmethod
-    def _normalise_vector_backend(cls, value: str) -> str:
-        return (value or "qdrant").strip().lower()
-
-    @field_validator("llm_provider")
-    @classmethod
-    def _normalise_provider(cls, value: str) -> str:
-        return (value or "ollama").strip().lower()
-
-    @field_validator("data_dir", "chat_db_path", "memory_db_path", mode="before")
-    @classmethod
-    def _expand_path(cls, value: object) -> object:
-        if isinstance(value, str) and value:
-            return Path(value).expanduser()
-        return value
-
-    @field_validator("chat_db_path", "memory_db_path", mode="after")
-    @classmethod
-    def _absolute_path(cls, value: Path | None) -> Path | None:
-        if value is None:
-            return None
-        return value.expanduser().resolve()
-
-    @field_validator("data_dir", mode="after")
-    @classmethod
-    def _ensure_dir(cls, value: Path) -> Path:
-        return value.expanduser()
 
     def iter_secret_fields(self) -> Iterable[str]:
         """Return names of settings that contain secrets."""
