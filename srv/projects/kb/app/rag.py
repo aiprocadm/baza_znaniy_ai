@@ -1,16 +1,5 @@
-        codex/create-sqlmodel-models-for-files-and-pages
 """Compatibility wrapper exposing context helpers for tests."""
 
-from app.rag.context import build_context, select_citations, detokenize, tokenize
+from app.rag.context import build_context, detokenize, select_citations, tokenize
 
-__all__ = [
-    "build_context",
-    "select_citations",
-    "detokenize",
-    "tokenize",
-]
-
-"""Compatibility wrapper forwarding to :mod:`app.rag.context`."""
-
-from app.rag.context import *  # noqa: F401,F403
-        main
+__all__ = ["build_context", "detokenize", "select_citations", "tokenize"]
