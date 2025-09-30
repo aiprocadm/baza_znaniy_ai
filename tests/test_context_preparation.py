@@ -111,6 +111,20 @@ def test_app_build_context_skips_hits_with_empty_tokens(monkeypatch):
     assert context == "kept"
 
 
+def test_app_build_context_returns_empty_string_for_empty_texts(monkeypatch):
+    monkeypatch.setattr(app_context, "tokenize", lambda text: list(text))
+    monkeypatch.setattr(app_context, "detokenize", lambda tokens: "".join(tokens))
+
+    hits = [
+        {"text": ""},
+        {"text": None},
+    ]
+
+    context = app_context.build_context(hits, token_limit=10)
+
+    assert context == ""
+
+
 def test_app_build_context_breaks_when_separator_exhausts_limit(monkeypatch):
     monkeypatch.setattr(app_context, "tokenize", lambda text: list(text))
     monkeypatch.setattr(app_context, "detokenize", lambda tokens: "".join(tokens))
