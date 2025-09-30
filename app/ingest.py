@@ -125,11 +125,19 @@ def _handle_small_token_window(
     overlap: int,
     tokenizer: _Tokenizer,
 ) -> Optional[_WindowPlan]:
+    decoded_text = tokenizer.decode(token_ids)
+
+    if window <= 1:
+        fallback_text = decoded_text or text
+        char_tokenizer = _CharTokenizer()
+        char_token_ids = (
+            char_tokenizer.encode(fallback_text) if fallback_text else []
+        )
+        return _WindowPlan(char_token_ids, char_tokenizer)
+
     if len(token_ids) > window:
         return None
 
-    decoded_text = tokenizer.decode(token_ids)
-        codex/add-guard-for-token-window-in-_handle_small_token_window
     if decoded_text and len(decoded_text) > window:
         char_tokenizer = _CharTokenizer()
         char_token_ids = char_tokenizer.encode(decoded_text)
@@ -143,7 +151,6 @@ def _handle_small_token_window(
             if char_token_ids:
                 return _WindowPlan(char_token_ids, char_tokenizer)
         return _WindowPlan(token_ids, tokenizer)
-        main
 
     if decoded_text:
         try:
