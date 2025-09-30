@@ -1,4 +1,4 @@
-"""Application factory."""
+"""FastAPI application factory and bootstrap helpers."""
 
 from __future__ import annotations
 
@@ -10,22 +10,22 @@ from app.api.routes import router as api_router
 from app.chat.summarizer import ConversationSummarizer
 from app.core.config import get_settings
 from app.core.services import init_chat_store, init_memory_store
-from app.ingest import parse_and_chunk  # ensure package initialised for scripts
-        codex/implement-reranking-functionality-and-tests
-from app.llm import get_llm_client
-from app.retriever import CrossEncoderReranker, get_vector_store
-
+from app.llm import LLMProvider, get_cached_provider
+from app.retriever import CrossEncoderReranker, get_reranker, get_vector_store
 
 logger = logging.getLogger(__name__)
 
-        codex/create-llm-provider-package-and-implementations
-from app.llm import LLMProvider, get_cached_provider
-from app.retriever import get_vector_store
-        main
 
-from app.llm import get_llm_client
-from app.retriever import CrossEncoderReranker, get_reranker, get_vector_store
-        main
+def _initialise_reranker(settings) -> CrossEncoderReranker | None:
+    """Create a reranker instance when enabled in configuration."""
+
+    if not settings.rerank_enabled:
+        return None
+    try:  # pragma: no cover - optional dependency initialisation
+        return get_reranker()
+    except Exception:  # pragma: no cover - defensive logging
+        logger.exception("Failed to initialise cross-encoder reranker")
+        return None
 
 
 def create_app(provider: LLMProvider | None = None) -> FastAPI:
@@ -35,26 +35,11 @@ def create_app(provider: LLMProvider | None = None) -> FastAPI:
     application = FastAPI(title="kb")
 
     chat_store = init_chat_store(settings)
+    memory_store = init_memory_store(settings)
     llm_provider = provider or get_cached_provider(settings)
     vector_store = get_vector_store(settings)
-        codex/implement-reranking-functionality-and-tests
-    reranker = None
-    if settings.rerank_enabled:
-        try:
-            reranker = CrossEncoderReranker()
-        except Exception:  # pragma: no cover - optional dependency initialisation
-            logger.exception("Failed to initialise cross-encoder reranker")
-
-        codex/create-llm-provider-package-and-implementations
+    reranker = _initialise_reranker(settings)
     summarizer = ConversationSummarizer(chat_store, llm_provider.generate)
-
-        main
-    summarizer = ConversationSummarizer(chat_store, llm_client.generate)
-    reranker: CrossEncoderReranker | None = None
-    if settings.rerank_enabled:
-        reranker = get_reranker()
-        main
-    memory_store = init_memory_store(settings)
 
     application.state.settings = settings
     application.state.chat_store = chat_store
@@ -64,7 +49,6 @@ def create_app(provider: LLMProvider | None = None) -> FastAPI:
     application.state.summarizer = summarizer
     application.state.memory_store = memory_store
     application.state.fallback_index: list[dict[str, object]] = []
-    application.state.reranker = reranker
 
     application.include_router(api_router)
     return application
