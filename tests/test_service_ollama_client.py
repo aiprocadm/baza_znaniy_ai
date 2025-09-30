@@ -127,6 +127,41 @@ def test_ensure_model_reads_tags_only_when_model_exists(
     ]
 
 
+def test_ensure_model_does_not_recreate_client_once_cached(
+    monkeypatch: pytest.MonkeyPatch, ollama_client_module
+):
+    module = ollama_client_module
+    module._ENSURED_MODEL = False
+    settings = _patch_settings(monkeypatch, module, "http://ollama", "ready-model")
+    instantiations = 0
+
+    class DummyClient:
+        def __init__(self, *, timeout):
+            nonlocal instantiations
+            instantiations += 1
+            self.timeout = timeout
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def get(self, url: str):
+            return DummyResponse({"models": [{"name": settings.gen_model}]})
+
+    monkeypatch.setattr(module.httpx, "Client", DummyClient)
+
+    module.ensure_model()
+
+    assert module._ENSURED_MODEL is True
+    assert instantiations == 1
+
+    module.ensure_model()
+
+    assert instantiations == 1
+
+
 def test_ensure_model_pulls_when_missing(monkeypatch: pytest.MonkeyPatch, ollama_client_module):
     module = ollama_client_module
     module._ENSURED_MODEL = False
@@ -205,3 +240,28 @@ def test_generate_returns_text_and_bubbles_errors(
 
     with pytest.raises(ValueError, match="boom"):
         module.generate("boom")
+
+
+def test_generate_returns_default_when_missing_response(
+    monkeypatch: pytest.MonkeyPatch, ollama_client_module
+):
+    module = ollama_client_module
+    module._ENSURED_MODEL = False
+    _patch_settings(monkeypatch, module, "http://ollama.service", "gen-model")
+
+    class DummyClient:
+        def __init__(self, *, timeout):
+            self.timeout = timeout
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def post(self, url: str, json: dict):
+            return DummyResponse({})
+
+    monkeypatch.setattr(module.httpx, "Client", DummyClient)
+
+    assert module.generate("hello") == ""
