@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from typing import Callable, Sequence, Tuple
 
-from .store import ChatStore
+from .store import ChatStoreProtocol
 
 __all__ = ["ConversationSummarizer"]
 
@@ -17,7 +17,7 @@ class ConversationSummarizer:
 
     def __init__(
         self,
-        store: ChatStore,
+        store: ChatStoreProtocol,
         llm_generate: Callable[[str], str],
         max_history: int = 50,
     ) -> None:
