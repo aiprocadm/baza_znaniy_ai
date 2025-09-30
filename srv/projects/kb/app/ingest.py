@@ -138,6 +138,13 @@ def _handle_small_token_window(
         return _WindowPlan(token_ids, tokenizer)
 
     if decoded_text:
+        codex/add-guard-for-token-window-in-_handle_small_token_window
+        if len(decoded_text) > window:
+            char_tokenizer = _CharTokenizer()
+            char_token_ids = char_tokenizer.encode(decoded_text)
+            return _WindowPlan(char_token_ids, char_tokenizer)
+        if window <= 1:
+
         try:
             reencoded = tokenizer.encode(decoded_text)
         except Exception:  # pragma: no cover - defensive fallback
@@ -147,6 +154,7 @@ def _handle_small_token_window(
                 if reencoded == token_ids:
                     return _WindowPlan(token_ids, tokenizer)
                 return _WindowPlan(reencoded, tokenizer)
+        main
             fallback_text = decoded_text
         else:
             fallback_text = decoded_text
