@@ -128,24 +128,28 @@ def _handle_small_token_window(
         return None
 
     decoded_text = tokenizer.decode(token_ids)
-    fallback_text = decoded_text if decoded_text else text
+    if len(token_ids) == 1:
+        fallback_text = decoded_text or text
+        if fallback_text:
+            char_tokenizer = _CharTokenizer()
+            char_token_ids = char_tokenizer.encode(fallback_text)
+            if char_token_ids:
+                return _WindowPlan(char_token_ids, char_tokenizer)
+        return _WindowPlan(token_ids, tokenizer)
 
     if decoded_text:
-        if len(decoded_text) > window or window <= 1:
+        try:
+            reencoded = tokenizer.encode(decoded_text)
+        except Exception:  # pragma: no cover - defensive fallback
+            reencoded = []
+        if reencoded:
+            if len(reencoded) <= window and len(decoded_text) <= window:
+                if reencoded == token_ids:
+                    return _WindowPlan(token_ids, tokenizer)
+                return _WindowPlan(reencoded, tokenizer)
             fallback_text = decoded_text
         else:
-            try:
-                reencoded = tokenizer.encode(decoded_text)
-            except Exception:  # pragma: no cover - defensive fallback
-                reencoded = []
-            if reencoded:
-                if len(reencoded) <= window and len(decoded_text) <= window:
-                    if reencoded == token_ids:
-                        return _WindowPlan(token_ids, tokenizer)
-                    return _WindowPlan(reencoded, tokenizer)
-                fallback_text = decoded_text
-            else:
-                fallback_text = decoded_text
+            fallback_text = decoded_text
     else:
         fallback_text = text
 
@@ -174,9 +178,6 @@ def _chunk(
         return []
 
     window = _normalise_window_size(chunk)
-
-    if window <= 1:
-        return list(text)
 
     tokenizer = encoder or _get_tokenizer()
     working_token_ids = list(token_ids) if token_ids is not None else tokenizer.encode(text)
