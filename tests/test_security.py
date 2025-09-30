@@ -64,6 +64,24 @@ def test_create_access_token_includes_expiry(security):
     assert timedelta(seconds=0) <= expires_at - now <= timedelta(minutes=1, seconds=5)
 
 
+def test_create_access_token_uses_default_expiry(monkeypatch, security):
+    default_expiry_minutes = 2
+    monkeypatch.setattr(
+        security, "ACCESS_TOKEN_EXPIRE_MINUTES", default_expiry_minutes, raising=False
+    )
+
+    now = datetime.now(timezone.utc)
+    token = security.create_access_token({"sub": "user"})
+
+    payload = security.decode_token(token)
+    assert payload["sub"] == "user"
+
+    expires_at = datetime.fromtimestamp(payload["exp"], tz=timezone.utc)
+    assert timedelta(seconds=0) <= expires_at - now <= timedelta(
+        minutes=default_expiry_minutes, seconds=5
+    )
+
+
 def test_decode_token_rejects_invalid_tokens(security):
     with pytest.raises(security.InvalidTokenError):
         security.decode_token("this-is-not-a-token")
