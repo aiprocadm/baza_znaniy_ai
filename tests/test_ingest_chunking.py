@@ -73,7 +73,11 @@ def _expected_windows(
     return windows
 
 
-    assert _chunk("hello", chunk=0, overlap=2) == list("hello")
+def test_chunk_handles_zero_and_single_window_sizes() -> None:
+    text = "hello"
+
+    assert _chunk(text, chunk=0, overlap=2) == list(text)
+    assert _chunk(text, chunk=1, overlap=2) == list(text)
 
 
 def test_chunk_progress_with_high_overlap() -> None:
@@ -113,12 +117,15 @@ def test_chunk_fallback_respects_token_window_slices() -> None:
     overlap = 140
     text = "<expand>"
 
+    expanded_text = tokenizer.decode(tokenizer.encode(text))
     chunks = _chunk(text, chunk=chunk, overlap=overlap, encoder=tokenizer)
 
     assert len(chunks) == 3
+    assert chunks[0] == expanded_text[:chunk]
+    assert chunks[1] == expanded_text[chunk - overlap : chunk - overlap + chunk]
+    assert chunks[2] == expanded_text[(2 * chunk) - (2 * overlap) :]
 
     encoded_chunks = [tokenizer.encode(chunk) for chunk in chunks]
-    expanded_text = tokenizer.decode(tokenizer.encode(text))
     expected = _expected_windows(expanded_text, chunk, overlap, tokenizer=tokenizer)
 
     assert encoded_chunks == expected
