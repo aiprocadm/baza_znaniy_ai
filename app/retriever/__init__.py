@@ -1,4 +1,4 @@
-"""Retriever package exposing the configured vector store."""
+"""Retriever package exposing vector store implementations and helpers."""
 
 from __future__ import annotations
 
@@ -6,6 +6,19 @@ import importlib
 from typing import Any
 
 from app.core.config import Settings
+
+      codex/create-vectorstore-package-and-implementations-p7jgtz
+from .faiss import FaissVectorStore
+from .qdrant import QdrantVectorStore
+from .vector_store import VectorStore, get_vector_store
+
+__all__ = [
+    "FaissVectorStore",
+    "QdrantVectorStore",
+    "VectorStore",
+    "get_vector_store",
+    "Settings",
+]
 
 __all__ = [
     "CrossEncoderReranker",
@@ -37,3 +50,4 @@ def __getattr__(name: str) -> Any:  # pragma: no cover - trivial passthrough
 
 def __dir__() -> list[str]:  # pragma: no cover - trivial passthrough
     return sorted(set(globals()) | set(__all__))
+        main

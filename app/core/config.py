@@ -158,6 +158,10 @@ class Settings(BaseSettings):
         default="qdrant",
         validation_alias=AliasChoices("VECTOR_BACKEND"),
     )
+    embed_batch_size: int = Field(
+        default=32,
+        validation_alias=AliasChoices("EMBED_BATCH_SIZE", "VECTOR_EMBED_BATCH_SIZE"),
+    )
     qdrant_url: str = Field(
         default="http://qdrant:6333",
         validation_alias=AliasChoices("QDRANT_URL"),
@@ -217,6 +221,7 @@ class Settings(BaseSettings):
         "rag_chunk",
         "rag_overlap",
         "vector_embed_dimension",
+        "embed_batch_size",
         "chat_memory_ttl_days",
         "chat_memory_max_tokens",
         "access_token_expire_minutes",
