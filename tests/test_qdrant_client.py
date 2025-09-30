@@ -127,6 +127,81 @@ def _multi_collection_info(*sizes: int) -> object:
     return SimpleNamespace(config=config)
 
 
+def test_embedder_caches_sentence_transformer(monkeypatch: pytest.MonkeyPatch) -> None:
+    instances: list[object] = []
+
+    class DummySentenceTransformer:
+        def __init__(self, model_name: str) -> None:
+            self.model_name = model_name
+            instances.append(self)
+
+        def get_sentence_embedding_dimension(self) -> int:
+            return qc.EMBED_DIMENSION
+
+    monkeypatch.setattr(qc, "SentenceTransformer", DummySentenceTransformer)
+
+    first = qc._embedder()
+    second = qc._embedder()
+
+    assert first is second
+    assert instances == [first]
+    assert first.model_name == qc.EMBED_MODEL
+
+
+def test_embedder_raises_for_dimension_mismatch(monkeypatch: pytest.MonkeyPatch) -> None:
+    class DummySentenceTransformer:
+        def __init__(self, *_: object, **__: object) -> None:
+            pass
+
+        def get_sentence_embedding_dimension(self) -> int:
+            return qc.EMBED_DIMENSION + 1
+
+    monkeypatch.setattr(qc, "SentenceTransformer", DummySentenceTransformer)
+
+    with pytest.raises(RuntimeError, match="dimension mismatch"):
+        qc._embedder()
+
+
+def test_qdrant_client_forwards_url_and_api_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    created_clients: list[dict[str, object]] = []
+    sentinel = object()
+
+    def factory(**kwargs: object) -> object:
+        created_clients.append(kwargs)
+        return sentinel
+
+    monkeypatch.setattr(qc, "QdrantClient", factory)
+    monkeypatch.setattr(qc, "QDRANT_URL", "http://custom")
+    monkeypatch.setattr(qc, "QDRANT_API_KEY", "secret")
+
+    client1 = qc._qdrant_client()
+    client2 = qc._qdrant_client()
+
+    assert client1 is sentinel
+    assert client2 is sentinel
+    assert created_clients == [{"url": "http://custom", "api_key": "secret"}]
+
+
+def test_qdrant_client_skips_api_key_when_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+    created_clients: list[dict[str, object]] = []
+    sentinel = object()
+
+    def factory(**kwargs: object) -> object:
+        created_clients.append(kwargs)
+        return sentinel
+
+    monkeypatch.setattr(qc, "QdrantClient", factory)
+    monkeypatch.setattr(qc, "QDRANT_URL", "http://example")
+    monkeypatch.setattr(qc, "QDRANT_API_KEY", "")
+
+    client1 = qc._qdrant_client()
+    client2 = qc._qdrant_client()
+
+    assert client1 is sentinel
+    assert client2 is sentinel
+    assert created_clients == [{"url": "http://example"}]
+
+
 def test_ensure_collection_recreates_when_missing(mocked_qdrant: MagicMock) -> None:
     mocked_qdrant.get_collection.return_value = None
 
