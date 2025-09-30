@@ -1,4 +1,8 @@
+        codex/clean-up-codebase-by-removing-codex-markers
 """Aggregate and expose FastAPI routers used by the service."""
+
+"""Aggregate FastAPI routers."""
+        main
 
 from __future__ import annotations
 
