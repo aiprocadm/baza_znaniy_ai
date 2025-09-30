@@ -53,6 +53,7 @@ def get_rerank_top_k(
 class CrossEncoderReranker:
     """Rerank hits using a cross-encoder model."""
 
+        codex/clean-up-code-and-run-tests
     def __init__(
         self,
         model: "_CrossEncoder | None" = None,
@@ -67,18 +68,28 @@ class CrossEncoderReranker:
         self._model = model
         self._batch_size = max(1, int(batch_size))
 
+    def __init__(self, model_name: str = DEFAULT_MODEL_NAME) -> None:
+        self.model_name = model_name
+        self._model = CrossEncoder(model_name)
+        main
+
     def rerank(
         self,
         query: str,
         hits: Sequence[dict[str, object]],
         top_k: int,
     ) -> list[dict[str, object]]:
+        codex/clean-up-code-and-run-tests
         """Return the highest scoring hits for ``query`` with updated scores."""
+
+        """Return the highest scoring hits ordered by cross-encoder scores."""
+        main
 
         if not hits:
             return []
 
         limit = max(1, min(int(top_k), len(hits)))
+        codex/clean-up-code-and-run-tests
         pairs = [(query, str(hit.get("text") or "")) for hit in hits]
 
         scores: list[float] = []
@@ -95,6 +106,20 @@ class CrossEncoderReranker:
         ranked = [dict(hit, score=float(score)) for hit, score in zip(hits, scores)]
         ranked.sort(key=lambda item: float(item.get("score", 0.0)), reverse=True)
         return ranked[:limit]
+
+        pairs = [(query, str(hit.get("text", ""))) for hit in hits]
+        scores_iter = self._model.predict(pairs)
+        scores = [float(score) for score in scores_iter]
+
+        reranked: list[dict[str, object]] = []
+        for hit, score in zip(hits, scores):
+            updated = dict(hit)
+            updated["score"] = score
+            reranked.append(updated)
+
+        reranked.sort(key=lambda item: float(item.get("score", 0.0)), reverse=True)
+        return reranked[:limit]
+        main
 
 
 def apply_rerank(

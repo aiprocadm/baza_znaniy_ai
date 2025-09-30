@@ -1,4 +1,8 @@
+        codex/clean-up-code-and-run-tests
 """Qdrant-backed vector store implementation."""
+
+"""Qdrant vector store implementation."""
+        main
 
 from __future__ import annotations
 
@@ -58,10 +62,14 @@ class QdrantVectorStore:
 
     def _client_instance(self) -> QdrantClient:
         if self._client is None:
-            self._client = self._client_factory(path=str(self._storage_dir))
+            kwargs = {"url": self.settings.qdrant_url}
+            if self.settings.qdrant_api_key:
+                kwargs["api_key"] = self.settings.qdrant_api_key
+            self._client = self._client_factory(**kwargs)
         return self._client
 
-    def _normalise(self, vectors: np.ndarray) -> np.ndarray:
+    @staticmethod
+    def _normalise(vectors: np.ndarray) -> np.ndarray:
         if not len(vectors):
             return vectors
         norm = np.linalg.norm(vectors, axis=1, keepdims=True) + 1e-12

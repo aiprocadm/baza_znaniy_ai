@@ -172,7 +172,10 @@ def chat(request: Request, inp: ChatIn) -> dict[str, Any]:
     if not hits and fallback_index:
         hits = fallback_index[: settings.retrieve_topk]
 
+        codex/clean-up-code-and-run-tests
     reranker = getattr(request.app.state, "reranker", None)
+
+        main
     hits = apply_rerank(
         inp.message,
         hits,
@@ -236,6 +239,8 @@ def chat(request: Request, inp: ChatIn) -> dict[str, Any]:
         "conversation_id": conversation_id,
         "citations_insufficient": not has_minimum_citations,
         "latency_ms": (time.perf_counter() - start) * 1000,
+        "max_context_tokens": settings.max_context_tokens,
+        "max_generation_tokens": settings.max_generation_tokens,
     }
 
 
