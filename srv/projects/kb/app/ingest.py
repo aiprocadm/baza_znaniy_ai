@@ -131,7 +131,11 @@ def _handle_small_token_window(
     fallback_text = decoded_text if decoded_text else text
 
     if decoded_text:
-        if len(decoded_text) > window or window <= 1:
+        if len(decoded_text) > window:
+            char_tokenizer = _CharTokenizer()
+            char_token_ids = char_tokenizer.encode(decoded_text)
+            return _WindowPlan(char_token_ids, char_tokenizer)
+        if window <= 1:
             fallback_text = decoded_text
         else:
             try:
