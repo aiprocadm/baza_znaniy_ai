@@ -271,6 +271,12 @@ class Settings(BaseSettings):
         default=6000,
         validation_alias=AliasChoices("MAX_CONTEXT_TOKENS"),
     )
+        codex/update-default-model-and-settings
+    max_generation_tokens: int = Field(
+        default=0,
+        validation_alias=AliasChoices("MAX_GENERATION_TOKENS"),
+    )
+
         codex/expand-env.example-and-update-configuration
     max_generation_tokens: int = Field(
         default=512,
@@ -285,6 +291,7 @@ class Settings(BaseSettings):
 
 
     # Security -----------------------------------------------------------
+        main
         main
         main
     secret_key: str = Field(
@@ -321,6 +328,9 @@ class Settings(BaseSettings):
         "embed_batch_size",
         "chat_memory_ttl_days",
         "chat_memory_max_tokens",
+        codex/update-default-model-and-settings
+        "max_generation_tokens",
+
         codex/expand-env.example-and-update-configuration
         "access_token_expire_minutes",
         "app_port",
@@ -340,6 +350,7 @@ class Settings(BaseSettings):
         return int(value)
 
         codex/update-default-model-and-settings-5pychu
+        main
         "embed_batch_size",
         "max_context_tokens",
         "max_generation_tokens",

@@ -9,6 +9,7 @@ from typing import Iterable, List
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from app.chat.store import ChatStoreProtocol, ConversationAccessError
+from app.core.config import get_settings
 from app.core.deps import get_tenant
 from app.memory.store import MemoryStore
 from app.models import ChatRequest, ChatResponse, Citation
@@ -51,6 +52,10 @@ def chat(
         app_state = main_app.state
     else:
         app_state = request.app.state
+    settings = getattr(app_state, "settings", None)
+    if settings is None:
+        settings = get_settings()
+
     chat_store: ChatStoreProtocol = app_state.chat_store
     summarizer = app_state.summarizer
     memory_store = getattr(app_state, "memory_store", None)
@@ -160,6 +165,11 @@ def chat(
         conversation_id=conversation_id,
         citations_insufficient=not has_minimum,
         latency_ms=latency_ms,
+        codex/update-default-model-and-settings
+        max_context_tokens=settings.max_context_tokens or None,
+        max_generation_tokens=settings.max_generation_tokens or None,
+
         max_context_tokens=max_context_tokens,
         max_generation_tokens=max_generation_tokens,
+        main
     )
