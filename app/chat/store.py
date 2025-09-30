@@ -6,9 +6,33 @@ import os
 import sqlite3
 import time
 import uuid
-from typing import List, Optional, Tuple
+from typing import List, Optional, Protocol, Tuple
 
-__all__ = ["ChatStore", "ConversationAccessError"]
+__all__ = ["ChatStore", "ConversationAccessError", "ChatStoreProtocol"]
+
+
+class ChatStoreProtocol(Protocol):
+    """Interface implemented by chat persistence backends."""
+
+    def ensure_conversation(self, user_id: str, conversation_id: Optional[str]) -> str:
+        ...
+
+    def get_summary(self, conversation_id: str) -> Optional[str]:
+        ...
+
+    def get_recent_messages(
+        self, conversation_id: str, limit: Optional[int] = None
+    ) -> List[Tuple[str, str]]:
+        ...
+
+    def record_exchange(self, conversation_id: str, user_message: str, assistant_message: str) -> None:
+        ...
+
+    def messages_since_summary(self, conversation_id: str) -> int:
+        ...
+
+    def save_summary(self, conversation_id: str, summary: str) -> None:
+        ...
 
 
 class ConversationAccessError(RuntimeError):
