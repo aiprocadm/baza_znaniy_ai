@@ -422,6 +422,74 @@ def test_init_memory_store_toggle(service_app: Any, tmp_path: Path, monkeypatch:
     assert enabled_store.max_tokens == 4321
 
 
+def test_chat_records_memory_when_enabled(
+    service_app: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    settings = _clone_settings(service_app.get_settings())
+    settings.data_dir = tmp_path
+    monkeypatch.setattr(service_app, "get_settings", lambda: settings)
+    monkeypatch.setenv("CHAT_MEMORY_ENABLED", "1")
+
+    created_instances: list[Any] = []
+    record_calls: list[tuple[str, str, str, str]] = []
+
+    class StubMemoryStore:
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            created_instances.append(self)
+
+        def load_context(self, user_id: str, conversation_id: str) -> str:
+            return "context"
+
+        def record(
+            self, user_id: str, conversation_id: str, message: str, answer: str
+        ) -> None:
+            record_calls.append((user_id, conversation_id, message, answer))
+
+    monkeypatch.setattr(service_app, "MemoryStore", StubMemoryStore)
+
+    payload = {"user_id": "mem-user", "message": "Привет", "conversation_id": "conv"}
+
+    with TestClient(service_app.app) as client:
+        response = client.post("/api/chat", json=payload)
+
+    assert response.status_code == 200
+    assert created_instances, "Memory store should have been initialised"
+    assert record_calls == [
+        (payload["user_id"], payload["conversation_id"], payload["message"], "Ответ")
+    ]
+
+
+def test_load_index_html_missing_file_uses_fallback(
+    service_app: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setattr(service_app, "WEB_ROOT", tmp_path / "missing")
+
+    fallback = service_app._load_index_html()
+
+    assert fallback == "<h1>Knowledge Base</h1>"
+
+
+def test_init_memory_store_logs_on_failure(
+    service_app: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+):
+    settings = _clone_settings(service_app.get_settings())
+    settings.data_dir = tmp_path
+    monkeypatch.setattr(service_app, "get_settings", lambda: settings)
+    monkeypatch.setenv("CHAT_MEMORY_ENABLED", "1")
+
+    class BrokenMemoryStore:
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            raise RuntimeError("boom")
+
+    monkeypatch.setattr(service_app, "MemoryStore", BrokenMemoryStore)
+
+    with caplog.at_level(logging.ERROR):
+        store = service_app._init_memory_store(settings)
+
+    assert store is None
+    assert any("Failed to initialise memory store" in message for message in caplog.messages)
+
+
 def test_bootstrap_initialises_state(service_app: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     settings = _clone_settings(service_app.get_settings())
     settings.log_level = "DEBUG"
