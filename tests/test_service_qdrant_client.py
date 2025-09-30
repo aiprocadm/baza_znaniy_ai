@@ -18,11 +18,16 @@ import pytest
 class StubSettings:
     embed_model: str = "test-model"
     embed_dimension: int = 3
+    embed_batch_size: int = 32
     qdrant_url: str = "http://localhost:6333"
     qdrant_api_key: str | None = "secret"
     qdrant_collection: str = "unit-test"
     retrieve_topk: int = 4
     rerank_topk: int = 2
+    rerank_enabled: bool = True
+    llm_model_name: str = "stub-model"
+    ollama_model: str | None = None
+    max_context_tokens: int = 3000
 
 
 class SentenceTransformerStub:

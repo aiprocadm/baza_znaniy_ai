@@ -65,7 +65,13 @@ def ollama_client_module():
 
 
 def _patch_settings(monkeypatch: pytest.MonkeyPatch, module, base_url: str, model: str):
-    settings = SimpleNamespace(ollama_base_url=base_url, gen_model=model)
+    settings = SimpleNamespace(
+        ollama_base_url=base_url,
+        gen_model=model,
+        llm_model_name=model,
+        llm_model=model,
+        ollama_model=model,
+    )
     monkeypatch.setattr(module, "get_settings", lambda: settings)
     return settings
 

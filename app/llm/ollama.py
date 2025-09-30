@@ -21,7 +21,10 @@ class OllamaClient:
 
     @property
     def model_name(self) -> str:
-        return self.settings.llm_model_name
+        settings = self.settings
+        if hasattr(settings, "llm_model"):
+            return getattr(settings, "llm_model")
+        return getattr(settings, "llm_model_name")
 
     def ensure_model(self) -> None:
         """Ensure the configured model is available locally."""

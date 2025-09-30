@@ -92,6 +92,7 @@ MAX_CITATIONS = max(MIN_CITATIONS, int(os.getenv("CHAT_MAX_CITATIONS", "5")))
 RETRIEVE_TOPK = max(1, int(os.getenv("RETRIEVE_TOPK", "10")))
 _configured_rerank = int(os.getenv("RERANK_TOPK", str(RETRIEVE_TOPK)))
 RERANK_TOPK = max(1, min(RETRIEVE_TOPK, _configured_rerank))
+MAX_CONTEXT_TOKENS = max(1, int(os.getenv("MAX_CONTEXT_TOKENS", "3000")))
 
 
 def _get_env_value(*names: str, default: str | None = None) -> str | None:
@@ -169,6 +170,7 @@ app.state.file_store = FileStore()
 app.state.ingest_queue = IngestQueue()
 app.state.retrieve_topk = RETRIEVE_TOPK
 app.state.rerank_topk = RERANK_TOPK
+app.state.max_context_tokens = MAX_CONTEXT_TOKENS
 app.state.min_citations = MIN_CITATIONS
 app.state.max_citations = MAX_CITATIONS
 app.state.chat_history_limit = CHAT_HISTORY_LIMIT

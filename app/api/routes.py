@@ -173,7 +173,7 @@ def chat(request: Request, inp: ChatIn) -> dict[str, Any]:
     rerank_limit = settings.rerank_limit
     if len(hits) > rerank_limit:
         hits = hits[:rerank_limit]
-    context = build_context(hits, token_limit=3000)
+    context = build_context(hits, token_limit=settings.max_context_tokens)
 
     prompt_parts = [
         "You are a helpful assistant providing concise answers based on the provided documentation context.",

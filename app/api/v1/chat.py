@@ -83,7 +83,8 @@ def chat(
     if len(hits) > rerank_topk:
         hits = hits[:rerank_topk]
 
-    context = build_context(hits, token_limit=3000)
+    context_limit = getattr(app_state, "max_context_tokens", 3000)
+    context = build_context(hits, token_limit=context_limit)
 
     prompt_parts = [
         "You are a helpful assistant providing concise answers based on the provided documentation context.",

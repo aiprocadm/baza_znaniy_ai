@@ -118,9 +118,17 @@ class Settings(BaseSettings):
         default=10,
         validation_alias=AliasChoices("RETRIEVE_TOPK"),
     )
+    embed_batch_size: int = Field(
+        default=32,
+        validation_alias=AliasChoices("EMBED_BATCH_SIZE"),
+    )
     rerank_topk: int | None = Field(
         default=None,
         validation_alias=AliasChoices("RERANK_TOPK"),
+    )
+    rerank_enabled: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("RERANK_ENABLED"),
     )
     chat_memory_enabled: bool = Field(
         default=False,
@@ -182,9 +190,17 @@ class Settings(BaseSettings):
         default="qwen2.5:3b-instruct",
         validation_alias=AliasChoices("LLM_MODEL_NAME", "GEN_MODEL"),
     )
+    ollama_model: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("OLLAMA_MODEL"),
+    )
     ollama_base_url: str = Field(
         default="http://ollama:11434",
         validation_alias=AliasChoices("OLLAMA_BASE_URL", "OLLAMA_HOST"),
+    )
+    max_context_tokens: int = Field(
+        default=3000,
+        validation_alias=AliasChoices("MAX_CONTEXT_TOKENS", "LLM_MAX_CONTEXT"),
     )
     secret_key: str = Field(
         default="change-me",
@@ -208,8 +224,10 @@ class Settings(BaseSettings):
         "rag_chunk",
         "rag_overlap",
         "vector_embed_dimension",
+        "embed_batch_size",
         "chat_memory_ttl_days",
         "chat_memory_max_tokens",
+        "max_context_tokens",
         "access_token_expire_minutes",
         mode="before",
     )
@@ -219,6 +237,7 @@ class Settings(BaseSettings):
 
     @field_validator(
         "chat_memory_enabled",
+        "rerank_enabled",
         mode="before",
     )
     @classmethod
@@ -226,6 +245,19 @@ class Settings(BaseSettings):
         if isinstance(value, str):
             return value.lower() in {"1", "true", "yes", "on"}
         return bool(value)
+
+    @field_validator("ollama_model", mode="before")
+    @classmethod
+    def _clean_optional_string(cls, value: object) -> object:
+        if isinstance(value, str):
+            stripped = value.strip()
+            return stripped or None
+        return value
+
+    @field_validator("embed_batch_size", "max_context_tokens", mode="after")
+    @classmethod
+    def _ensure_positive(cls, value: int) -> int:
+        return max(1, value)
 
     @field_validator("ollama_base_url")
     @classmethod
@@ -247,9 +279,25 @@ class Settings(BaseSettings):
     @computed_field
     @property
     def rerank_limit(self) -> int:
+        if not self.rerank_enabled:
+            return self.retrieve_topk
         candidate = self.rerank_topk or self.retrieve_topk
         candidate = max(1, candidate)
         return min(self.retrieve_topk, candidate)
+
+    @computed_field
+    @property
+    def should_rerank(self) -> bool:
+        if not self.rerank_enabled:
+            return False
+        candidate = self.rerank_topk or self.retrieve_topk
+        return candidate > 0
+
+    @computed_field
+    @property
+    def llm_model(self) -> str:
+        candidate = self.ollama_model or self.llm_model_name
+        return candidate.strip()
 
     @computed_field
     @property
