@@ -5,13 +5,14 @@ from __future__ import annotations
 import hashlib
 import io
 import logging
-import os
 import re
 from functools import lru_cache
 from typing import Iterable, List, NamedTuple, Optional, Protocol
 
 from docx import Document
 from pypdf import PdfReader
+
+from app.core.config import get_settings
 
 try:  # pragma: no cover - tokenizer optional in some environments
     import tiktoken
@@ -57,7 +58,8 @@ def _load_tiktoken(name: str) -> Optional[_Tokenizer]:
 
 @lru_cache(maxsize=1)
 def _default_tokenizer() -> _Tokenizer:
-    name = os.getenv("RAG_TOKENIZER_NAME", "cl100k_base")
+    settings = get_settings()
+    name = settings.rag_tokenizer_name
     tokenizer = _load_tiktoken(name)
     if tokenizer is None and name != "text-embedding-3-small":
         tokenizer = _load_tiktoken("text-embedding-3-small")
@@ -289,8 +291,9 @@ def parse_and_chunk(filename: str, data: bytes) -> List[dict[str, object]]:
     if not pages:
         return []
 
-    chunk_size = _normalise_window_size(int(os.getenv("RAG_CHUNK", "900")))
-    overlap = _normalise_overlap(chunk_size, int(os.getenv("RAG_OVERLAP", "140")))
+    settings = get_settings()
+    chunk_size = _normalise_window_size(settings.rag_chunk)
+    overlap = _normalise_overlap(chunk_size, settings.rag_overlap)
     tokenizer = _get_tokenizer()
 
     chunks: List[dict[str, object]] = []
