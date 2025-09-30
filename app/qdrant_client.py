@@ -30,15 +30,23 @@ def search_chunks(query: str, top_k: int = 10) -> list[dict[str, object]]:
 
 
 def reset_collection() -> None:
-    _vector_store.reset_collection()
+    if hasattr(_vector_store, "reset_collection"):
+        _vector_store.reset_collection()
+        return
+    raise NotImplementedError("Active vector store does not support resetting the index")
 
 
 def export_payloads(batch_size: int = 256) -> Iterator[dict[str, object]]:
-    return _vector_store.export_payloads(batch_size=batch_size)
+    if hasattr(_vector_store, "export_payloads"):
+        return _vector_store.export_payloads(batch_size=batch_size)
+    raise NotImplementedError("Active vector store does not support exporting payloads")
 
 
 def import_payloads(payloads: Iterable[dict[str, object]]) -> None:
-    _vector_store.import_payloads(payloads)
+    if hasattr(_vector_store, "import_payloads"):
+        _vector_store.import_payloads(payloads)
+        return
+    raise NotImplementedError("Active vector store does not support importing payloads")
 
 
 __all__ = [

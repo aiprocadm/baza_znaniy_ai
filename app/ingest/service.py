@@ -12,6 +12,7 @@ from typing import Optional
 
 from sqlmodel import Session, delete, select
 
+from app.core.config import get_settings
 from app.ingest.chunking import _chunk, _get_tokenizer, iter_document_pages
 from app.models.file import ChunkRecord, FileRecord, FileStatus, PageRecord, get_engine
 
@@ -102,7 +103,9 @@ class IngestWorker:
         embed_batch_size: Optional[int] = None,
     ) -> None:
         self.service = service
-        self.embed_batch_size = max(1, int(embed_batch_size or os.getenv("EMBED_BATCH_SIZE", 32)))
+        settings = get_settings()
+        default_batch = settings.embed_batch_size
+        self.embed_batch_size = max(1, int(embed_batch_size or default_batch))
         self._tokenizer = _get_tokenizer()
         chunk = int(os.getenv("RAG_CHUNK", "900"))
         overlap = int(os.getenv("RAG_OVERLAP", "140"))

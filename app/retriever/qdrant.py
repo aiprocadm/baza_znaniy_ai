@@ -1,6 +1,12 @@
-"""Qdrant-backed vector store implementation."""
+"""Compatibility wrapper exposing Qdrant vector store symbols."""
 
 from __future__ import annotations
+
+        codex/implement-vector-store-interface-and-refactor-qdrant-logic
+from .vector_store import QdrantVectorStore, get_vector_store
+
+__all__ = ["QdrantVectorStore", "get_vector_store"]
+
 
 import os
 from pathlib import Path
@@ -263,3 +269,4 @@ class QdrantVectorStore:
 
 
 __all__ = ["QdrantVectorStore"]
+        main

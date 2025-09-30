@@ -26,14 +26,14 @@ def _iter_documents(root: Path) -> Iterable[Path]:
 def ingest_path(path: Path) -> int:
     settings = get_settings()
     vector_store = get_vector_store(settings)
-    vector_store.ensure_collection()
+    vector_store.ensure_ready()
 
     total_chunks = 0
     for document in _iter_documents(path):
         chunks = parse_and_chunk(document.name, document.read_bytes())
         if not chunks:
             continue
-        vector_store.upsert_chunks(chunks)
+        vector_store.upsert(chunks)
         total_chunks += len(chunks)
     return total_chunks
 

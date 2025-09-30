@@ -2,6 +2,22 @@
         codex/create-vectorstore-package-and-implementations
 
 from app.core.config import Settings
+        codex/implement-vector-store-interface-and-refactor-qdrant-logic
+from .vector_store import (
+    FaissVectorStore,
+    QdrantVectorStore,
+    VectorStore,
+    get_vector_store,
+)
+
+__all__ = [
+    "VectorStore",
+    "QdrantVectorStore",
+    "FaissVectorStore",
+    "get_vector_store",
+    "Settings",
+]
+        
 
 
 
@@ -65,5 +81,6 @@ def __getattr__(name: str) -> Any:  # pragma: no cover - trivial passthrough
 
 def __dir__() -> list[str]:  # pragma: no cover - trivial passthrough
     return sorted(set(globals()) | set(__all__))
+        main
         main
         main
