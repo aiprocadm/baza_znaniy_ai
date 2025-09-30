@@ -47,14 +47,14 @@ def _index_chunks(request: Request, chunks: Iterable[dict[str, Any]]) -> int:
     try:  # pragma: no cover - optional dependency initialisation
         if vector_store is None:
             raise RuntimeError("Vector store is not configured")
-        vector_store.ensure_collection()
+        vector_store.ensure_ready()
     except Exception:
         logger.exception("Failed to ensure vector store; using fallback index")
         fallback_index.extend(items)
         return len(items)
 
     try:  # pragma: no cover - optional dependency for full ingestion pipeline
-        vector_store.upsert_chunks(items)
+        vector_store.upsert(items)
     except Exception:
         fallback_index.extend(items)
         logger.info("Stored %s chunks in fallback index", len(items))
@@ -137,7 +137,7 @@ def chat(request: Request, inp: ChatIn) -> dict[str, Any]:
     llm_client.ensure_model()
     if vector_store is not None:
         try:  # pragma: no cover - defensive ensure call
-            vector_store.ensure_collection()
+            vector_store.ensure_ready()
         except Exception:
             logger.exception("Failed to ensure vector store for chat")
 
