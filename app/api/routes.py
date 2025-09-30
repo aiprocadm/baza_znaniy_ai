@@ -129,13 +129,12 @@ async def upload(
 def chat(request: Request, inp: ChatIn) -> dict[str, Any]:
     settings = request.app.state.settings
     chat_store = request.app.state.chat_store
-    llm_client = request.app.state.llm_client
+    llm_provider = request.app.state.llm_provider
     vector_store = getattr(request.app.state, "vector_store", None)
     summarizer = request.app.state.summarizer
     memory_store = getattr(request.app.state, "memory_store", None)
     fallback_index = getattr(request.app.state, "fallback_index", [])
 
-    llm_client.ensure_model()
     if vector_store is not None:
         try:  # pragma: no cover - defensive ensure call
             vector_store.ensure_collection()
@@ -199,12 +198,13 @@ def chat(request: Request, inp: ChatIn) -> dict[str, Any]:
         f"User message: {inp.message}",
         "Сформулируй точный ответ, используя контекст, если он релевантен. Если данных недостаточно, сообщи об этом.",
     ])
-    prompt = "\n".join(part for part in prompt_parts if part is not None)
-
-    answer = llm_client.generate(prompt).strip()
-
     min_citations, max_citations = settings.citations_bounds
     citations, has_minimum_citations = _select_citations(hits, min_citations, max_citations)
+
+    prompt = "\n".join(part for part in prompt_parts if part is not None)
+
+    provider_context = {"citations": citations} if citations else None
+    answer = llm_provider.generate(prompt, context=provider_context).strip()
 
     chat_store.record_exchange(conversation_id, inp.message, answer)
     if chat_store.messages_since_summary(conversation_id) >= settings.chat_summary_trigger:
@@ -217,7 +217,7 @@ def chat(request: Request, inp: ChatIn) -> dict[str, Any]:
             logger.exception("Failed to persist memory entry")
 
     answer_text = answer
-    if citations:
+    if citations and not getattr(llm_provider, "handles_citations", False):
         formatted = []
         for idx, citation in enumerate(citations, start=1):
             location = citation.get("page")

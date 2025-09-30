@@ -1,5 +1,50 @@
-"""LLM helpers."""
+"""Helpers for working with language model providers."""
 
-from .ollama import OllamaClient, get_llm_client
+from __future__ import annotations
 
-__all__ = ["OllamaClient", "get_llm_client"]
+from typing import Optional
+
+from app.core.config import Settings, get_settings
+
+from .providers import LLMProvider, OllamaProvider, StubProvider, get_llm_provider
+
+__all__ = [
+    "LLMProvider",
+    "OllamaProvider",
+    "StubProvider",
+    "get_llm_provider",
+    "get_cached_provider",
+    "reset_provider_cache",
+]
+
+_cached_provider: Optional[LLMProvider] = None
+
+
+def get_cached_provider(settings: Settings | None = None) -> LLMProvider:
+    """Return a cached provider instance.
+
+    When *settings* are supplied a fresh provider is constructed and cached.
+    When omitted the previously cached provider (or a lazily created default)
+    is returned.
+    """
+
+    global _cached_provider
+    if settings is not None:
+        _cached_provider = get_llm_provider(settings)
+        return _cached_provider
+    if _cached_provider is None:
+        _cached_provider = get_llm_provider(get_settings())
+    return _cached_provider
+
+
+def reset_provider_cache() -> None:
+    """Clear the cached provider (useful for tests)."""
+
+    global _cached_provider
+    _cached_provider = None
+
+
+# Backwards compatible alias used by legacy modules/tests.
+get_llm_client = get_cached_provider
+
+__all__.append("get_llm_client")
