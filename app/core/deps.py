@@ -13,26 +13,38 @@ from app.core.config import get_settings
 from app.services.files import FileStore, IngestQueue
 
 
+DEFAULT_ALLOWED_EXTENSIONS = frozenset({"pdf", "docx", "pptx", "xlsx", "txt", "md"})
+
+
 @dataclass
 class UploadLimits:
     """Configuration describing upload restrictions."""
 
-    max_size: int = 10 * 1024 * 1024
-    allowed_extensions: set[str] = field(default_factory=lambda: {"pdf", "docx", "txt"})
+    max_upload_mb: int = 40
+    allowed_extensions: set[str] = field(default_factory=lambda: set(DEFAULT_ALLOWED_EXTENSIONS))
+
+    max_bytes: int = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
-        self.max_size = self._normalise_max_size(self.max_size)
+        self.max_upload_mb = self._normalise_max_mb(self.max_upload_mb)
+        self.max_bytes = self.max_upload_mb * 1024 * 1024
         self.allowed_extensions = self._normalise_extensions(self.allowed_extensions)
 
     @staticmethod
-    def _normalise_max_size(value: object) -> int:
+    def _normalise_max_mb(value: object) -> int:
         try:
             size = int(value)
         except (TypeError, ValueError) as exc:  # pragma: no cover - defensive branch
-            raise ValueError("max_size must be an integer") from exc
+            raise ValueError("max_upload_mb must be an integer") from exc
         if size <= 0:
-            raise ValueError("max_size must be greater than zero")
+            raise ValueError("max_upload_mb must be greater than zero")
         return size
+
+    @property
+    def max_size(self) -> int:
+        """Backwards-compatible alias exposing the limit in bytes."""
+
+        return self.max_bytes
 
     @staticmethod
     def _normalise_extensions(value: object) -> set[str]:
@@ -55,6 +67,7 @@ def get_data_dir() -> Path:
 def get_upload_limits() -> UploadLimits:
     """Provide upload limit configuration from environment variables."""
 
+        codex/expand-env.example-and-update-configuration
     settings = get_settings()
 
     def _mb_to_bytes(value: float | int) -> int:
@@ -75,6 +88,11 @@ def get_upload_limits() -> UploadLimits:
 
     extensions = os.getenv("UPLOAD_ALLOWED_EXTS", "pdf,docx,txt")
     return UploadLimits(max_size=max_size, allowed_extensions=extensions)
+
+    defaults = UploadLimits()
+    max_upload_mb = os.getenv("MAX_UPLOAD_MB", defaults.max_upload_mb)
+    return UploadLimits(max_upload_mb=max_upload_mb)
+        main
 
 
 def get_tenant(request: Request = None) -> str:
@@ -102,6 +120,7 @@ def get_ingest_queue(request: Request = None) -> IngestQueue:
 
 
 __all__ = [
+    "DEFAULT_ALLOWED_EXTENSIONS",
     "UploadLimits",
     "get_data_dir",
     "get_file_store",

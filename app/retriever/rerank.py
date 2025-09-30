@@ -1,44 +1,18 @@
-        codex/implement-reranking-functionality-and-tests
-"""Cross-encoder based reranking utilities."""
-
-from __future__ import annotations
-
-from typing import TYPE_CHECKING, List, Sequence
-
-if TYPE_CHECKING:  # pragma: no cover - for type checkers only
-    from sentence_transformers import CrossEncoder
-
-
-class CrossEncoderReranker:
-    """Wrapper around :class:`sentence_transformers.CrossEncoder`."""
-
-    def __init__(
-        self,
-        model: "CrossEncoder | None" = None,
-        *,
-        model_name: str = "cross-encoder/ms-marco-MiniLM-L-6-v2",
-        batch_size: int = 32,
-    ) -> None:
-        try:
-            from sentence_transformers import CrossEncoder  # type: ignore import
-        except Exception as exc:  # pragma: no cover - optional dependency guard
-            raise RuntimeError("sentence-transformers is required for reranking") from exc
-
-        if model is None:
-            model = CrossEncoder(model_name)
-
-        self._model = model
-        self._batch_size = max(1, int(batch_size))
-
 """Utility helpers for cross-encoder based reranking."""
 
 from __future__ import annotations
 
 import os
 from functools import lru_cache
-from typing import Mapping, Sequence
+from typing import Mapping, Sequence, TYPE_CHECKING
 
-from sentence_transformers import CrossEncoder
+try:  # pragma: no cover - optional dependency guard
+    from sentence_transformers import CrossEncoder
+except Exception:  # pragma: no cover - fallback when dependency missing
+    CrossEncoder = None  # type: ignore[assignment]
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from sentence_transformers import CrossEncoder as _CrossEncoder
 
 DEFAULT_MODEL_NAME = "cross-encoder/ms-marco-MiniLM-L-6-v2"
 
@@ -79,6 +53,21 @@ def get_rerank_top_k(
 class CrossEncoderReranker:
     """Rerank hits using a cross-encoder model."""
 
+        codex/clean-up-code-and-run-tests
+    def __init__(
+        self,
+        model: "_CrossEncoder | None" = None,
+        *,
+        model_name: str = DEFAULT_MODEL_NAME,
+        batch_size: int = 32,
+    ) -> None:
+        if model is None:
+            if CrossEncoder is None:  # pragma: no cover - dependency missing at runtime
+                raise RuntimeError("sentence-transformers is required for reranking")
+            model = CrossEncoder(model_name)
+        self._model = model
+        self._batch_size = max(1, int(batch_size))
+
     def __init__(self, model_name: str = DEFAULT_MODEL_NAME) -> None:
         self.model_name = model_name
         self._model = CrossEncoder(model_name)
@@ -89,26 +78,21 @@ class CrossEncoderReranker:
         query: str,
         hits: Sequence[dict[str, object]],
         top_k: int,
-        codex/implement-reranking-functionality-and-tests
-    ) -> List[dict[str, object]]:
-        """Return the highest scoring hits ordered by cross-encoder scores."""
-
     ) -> list[dict[str, object]]:
+        codex/clean-up-code-and-run-tests
         """Return the highest scoring hits for ``query`` with updated scores."""
+
+        """Return the highest scoring hits ordered by cross-encoder scores."""
         main
 
         if not hits:
             return []
 
-        codex/implement-reranking-functionality-and-tests
         limit = max(1, min(int(top_k), len(hits)))
+        codex/clean-up-code-and-run-tests
+        pairs = [(query, str(hit.get("text") or "")) for hit in hits]
 
-        pairs: List[tuple[str, str]] = []
-        for hit in hits:
-            text = str(hit.get("text") or "")
-            pairs.append((query, text))
-
-        scores: List[float] = []
+        scores: list[float] = []
         for start in range(0, len(pairs), self._batch_size):
             batch = pairs[start : start + self._batch_size]
             if not batch:
@@ -123,11 +107,6 @@ class CrossEncoderReranker:
         ranked.sort(key=lambda item: float(item.get("score", 0.0)), reverse=True)
         return ranked[:limit]
 
-
-__all__ = ["CrossEncoderReranker"]
-
-        limit = top_k if top_k and top_k > 0 else len(hits)
-
         pairs = [(query, str(hit.get("text", ""))) for hit in hits]
         scores_iter = self._model.predict(pairs)
         scores = [float(score) for score in scores_iter]
@@ -139,8 +118,8 @@ __all__ = ["CrossEncoderReranker"]
             reranked.append(updated)
 
         reranked.sort(key=lambda item: float(item.get("score", 0.0)), reverse=True)
-        limit = min(max(1, limit), len(reranked))
         return reranked[:limit]
+        main
 
 
 def apply_rerank(
@@ -177,4 +156,3 @@ __all__ = [
     "get_reranker",
     "is_rerank_enabled",
 ]
-        main

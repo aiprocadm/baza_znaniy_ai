@@ -1,0 +1,783 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>KnowLab Control Panel</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+      :root {
+        color-scheme: light dark;
+        --accent: #2563eb;
+        --bg: #f9fafb;
+        --card: #ffffff;
+        --border: #d1d5db;
+        --text: #111827;
+        --muted: #6b7280;
+      }
+
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #0f172a;
+          --card: #111827;
+          --border: #1f2937;
+          --text: #f9fafb;
+          --muted: #9ca3af;
+        }
+      }
+
+      body {
+        margin: 0;
+        font-family: "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        background: var(--bg);
+        color: var(--text);
+      }
+
+      header {
+        padding: 2rem clamp(1rem, 3vw, 2.5rem);
+        background: var(--card);
+        border-bottom: 1px solid var(--border);
+      }
+
+      header h1 {
+        margin: 0 0 0.5rem;
+        font-size: clamp(1.75rem, 2.5vw, 2.25rem);
+      }
+
+      header p {
+        margin: 0;
+        color: var(--muted);
+        max-width: 52ch;
+      }
+
+      main {
+        padding: clamp(1rem, 3vw, 2.5rem);
+        display: grid;
+        gap: clamp(1rem, 2vw, 1.5rem);
+        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      }
+
+      section {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 1rem;
+        padding: clamp(1rem, 3vw, 1.75rem);
+        box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
+      }
+
+      section h2 {
+        margin-top: 0;
+        margin-bottom: 0.75rem;
+        font-size: 1.15rem;
+      }
+
+      form {
+        display: flex;
+        flex-direction: column;
+        gap: 0.75rem;
+      }
+
+      .field {
+        display: flex;
+        flex-direction: column;
+        gap: 0.35rem;
+      }
+
+      label {
+        font-weight: 600;
+      }
+
+      input[type="file"],
+      input[type="text"],
+      textarea {
+        font: inherit;
+        padding: 0.65rem 0.75rem;
+        border: 1px solid var(--border);
+        border-radius: 0.75rem;
+        background: transparent;
+        color: inherit;
+      }
+
+      textarea {
+        min-height: 80px;
+        resize: vertical;
+      }
+
+      button {
+        appearance: none;
+        border: none;
+        border-radius: 999px;
+        background: var(--accent);
+        color: #fff;
+        font-weight: 600;
+        padding: 0.65rem 1.25rem;
+        cursor: pointer;
+        transition: transform 0.15s ease, box-shadow 0.15s ease;
+      }
+
+      button:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+      }
+
+      button:hover:not(:disabled) {
+        transform: translateY(-1px);
+        box-shadow: 0 8px 16px rgba(37, 99, 235, 0.25);
+      }
+
+      progress {
+        width: 100%;
+        height: 8px;
+        border-radius: 999px;
+        overflow: hidden;
+        border: 1px solid var(--border);
+      }
+
+      .status-log {
+        font-size: 0.9rem;
+        max-height: 180px;
+        overflow-y: auto;
+        display: flex;
+        flex-direction: column;
+        gap: 0.5rem;
+        margin-top: 0.75rem;
+      }
+
+      .status-log div {
+        padding: 0.5rem 0.75rem;
+        border-radius: 0.75rem;
+        border: 1px solid var(--border);
+        background: rgba(37, 99, 235, 0.08);
+      }
+
+      .status-log div.error {
+        border-color: #f97316;
+        background: rgba(249, 115, 22, 0.15);
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.9rem;
+      }
+
+      th,
+      td {
+        padding: 0.5rem 0.35rem;
+        border-bottom: 1px solid var(--border);
+        text-align: left;
+      }
+
+      th {
+        font-size: 0.75rem;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: var(--muted);
+      }
+
+      .chat-log {
+        border: 1px solid var(--border);
+        border-radius: 1rem;
+        padding: 1rem;
+        max-height: 420px;
+        overflow-y: auto;
+        display: flex;
+        flex-direction: column;
+        gap: 0.75rem;
+        background: rgba(37, 99, 235, 0.04);
+      }
+
+      .chat-message {
+        display: flex;
+        flex-direction: column;
+        gap: 0.35rem;
+      }
+
+      .chat-message.user .bubble {
+        align-self: flex-end;
+        background: var(--accent);
+        color: #fff;
+      }
+
+      .chat-message.assistant .bubble {
+        align-self: flex-start;
+        background: var(--card);
+        border: 1px solid var(--border);
+      }
+
+      .bubble {
+        padding: 0.75rem 1rem;
+        border-radius: 1rem;
+        max-width: 100%;
+        line-height: 1.45;
+      }
+
+      .citations {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.5rem;
+        font-size: 0.8rem;
+      }
+
+      .citations a {
+        color: var(--accent);
+        text-decoration: none;
+        background: rgba(37, 99, 235, 0.12);
+        padding: 0.25rem 0.5rem;
+        border-radius: 999px;
+      }
+
+      .citations a:focus,
+      .citations a:hover {
+        text-decoration: underline;
+      }
+
+      .insufficient-note {
+        color: #f97316;
+        font-size: 0.8rem;
+      }
+
+      .search-results {
+        display: grid;
+        gap: 0.75rem;
+        margin-top: 0.75rem;
+        max-height: 260px;
+        overflow-y: auto;
+      }
+
+      .search-hit {
+        border: 1px solid var(--border);
+        border-radius: 0.75rem;
+        padding: 0.75rem;
+        background: rgba(37, 99, 235, 0.05);
+      }
+
+      .search-hit h3 {
+        margin: 0 0 0.35rem;
+        font-size: 1rem;
+      }
+
+      .search-hit p {
+        margin: 0;
+        white-space: pre-line;
+      }
+
+      .actions-row {
+        display: flex;
+        gap: 0.5rem;
+        flex-wrap: wrap;
+        align-items: center;
+      }
+
+      .actions-row button.secondary {
+        background: transparent;
+        color: var(--accent);
+        border: 1px solid var(--accent);
+      }
+
+      small.muted {
+        color: var(--muted);
+        font-size: 0.8rem;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>KnowLab Operations Console</h1>
+      <p>
+        Загрузите документы, отслеживайте индексацию и общайтесь с ассистентом
+        на одной странице. Интерфейс работает поверх REST API и не требует
+        сборки — только статический HTML и нативный JavaScript.
+      </p>
+    </header>
+    <main>
+      <section id="upload-card">
+        <h2>1. Загрузка документа</h2>
+        <form id="upload-form">
+          <div class="field">
+            <label for="upload-file">Выберите файл (PDF/DOCX/TXT)</label>
+            <input id="upload-file" type="file" accept=".pdf,.docx,.txt" required />
+          </div>
+          <div class="field">
+            <label for="upload-tenant">Tenant header (опционально)</label>
+            <input id="upload-tenant" type="text" placeholder="default" />
+            <small class="muted"
+              >Значение будет отправлено в заголовке <code>X-Tenant</code>, если
+              указано.</small
+            >
+          </div>
+          <div class="actions-row">
+            <button id="upload-button" type="submit">Отправить</button>
+            <button id="refresh-files" type="button" class="secondary">
+              Обновить статус
+            </button>
+          </div>
+          <progress id="upload-progress" value="0" max="100" hidden></progress>
+        </form>
+        <div id="upload-log" class="status-log" aria-live="polite"></div>
+      </section>
+
+      <section id="ingest-card">
+        <h2>2. Статусы индексации</h2>
+        <table aria-describedby="ingest-card">
+          <thead>
+            <tr>
+              <th>Файл</th>
+              <th>Статус</th>
+              <th>Чанки</th>
+              <th>Ошибка</th>
+            </tr>
+          </thead>
+          <tbody id="files-table">
+            <tr>
+              <td colspan="4">Нет загруженных файлов</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="search-card">
+        <h2>3. Поиск по базе</h2>
+        <form id="search-form" class="actions-row">
+          <input
+            id="search-input"
+            type="text"
+            placeholder="Введите запрос"
+            aria-label="Текст поискового запроса"
+            required
+          />
+          <button type="submit">Найти</button>
+        </form>
+        <div id="search-results" class="search-results" aria-live="polite"></div>
+      </section>
+
+      <section id="chat-card">
+        <h2>4. Чат с ассистентом</h2>
+        <div class="field">
+          <label for="user-id">Идентификатор пользователя</label>
+          <input id="user-id" type="text" value="demo-user" required />
+        </div>
+        <div id="chat-log" class="chat-log" aria-live="polite"></div>
+        <form id="chat-form">
+          <textarea id="chat-input" placeholder="Введите сообщение" required></textarea>
+          <button id="chat-send" type="submit">Отправить вопрос</button>
+        </form>
+      </section>
+    </main>
+
+    <script>
+      (function () {
+        const API = {
+          upload: "/api/v1/upload",
+          ingest: "/api/v1/ingest",
+          files: "/api/v1/files",
+          search: "/api/v1/search",
+          chat: "/api/v1/chat",
+        };
+
+        const state = {
+          conversationId: null,
+          pollTimer: null,
+        };
+
+        const dom = {
+          uploadForm: document.querySelector("#upload-form"),
+          uploadFile: document.querySelector("#upload-file"),
+          uploadTenant: document.querySelector("#upload-tenant"),
+          uploadButton: document.querySelector("#upload-button"),
+          refreshFiles: document.querySelector("#refresh-files"),
+          progress: document.querySelector("#upload-progress"),
+          log: document.querySelector("#upload-log"),
+          filesTable: document.querySelector("#files-table"),
+          searchForm: document.querySelector("#search-form"),
+          searchInput: document.querySelector("#search-input"),
+          searchResults: document.querySelector("#search-results"),
+          chatForm: document.querySelector("#chat-form"),
+          chatInput: document.querySelector("#chat-input"),
+          chatLog: document.querySelector("#chat-log"),
+          chatSend: document.querySelector("#chat-send"),
+          userId: document.querySelector("#user-id"),
+        };
+
+        function logStatus(message, type = "info") {
+          const entry = document.createElement("div");
+          entry.textContent = message;
+          if (type === "error") {
+            entry.classList.add("error");
+          }
+          dom.log.prepend(entry);
+          const entries = dom.log.querySelectorAll("div");
+          if (entries.length > 6) {
+            entries[entries.length - 1].remove();
+          }
+        }
+
+        function updateProgress(percent) {
+          dom.progress.hidden = false;
+          dom.progress.value = percent;
+          if (percent >= 100) {
+            setTimeout(() => {
+              dom.progress.hidden = true;
+              dom.progress.value = 0;
+            }, 800);
+          }
+        }
+
+        function normaliseRecord(raw) {
+          if (!raw) {
+            return null;
+          }
+          if (typeof raw !== "object") {
+            return null;
+          }
+          return {
+            id: raw.id ?? raw.file_id ?? null,
+            filename: raw.filename ?? raw.name ?? raw.id ?? "(unknown)",
+            status: (raw.status ?? raw.state ?? "").toString() || "pending",
+            chunks: raw.chunks ?? raw.chunk_count ?? 0,
+            error: raw.error ?? null,
+          };
+        }
+
+        function renderFiles(records) {
+          dom.filesTable.innerHTML = "";
+          if (!records.length) {
+            const row = document.createElement("tr");
+            const cell = document.createElement("td");
+            cell.colSpan = 4;
+            cell.textContent = "Нет загруженных файлов";
+            row.appendChild(cell);
+            dom.filesTable.appendChild(row);
+            return;
+          }
+          records.forEach((record) => {
+            const row = document.createElement("tr");
+            const nameCell = document.createElement("td");
+            nameCell.textContent = record.filename;
+            row.appendChild(nameCell);
+
+            const statusCell = document.createElement("td");
+            statusCell.textContent = record.status;
+            row.appendChild(statusCell);
+
+            const chunksCell = document.createElement("td");
+            chunksCell.textContent = record.chunks ?? "-";
+            row.appendChild(chunksCell);
+
+            const errorCell = document.createElement("td");
+            errorCell.textContent = record.error || "-";
+            row.appendChild(errorCell);
+
+            dom.filesTable.appendChild(row);
+          });
+        }
+
+        async function refreshFiles() {
+          try {
+            const response = await fetch(API.files, {
+              headers: buildTenantHeaders(),
+            });
+            if (!response.ok) {
+              throw new Error(`Не удалось получить список файлов: ${response.status}`);
+            }
+            const payload = await response.json();
+            const items = Array.isArray(payload?.files)
+              ? payload.files
+              : Array.isArray(payload)
+              ? payload
+              : [];
+            const records = items
+              .map((item) => normaliseRecord(item))
+              .filter(Boolean);
+            renderFiles(records);
+            return records;
+          } catch (error) {
+            console.error(error);
+            logStatus(error.message || "Не удалось получить статусы", "error");
+            return [];
+          }
+        }
+
+        function buildTenantHeaders() {
+          const headers = {};
+          const tenant = dom.uploadTenant.value.trim();
+          if (tenant) {
+            headers["X-Tenant"] = tenant;
+          }
+          return headers;
+        }
+
+        function pollIngestion(fileId, attempt = 0) {
+          clearTimeout(state.pollTimer);
+          state.pollTimer = setTimeout(async () => {
+            const records = await refreshFiles();
+            const record = records.find((item) => item.id === fileId);
+            if (!record) {
+              if (attempt < 20) {
+                pollIngestion(fileId, attempt + 1);
+              }
+              return;
+            }
+            if (["completed", "failed"].includes(record.status)) {
+              logStatus(
+                record.status === "completed"
+                  ? `Файл ${record.filename} успешно проиндексирован`
+                  : `Индексация ${record.filename} завершилась с ошибкой`
+              );
+              return;
+            }
+            if (attempt < 20) {
+              pollIngestion(fileId, attempt + 1);
+            }
+          }, 1500);
+        }
+
+        function uploadFile(file) {
+          return new Promise((resolve, reject) => {
+            const formData = new FormData();
+            formData.append("file", file);
+            const xhr = new XMLHttpRequest();
+            xhr.open("POST", API.upload);
+            const tenant = dom.uploadTenant.value.trim();
+            if (tenant) {
+              xhr.setRequestHeader("X-Tenant", tenant);
+            }
+            xhr.responseType = "json";
+            xhr.upload.addEventListener("progress", (event) => {
+              if (event.lengthComputable) {
+                const percent = Math.round((event.loaded / event.total) * 100);
+                updateProgress(percent);
+              }
+            });
+            xhr.addEventListener("load", () => {
+              try {
+                const payload = xhr.response ?? JSON.parse(xhr.responseText || "{}");
+                if (xhr.status >= 200 && xhr.status < 300) {
+                  resolve(payload);
+                } else {
+                  const message = payload?.detail || payload?.message || `Ошибка загрузки (${xhr.status})`;
+                  reject(new Error(message));
+                }
+              } catch (parseError) {
+                reject(parseError);
+              }
+            });
+            xhr.addEventListener("error", () => {
+              reject(new Error("Не удалось загрузить файл"));
+            });
+            xhr.send(formData);
+          });
+        }
+
+        async function ingestFile(fileId) {
+          const response = await fetch(API.ingest, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              ...buildTenantHeaders(),
+            },
+            body: JSON.stringify({ file_id: fileId }),
+          });
+          if (!response.ok) {
+            const payload = await safeJson(response);
+            const message = payload?.detail || payload?.error || `Ошибка индексации (${response.status})`;
+            throw new Error(message);
+          }
+          return response.json();
+        }
+
+        async function safeJson(response) {
+          try {
+            return await response.clone().json();
+          } catch (error) {
+            return null;
+          }
+        }
+
+        function appendChatMessage(role, text, options = {}) {
+          const container = document.createElement("div");
+          container.className = `chat-message ${role}`;
+
+          const bubble = document.createElement("div");
+          bubble.className = "bubble";
+          const lines = String(text || "").split(/\n/g);
+          lines.forEach((line, index) => {
+            if (index > 0) {
+              bubble.appendChild(document.createElement("br"));
+            }
+            bubble.appendChild(document.createTextNode(line));
+          });
+          container.appendChild(bubble);
+
+          if (Array.isArray(options.citations) && options.citations.length) {
+            const list = document.createElement("div");
+            list.className = "citations";
+            options.citations.forEach((citation, index) => {
+              const link = document.createElement("a");
+              const fileName = citation.file || `Источник ${index + 1}`;
+              const pageSuffix = citation.page != null ? `, страница ${citation.page}` : "";
+              link.href = "#";
+              link.textContent = `[${index + 1}] ${fileName}${pageSuffix}`;
+              link.addEventListener("click", (event) => {
+                event.preventDefault();
+                const query = citation.text || fileName;
+                if (query) {
+                  dom.searchInput.value = query;
+                  runSearch(query);
+                }
+              });
+              list.appendChild(link);
+            });
+            container.appendChild(list);
+          }
+
+          if (options.citationsInsufficient) {
+            const note = document.createElement("div");
+            note.className = "insufficient-note";
+            note.textContent = "Может потребоваться больше подтверждений";
+            container.appendChild(note);
+          }
+
+          dom.chatLog.appendChild(container);
+          dom.chatLog.scrollTop = dom.chatLog.scrollHeight;
+        }
+
+        async function runSearch(query) {
+          if (!query) {
+            return;
+          }
+          try {
+            dom.searchResults.textContent = "Поиск...";
+            const params = new URLSearchParams({ query });
+            const response = await fetch(`${API.search}?${params.toString()}`, {
+              headers: buildTenantHeaders(),
+            });
+            if (!response.ok) {
+              throw new Error(`Ошибка поиска (${response.status})`);
+            }
+            const payload = await response.json();
+            const hits = Array.isArray(payload?.hits) ? payload.hits : [];
+            renderSearchResults(hits);
+          } catch (error) {
+            dom.searchResults.textContent = error.message || "Поиск недоступен";
+          }
+        }
+
+        function renderSearchResults(hits) {
+          dom.searchResults.innerHTML = "";
+          if (!hits.length) {
+            dom.searchResults.textContent = "Совпадений не найдено";
+            return;
+          }
+          hits.forEach((hit, index) => {
+            const normalised = typeof hit === "object" && hit !== null ? hit : {};
+            const card = document.createElement("article");
+            card.className = "search-hit";
+
+            const title = document.createElement("h3");
+            const fileName = normalised.file || `Результат ${index + 1}`;
+            const page = normalised.page != null ? ` (стр. ${normalised.page})` : "";
+            title.textContent = `${fileName}${page}`;
+            card.appendChild(title);
+
+            const text = document.createElement("p");
+            text.textContent = normalised.text || "(нет предпросмотра)";
+            card.appendChild(text);
+
+            const meta = document.createElement("small");
+            meta.className = "muted";
+            const score = typeof normalised.score === "number" ? normalised.score.toFixed(3) : "–";
+            meta.textContent = `Score: ${score}`;
+            card.appendChild(meta);
+
+            dom.searchResults.appendChild(card);
+          });
+        }
+
+        async function handleUpload(event) {
+          event.preventDefault();
+          const file = dom.uploadFile.files?.[0];
+          if (!file) {
+            logStatus("Выберите файл перед загрузкой", "error");
+            return;
+          }
+          dom.uploadButton.disabled = true;
+          dom.refreshFiles.disabled = true;
+          logStatus(`Загрузка файла ${file.name}...`);
+          try {
+            const payload = await uploadFile(file);
+            logStatus(`Файл ${payload.filename || file.name} отправлен на сервер`);
+            await refreshFiles();
+            const ingestPayload = await ingestFile(payload.file_id || payload.id);
+            logStatus("Индексация запущена");
+            pollIngestion(ingestPayload.file_id || payload.file_id || payload.id || null);
+          } catch (error) {
+            logStatus(error.message || "Не удалось выполнить загрузку", "error");
+          } finally {
+            dom.uploadButton.disabled = false;
+            dom.refreshFiles.disabled = false;
+            dom.uploadForm.reset();
+          }
+        }
+
+        async function handleChat(event) {
+          event.preventDefault();
+          const message = dom.chatInput.value.trim();
+          if (!message) {
+            return;
+          }
+          const userId = dom.userId.value.trim() || "demo-user";
+          appendChatMessage("user", message);
+          dom.chatInput.value = "";
+          dom.chatSend.disabled = true;
+          try {
+            const response = await fetch(API.chat, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                ...buildTenantHeaders(),
+              },
+              body: JSON.stringify({
+                user_id: userId,
+                message,
+                conversation_id: state.conversationId,
+              }),
+            });
+            if (!response.ok) {
+              const payload = await safeJson(response);
+              throw new Error(payload?.detail || payload?.error || "Сервис недоступен");
+            }
+            const payload = await response.json();
+            state.conversationId = payload?.conversation_id || state.conversationId;
+            const citations = Array.isArray(payload?.citations) ? payload.citations : [];
+            appendChatMessage("assistant", payload?.answer || "(нет ответа)", {
+              citations: citations.map((item) => ({
+                file: item?.file ?? item?.filename ?? null,
+                page: item?.page ?? null,
+                text: item?.text ?? null,
+              })),
+              citationsInsufficient: Boolean(payload?.citations_insufficient),
+            });
+          } catch (error) {
+            appendChatMessage("assistant", error.message || "Чат недоступен", {
+              citations: [],
+              citationsInsufficient: false,
+            });
+          } finally {
+            dom.chatSend.disabled = false;
+            dom.chatInput.focus();
+          }
+        }
+
+        dom.uploadForm.addEventListener("submit", handleUpload);
+        dom.chatForm.addEventListener("submit", handleChat);
+        dom.searchForm.addEventListener("submit", (event) => {
+          event.preventDefault();
+          runSearch(dom.searchInput.value.trim());
+        });
+        dom.refreshFiles.addEventListener("click", () => refreshFiles());
+
+        refreshFiles();
+      })();
+    </script>
+  </body>
+</html>
