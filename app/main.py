@@ -1,24 +1,31 @@
+        codex/add-fastapi-routers-for-api-endpoints
+"""Application entrypoint configuring FastAPI and shared state."""
+
+
         codex/replace-compose.yml-with-docker-compose.yml
+        main
 from __future__ import annotations
 
 import logging
 import os
 import time
 from pathlib import Path
-from typing import Any, Iterable
+
+        codex/add-fastapi-routers-for-api-endpoints
+from fastapi import FastAPI
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile, status
+        main
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
 
-from app.chat.store import ChatStore, ConversationAccessError, ChatStoreProtocol
+from app.api.main import api_router
+from app.chat.store import ChatStore, ChatStoreProtocol
 from app.chat.summarizer import ConversationSummarizer
-from app.ingest import parse_and_chunk
+from app.core.deps import get_data_dir
 from app.memory.store import MemoryStore
-from app.ollama_client import ensure_model, generate
-from app.qdrant_client import ensure_collection, search_chunks
-from app.rag.context import build_context
+from app.ollama_client import generate
+from app.services.files import FileStore, IngestQueue
 
 load_dotenv()
 
@@ -86,6 +93,15 @@ RETRIEVE_TOPK = max(1, int(os.getenv("RETRIEVE_TOPK", "10")))
 _configured_rerank = int(os.getenv("RERANK_TOPK", str(RETRIEVE_TOPK)))
 RERANK_TOPK = max(1, min(RETRIEVE_TOPK, _configured_rerank))
 
+
+def _get_env_value(*names: str, default: str | None = None) -> str | None:
+    for name in names:
+        value = os.getenv(name)
+        if value is not None:
+            return value
+    return default
+
+
 def _init_chat_store() -> ChatStoreProtocol:
     backend = (os.getenv("CHAT_DB_BACKEND", "sqlite")).strip().lower()
     if backend in {"postgres", "postgresql"}:
@@ -111,14 +127,6 @@ def _init_chat_store() -> ChatStoreProtocol:
 
 chat_store = _init_chat_store()
 summarizer = ConversationSummarizer(chat_store, generate)
-
-
-def _get_env_value(*names: str, default: str | None = None) -> str | None:
-    for name in names:
-        value = os.getenv(name)
-        if value is not None:
-            return value
-    return default
 
 
 def _init_memory_store() -> MemoryStore | None:
@@ -154,12 +162,22 @@ def _init_memory_store() -> MemoryStore | None:
         return None
 
 
-app.mem = _init_memory_store()
+app.state.chat_store = chat_store
+app.state.summarizer = summarizer
+app.state.memory_store = _init_memory_store()
+app.state.file_store = FileStore()
+app.state.ingest_queue = IngestQueue()
+app.state.retrieve_topk = RETRIEVE_TOPK
+app.state.rerank_topk = RERANK_TOPK
+app.state.min_citations = MIN_CITATIONS
+app.state.max_citations = MAX_CITATIONS
+app.state.chat_history_limit = CHAT_HISTORY_LIMIT
+app.state.chat_summary_trigger = CHAT_SUMMARY_TRIGGER
 
-class ChatIn(BaseModel):
-    user_id: str
-    message: str
-    conversation_id: str | None = None
+
+@app.on_event("startup")
+def _ensure_data_dir() -> None:  # pragma: no cover - trivial filesystem side effect
+    get_data_dir()
 
 
 @app.get("/health", response_class=JSONResponse)
@@ -171,6 +189,9 @@ def health() -> JSONResponse:
 def health_head() -> JSONResponse:
     return health()
 
+
+        codex/add-fastapi-routers-for-api-endpoints
+app.include_router(api_router)
 
 def _normalise_extension(filename: str) -> str:
     name = (filename or "").strip()
@@ -197,6 +218,7 @@ def _index_chunks(chunks: Iterable[dict[str, Any]]) -> int:
 from __future__ import annotations
 
 from app.core.app import create_app
+        main
 
 app = create_app()
 
