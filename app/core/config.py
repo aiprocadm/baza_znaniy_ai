@@ -174,6 +174,10 @@ class Settings(BaseSettings):
         default=384,
         validation_alias=AliasChoices("VECTOR_EMBED_DIMENSION", "EMBED_DIMENSION"),
     )
+    embed_batch_size: int = Field(
+        default=32,
+        validation_alias=AliasChoices("EMBED_BATCH_SIZE"),
+    )
     llm_provider: str = Field(
         default="ollama",
         validation_alias=AliasChoices("LLM_PROVIDER"),
@@ -210,6 +214,7 @@ class Settings(BaseSettings):
         "vector_embed_dimension",
         "chat_memory_ttl_days",
         "chat_memory_max_tokens",
+        "embed_batch_size",
         "access_token_expire_minutes",
         mode="before",
     )

@@ -5,11 +5,13 @@ from __future__ import annotations
 import logging
 from typing import Iterable, List
 
-from app.qdrant_client import ensure_collection, search_chunks as qdrant_search, upsert_chunks
+from app.core.config import get_settings
+from app.retriever import get_vector_store
 
 LOGGER = logging.getLogger(__name__)
 
 _FALLBACK_INDEX: List[dict[str, object]] = []
+_VECTOR_STORE = get_vector_store(get_settings())
 
 
 def index_chunks(chunks: Iterable[dict[str, object]]) -> int:
@@ -20,8 +22,8 @@ def index_chunks(chunks: Iterable[dict[str, object]]) -> int:
         return 0
 
     try:
-        ensure_collection()
-        upsert_chunks(items)
+        _VECTOR_STORE.ensure_ready()
+        _VECTOR_STORE.upsert(items)
         return len(items)
     except Exception:  # pragma: no cover - gracefully degrade when Qdrant is unavailable
         LOGGER.exception("Falling back to in-memory index")
@@ -52,8 +54,8 @@ def search(query: str, top_k: int = 10) -> List[dict[str, object]]:
     """Run a similarity search returning at most *top_k* hits."""
 
     try:
-        ensure_collection()
-        return qdrant_search(query, top_k=top_k)
+        _VECTOR_STORE.ensure_ready()
+        return _VECTOR_STORE.search(query, top_k=top_k)
     except Exception:  # pragma: no cover - fallback path used in tests
         LOGGER.exception("Falling back to in-memory search")
         return _search_fallback(query, top_k)

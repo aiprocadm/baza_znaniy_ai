@@ -26,7 +26,7 @@ def _serialise_payload(payload: dict[str, Any]) -> dict[str, Any]:
 def export_all(output: Path) -> int:
     settings = get_settings()
     vector_store = get_vector_store(settings)
-    vector_store.ensure_collection()
+    vector_store.ensure_ready()
 
     exported: list[dict[str, Any]] = []
     for payload in vector_store.export_payloads():

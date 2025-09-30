@@ -96,12 +96,13 @@ SaaS.
 | `EMBED_MODEL` | `intfloat/multilingual-e5-small` | Модель эмбеддингов. |
 
 | `DATA_DIR` | `/opt/knowlab/data/files` | Каталог для загружаемых документов и базы чатов. |
-| `VECTOR_BACKEND` | `qdrant` | Тип векторного движка (поддерживается `qdrant`). |
+| `VECTOR_BACKEND` | `qdrant` | Тип векторного движка (поддерживаются `qdrant` и `faiss`). |
 | `QDRANT_URL` | `http://qdrant:6333` | Эндпоинт Qdrant. |
 | `QDRANT_COLLECTION` | `kb_chunks` | Коллекция для документов. |
 | `QDRANT_API_KEY` | пусто | Ключ доступа к Qdrant при необходимости. |
 | `VECTOR_EMBED_MODEL` | `intfloat/multilingual-e5-small` | Модель эмбеддингов. |
 | `VECTOR_EMBED_DIMENSION` | `384` | Размерность эмбеддингов (для контроля совместимости). |
+| `EMBED_BATCH_SIZE` | `32` | Размер батча при расчёте эмбеддингов. |
 | `LLM_PROVIDER` | `ollama` | Провайдер LLM. |
 | `LLM_MODEL_NAME` | `qwen2.5:3b-instruct` | Модель генерации ответов. |
 | `OLLAMA_BASE_URL` | `http://ollama:11434` | Базовый URL Ollama. |

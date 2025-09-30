@@ -26,16 +26,22 @@ def import_all(path: Path, *, reset: bool = False) -> int:
     settings = get_settings()
     vector_store = get_vector_store(settings)
     if reset:
-        vector_store.reset_collection()
+        if hasattr(vector_store, "reset_collection"):
+            vector_store.reset_collection()
+        else:  # pragma: no cover - utility guard
+            raise NotImplementedError("Active vector store does not support reset")
     else:
-        vector_store.ensure_collection()
+        vector_store.ensure_ready()
 
     data = json.loads(path.read_text())
     if not isinstance(data, list):
         raise ValueError("Ожидается список записей в JSON")
 
     payloads = [_normalise_payload(item) for item in data if isinstance(item, dict)]
-    vector_store.import_payloads(payloads)
+    if hasattr(vector_store, "import_payloads"):
+        vector_store.import_payloads(payloads)
+    else:  # pragma: no cover - utility guard
+        raise NotImplementedError("Active vector store does not support import")
     return len(payloads)
 
 

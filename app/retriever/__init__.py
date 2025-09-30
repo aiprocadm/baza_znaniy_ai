@@ -1,6 +1,17 @@
 """Retriever package exposing the configured vector store."""
 
 from app.core.config import Settings
-from .qdrant import QdrantVectorStore, get_vector_store
+from .vector_store import (
+    FaissVectorStore,
+    QdrantVectorStore,
+    VectorStore,
+    get_vector_store,
+)
 
-__all__ = ["QdrantVectorStore", "get_vector_store", "Settings"]
+__all__ = [
+    "VectorStore",
+    "QdrantVectorStore",
+    "FaissVectorStore",
+    "get_vector_store",
+    "Settings",
+]
