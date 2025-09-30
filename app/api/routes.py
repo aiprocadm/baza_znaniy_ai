@@ -14,6 +14,7 @@ from app.ingest import parse_and_chunk
 from app.memory.store import MemoryStore
 from app.models.chat import ChatIn
 from app.rag.context import build_context
+from app.retriever.rerank import apply_rerank
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -170,9 +171,15 @@ def chat(request: Request, inp: ChatIn) -> dict[str, Any]:
             logger.exception("Vector search failed; using fallback index")
     if not hits and fallback_index:
         hits = fallback_index[: settings.retrieve_topk]
-    rerank_limit = settings.rerank_limit
-    if len(hits) > rerank_limit:
-        hits = hits[:rerank_limit]
+
+    reranker = getattr(request.app.state, "reranker", None)
+    hits = apply_rerank(
+        inp.message,
+        hits,
+        settings.rerank_limit,
+        settings.rerank_enabled,
+        reranker,
+    )
     context = build_context(hits, token_limit=3000)
 
     prompt_parts = [

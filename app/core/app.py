@@ -10,7 +10,7 @@ from app.core.config import get_settings
 from app.core.services import init_chat_store, init_memory_store
 from app.ingest import parse_and_chunk  # ensure package initialised for scripts
 from app.llm import get_llm_client
-from app.retriever import get_vector_store
+from app.retriever import CrossEncoderReranker, get_reranker, get_vector_store
 
 
 def create_app() -> FastAPI:
@@ -23,6 +23,9 @@ def create_app() -> FastAPI:
     llm_client = get_llm_client(settings)
     vector_store = get_vector_store(settings)
     summarizer = ConversationSummarizer(chat_store, llm_client.generate)
+    reranker: CrossEncoderReranker | None = None
+    if settings.rerank_enabled:
+        reranker = get_reranker()
     memory_store = init_memory_store(settings)
 
     application.state.settings = settings
@@ -32,6 +35,7 @@ def create_app() -> FastAPI:
     application.state.summarizer = summarizer
     application.state.memory_store = memory_store
     application.state.fallback_index: list[dict[str, object]] = []
+    application.state.reranker = reranker
 
     application.include_router(api_router)
     return application
