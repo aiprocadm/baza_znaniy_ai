@@ -18,11 +18,11 @@ EMBED_DIMENSION = _settings.vector_embed_dimension
 
 
 def ensure_collection() -> None:
-    _vector_store.ensure_collection()
+    _vector_store.ensure_ready()
 
 
 def upsert_chunks(chunks: Iterable[dict[str, object]]) -> None:
-    _vector_store.upsert_chunks(chunks)
+    _vector_store.upsert(chunks)
 
 
 def search_chunks(query: str, top_k: int = 10) -> list[dict[str, object]]:

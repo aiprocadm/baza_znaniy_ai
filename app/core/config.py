@@ -122,9 +122,15 @@ class Settings(BaseSettings):
         default=False,
         validation_alias=AliasChoices("RERANK_ENABLED"),
     )
+        codex/implement-reranking-functionality-and-tests
     rerank_topk: int | None = Field(
         default=None,
         validation_alias=AliasChoices("RERANK_TOPK"),
+
+    rerank_topk: int = Field(
+        default=10,
+        validation_alias=AliasChoices("RERANK_TOP_K", "RERANK_TOPK"),
+        main
     )
     chat_memory_enabled: bool = Field(
         default=False,
@@ -158,6 +164,10 @@ class Settings(BaseSettings):
         default="qdrant",
         validation_alias=AliasChoices("VECTOR_BACKEND"),
     )
+    embed_batch_size: int = Field(
+        default=32,
+        validation_alias=AliasChoices("EMBED_BATCH_SIZE", "VECTOR_EMBED_BATCH_SIZE"),
+    )
     qdrant_url: str = Field(
         default="http://qdrant:6333",
         validation_alias=AliasChoices("QDRANT_URL"),
@@ -184,11 +194,15 @@ class Settings(BaseSettings):
     )
     llm_model_name: str = Field(
         default="qwen2.5:3b-instruct",
-        validation_alias=AliasChoices("LLM_MODEL_NAME", "GEN_MODEL"),
+        validation_alias=AliasChoices("LLM_MODEL_NAME", "GEN_MODEL", "OLLAMA_MODEL"),
     )
     ollama_base_url: str = Field(
         default="http://ollama:11434",
         validation_alias=AliasChoices("OLLAMA_BASE_URL", "OLLAMA_HOST"),
+    )
+    max_context_tokens: int = Field(
+        default=4096,
+        validation_alias=AliasChoices("MAX_CONTEXT_TOKENS"),
     )
     secret_key: str = Field(
         default="change-me",
@@ -213,6 +227,7 @@ class Settings(BaseSettings):
         "rag_chunk",
         "rag_overlap",
         "vector_embed_dimension",
+        "embed_batch_size",
         "chat_memory_ttl_days",
         "chat_memory_max_tokens",
         "access_token_expire_minutes",
