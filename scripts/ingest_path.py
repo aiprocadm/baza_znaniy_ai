@@ -8,10 +8,11 @@ from pathlib import Path
 from typing import Iterable
 
 from app.core.config import get_settings
+from app.core.deps import DEFAULT_ALLOWED_EXTENSIONS
 from app.ingest import parse_and_chunk
 from app.retriever import get_vector_store
 
-SUPPORTED_EXTENSIONS = {".pdf", ".docx", ".txt"}
+SUPPORTED_EXTENSIONS = {f".{ext}" for ext in DEFAULT_ALLOWED_EXTENSIONS}
 
 
 def _iter_documents(root: Path) -> Iterable[Path]:
