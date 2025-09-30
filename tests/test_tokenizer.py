@@ -33,6 +33,22 @@ def test_truncate_tokens_limits_output(tokens, limit, expected):
     assert truncate_tokens(tokens, limit) == expected
 
 
+def test_truncate_tokens_returns_new_list_for_tuples():
+    tokens = ("a", "b")
+    truncated = truncate_tokens(tokens, limit=5)
+
+    assert isinstance(truncated, list)
+    assert truncated == ["a", "b"]
+
+    truncated.append("c")
+    assert tokens == ("a", "b")
+
+
+def test_truncate_tokens_and_count_tokens_whitespace_behavior():
+    assert truncate_tokens((), limit=5) == []
+    assert count_tokens("\n\n") == 2
+
+
 @pytest.mark.parametrize(
     "text",
     [
