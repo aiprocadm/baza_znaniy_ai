@@ -122,9 +122,15 @@ class Settings(BaseSettings):
         default=False,
         validation_alias=AliasChoices("RERANK_ENABLED"),
     )
+        codex/implement-reranking-functionality-and-tests
+    rerank_topk: int | None = Field(
+        default=None,
+        validation_alias=AliasChoices("RERANK_TOPK"),
+
     rerank_topk: int = Field(
         default=10,
         validation_alias=AliasChoices("RERANK_TOP_K", "RERANK_TOPK"),
+        main
     )
     chat_memory_enabled: bool = Field(
         default=False,
@@ -241,6 +247,22 @@ class Settings(BaseSettings):
         if isinstance(value, str):
             return value.lower() in {"1", "true", "yes", "on"}
         return bool(value)
+
+    @field_validator("rerank_topk", mode="before")
+    @classmethod
+    def _optional_int(cls, value: object) -> int | None:
+        if value in {None, ""}:
+            return None
+        return int(value)
+
+    @field_validator("rerank_topk", mode="after")
+    @classmethod
+    def _validate_rerank_topk(cls, value: int | None) -> int | None:
+        if value is None:
+            return None
+        if value < 1:
+            raise ValueError("RERANK_TOPK must be at least 1")
+        return value
 
     @field_validator("ollama_base_url")
     @classmethod
