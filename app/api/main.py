@@ -1,3 +1,4 @@
+        codex/add-fastapi-routers-for-api-endpoints
 """Aggregate FastAPI routers."""
 
 from __future__ import annotations
@@ -22,3 +23,10 @@ except TypeError:  # pragma: no cover - fallback for test stubs without prefix s
 
 
 __all__ = ["api_router"]
+
+"""Application entrypoint for running the FastAPI service with Uvicorn."""
+
+from app.main import app  # noqa: F401
+
+__all__ = ["app"]
+        main

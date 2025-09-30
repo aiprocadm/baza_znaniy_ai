@@ -1,5 +1,9 @@
+        codex/add-fastapi-routers-for-api-endpoints
 """Application entrypoint configuring FastAPI and shared state."""
 
+
+        codex/replace-compose.yml-with-docker-compose.yml
+        main
 from __future__ import annotations
 
 import logging
@@ -7,7 +11,12 @@ import os
 import time
 from pathlib import Path
 
+        codex/add-fastapi-routers-for-api-endpoints
 from fastapi import FastAPI
+
+from dotenv import load_dotenv
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile, status
+        main
 from fastapi.responses import JSONResponse
 
 from app.api.main import api_router
@@ -18,12 +27,63 @@ from app.memory.store import MemoryStore
 from app.ollama_client import generate
 from app.services.files import FileStore, IngestQueue
 
+load_dotenv()
+
+
+def _resolve_path(value: str | None, default: Path) -> Path:
+    if value:
+        return Path(value).expanduser().resolve()
+    return default
+
+
+DATA_DIR = _resolve_path(os.getenv("DATA_DIR"), Path("/app/var/data"))
+FILES_ROOT = _resolve_path(os.getenv("FILES_ROOT"), DATA_DIR / "files")
+LOG_DIR = _resolve_path(os.getenv("LOG_DIR"), DATA_DIR / "logs")
+LOG_FILE = _resolve_path(os.getenv("APP_LOG_FILE"), LOG_DIR / "app.log")
+_DEFAULT_CHAT_DB_PATH = FILES_ROOT / "db" / "chat_history.sqlite"
+_DEFAULT_MEMORY_DB_PATH = FILES_ROOT / "db" / "memory.sqlite"
+
+
+def _ensure_runtime_directories() -> None:
+    for directory in (DATA_DIR, FILES_ROOT, FILES_ROOT / "db", LOG_DIR):
+        directory.mkdir(parents=True, exist_ok=True)
+    LOG_FILE.touch(exist_ok=True)
+
+
+def _configure_logging() -> None:
+    _ensure_runtime_directories()
+    log_level = os.getenv("LOG_LEVEL", "INFO").upper()
+    formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+
+    root_logger = logging.getLogger()
+    root_logger.setLevel(log_level)
+
+    if not any(
+        isinstance(handler, logging.StreamHandler) and not isinstance(handler, logging.FileHandler)
+        for handler in root_logger.handlers
+    ):
+        stream_handler = logging.StreamHandler()
+        stream_handler.setFormatter(formatter)
+        root_logger.addHandler(stream_handler)
+
+    if not any(
+        isinstance(handler, logging.FileHandler) and Path(handler.baseFilename) == LOG_FILE
+        for handler in root_logger.handlers
+    ):
+        file_handler = logging.FileHandler(LOG_FILE, encoding="utf-8")
+        file_handler.setFormatter(formatter)
+        root_logger.addHandler(file_handler)
+
+    for handler in root_logger.handlers:
+        handler.setLevel(log_level)
+
+
+_configure_logging()
+
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="kb")
 
-FILES_ROOT = Path(os.getenv("FILES_ROOT", "/opt/knowlab/data/files"))
-_DEFAULT_CHAT_DB_PATH = FILES_ROOT / "db" / "chat_history.sqlite"
 CHAT_DB_PATH = Path(os.getenv("CHAT_DB_PATH", str(_DEFAULT_CHAT_DB_PATH)))
 CHAT_HISTORY_LIMIT = int(os.getenv("CHAT_HISTORY_LIMIT", "12"))
 CHAT_SUMMARY_TRIGGER = int(os.getenv("CHAT_SUMMARY_TRIGGER", "10"))
@@ -75,9 +135,7 @@ def _init_memory_store() -> MemoryStore | None:
     if not enabled:
         return None
 
-    memory_db_path = Path(
-        os.getenv("MEMORY_DB_PATH", str(FILES_ROOT / "db" / "memory.sqlite"))
-    )
+    memory_db_path = Path(os.getenv("MEMORY_DB_PATH", str(_DEFAULT_MEMORY_DB_PATH)))
     ttl_days = int(_get_env_value("CHAT_MEMORY_TTL_DAYS", "MEMORY_TTL_DAYS", default="90") or "90")
     summary_trigger = int(
         _get_env_value(
@@ -132,7 +190,36 @@ def health_head() -> JSONResponse:
     return health()
 
 
+        codex/add-fastapi-routers-for-api-endpoints
 app.include_router(api_router)
 
+def _normalise_extension(filename: str) -> str:
+    name = (filename or "").strip()
+    if "." not in name:
+        return ""
+    return name.rsplit(".", 1)[-1].lower()
+
+
+def _index_chunks(chunks: Iterable[dict[str, Any]]) -> int:
+    items = list(chunks)
+    if not items:
+        return 0
+
+    try:  # pragma: no cover - optional dependency initialisation
+        ensure_collection()
+    except Exception:
+        logger.exception("Failed to ensure vector store; using fallback index")
+        _FALLBACK_INDEX.extend(items)
+        return len(items)
+
+"""Entrypoint for the FastAPI application."""
+        main
+
+from __future__ import annotations
+
+from app.core.app import create_app
+        main
+
+app = create_app()
 
 __all__ = ["app"]
