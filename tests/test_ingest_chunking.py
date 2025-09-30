@@ -73,9 +73,6 @@ def _expected_windows(
     return windows
 
 
-    assert _chunk("hello", chunk=0, overlap=2) == list("hello")
-
-
 def test_chunk_progress_with_high_overlap() -> None:
     text = "abcdef"
     chunks = _chunk(text, chunk=2, overlap=5)
@@ -174,6 +171,101 @@ def test_chunk_handles_single_token_multi_char_text() -> None:
     assert chunks == list(text)
 
 
+def test_chunk_small_window_char_tokenizer_fallback() -> None:
+    class ExpandingTokenizer:
+        def encode(self, text: str) -> List[int]:
+            return [1] if text else []
+
+        def decode(self, tokens: List[int]) -> str:
+            return "expansion" if tokens else ""
+
+    tokenizer = ExpandingTokenizer()
+    chunk = 5
+    overlap = 2
+    text = "trigger"
+
+    pieces = _chunk(text, chunk=chunk, overlap=overlap, encoder=tokenizer)
+
+    expanded = tokenizer.decode(tokenizer.encode(text))
+    char_tokenizer = ingest._CharTokenizer()
+    expected = _expected_windows(expanded, chunk, overlap, tokenizer=char_tokenizer)
+    encoded_pieces = [char_tokenizer.encode(piece) for piece in pieces]
+
+    assert encoded_pieces == expected
+
+
+def test_chunk_small_window_reencoded_branch() -> None:
+    class ReencodingTokenizer:
+        def encode(self, text: str) -> List[int]:
+            if text == "seed":
+                return [1, 2]
+            if text == "ab":
+                return [3, 4]
+            if not text:
+                return []
+            return [9] * len(text)
+
+        def decode(self, tokens: List[int]) -> str:
+            if tokens in ([1, 2], [3, 4]):
+                return "ab"
+            if not tokens:
+                return ""
+            return "x" * len(tokens)
+
+    tokenizer = ReencodingTokenizer()
+    text = "seed"
+
+    pieces = _chunk(text, chunk=5, overlap=0, encoder=tokenizer)
+
+    assert pieces == ["ab"]
+    assert tokenizer.encode(pieces[0]) == [3, 4]
+
+
+def test_chunk_small_window_returns_original_tokens_when_fallback_empty() -> None:
+    class FlakyStr(str):
+        def __new__(cls, value: str):
+            obj = super().__new__(cls, value)
+            obj._first = True
+            return obj
+
+        def __bool__(self) -> bool:
+            if getattr(self, "_first", False):
+                object.__setattr__(self, "_first", False)
+                return True
+            return False
+
+    class EmptyFallbackTokenizer:
+        def encode(self, text: str) -> List[int]:
+            return [7] if text == "" else [ord(ch) for ch in text]
+
+        def decode(self, tokens: List[int]) -> str:
+            return "" if tokens else ""
+
+    text = FlakyStr("")
+    tokenizer = EmptyFallbackTokenizer()
+
+    pieces = _chunk(text, chunk=5, overlap=0, encoder=tokenizer)
+
+    assert pieces == [""]
+    assert tokenizer.encode(pieces[0]) == [7]
+
+
+def test_chunk_with_tiny_window_uses_characters_and_handles_empty_tokens() -> None:
+    assert _chunk("hello", chunk=0, overlap=2) == list("hello")
+
+    class TruthyEmptyStr(str):
+        def __new__(cls, value: str):
+            obj = super().__new__(cls, value)
+            return obj
+
+        def __bool__(self) -> bool:
+            return True
+
+    empty_text = TruthyEmptyStr("")
+
+    assert _chunk(empty_text, chunk=1, overlap=0) == []
+
+
 def test_parse_and_chunk_preserves_metadata_and_tokens() -> None:
     text = "page content " * 20
     payload = text.encode("utf-8")
@@ -185,3 +277,16 @@ def test_parse_and_chunk_preserves_metadata_and_tokens() -> None:
     assert encoded == expected
     assert all(chunk["file"] == "example.txt" for chunk in chunks)
     assert all(chunk["page"] == 1 for chunk in chunks)
+
+
+def test_parse_and_chunk_requires_extension() -> None:
+    payload = b"contents"
+
+    assert parse_and_chunk("", payload) == []
+    assert parse_and_chunk("no_extension", payload) == []
+
+
+def test_parse_and_chunk_rejects_unsupported_extension() -> None:
+    payload = b"contents"
+
+    assert parse_and_chunk("example.csv", payload) == []
