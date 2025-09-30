@@ -172,6 +172,10 @@ def chat(request: Request, inp: ChatIn) -> dict[str, Any]:
     if not hits and fallback_index:
         hits = fallback_index[: settings.retrieve_topk]
 
+        codex/clean-up-code-and-run-tests
+    reranker = getattr(request.app.state, "reranker", None)
+
+        main
     hits = apply_rerank(
         inp.message,
         hits,

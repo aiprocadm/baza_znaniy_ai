@@ -147,7 +147,11 @@ class Settings(BaseSettings):
     )
     rerank_topk: int | None = Field(
         default=None,
+        codex/clean-up-code-and-run-tests
+        validation_alias=AliasChoices("RERANK_TOP_K", "RERANK_TOPK"),
+
         validation_alias=AliasChoices("RERANK_TOPK", "RERANK_TOP_K"),
+        main
     )
 
     # Memory store -------------------------------------------------------
