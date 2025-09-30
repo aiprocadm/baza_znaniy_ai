@@ -122,15 +122,9 @@ class Settings(BaseSettings):
         default=False,
         validation_alias=AliasChoices("RERANK_ENABLED"),
     )
-        codex/implement-reranking-functionality-and-tests
     rerank_topk: int | None = Field(
         default=None,
-        validation_alias=AliasChoices("RERANK_TOPK"),
-
-    rerank_topk: int = Field(
-        default=10,
         validation_alias=AliasChoices("RERANK_TOP_K", "RERANK_TOPK"),
-        main
     )
     chat_memory_enabled: bool = Field(
         default=False,
@@ -227,7 +221,6 @@ class Settings(BaseSettings):
         "chat_min_citations",
         "chat_max_citations",
         "retrieve_topk",
-        "rerank_topk",
         "rag_chunk",
         "rag_overlap",
         "vector_embed_dimension",
