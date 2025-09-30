@@ -9,7 +9,7 @@ from typing import Iterable
 from pydantic import AliasChoices, BaseModel, Field
 
 try:  # pragma: no cover - support for environments without computed_field
-    from pydantic import computed_field
+    from pydantic import computed_field, field_validator
 except ImportError:  # pragma: no cover - test stubs
 
     def computed_field(*args, **kwargs):  # type: ignore[no-redef]
@@ -20,10 +20,6 @@ except ImportError:  # pragma: no cover - test stubs
             return decorator(args[0])
         return decorator
 
-try:  # pragma: no cover - support for environments without field_validator
-    from pydantic import field_validator
-except ImportError:  # pragma: no cover - test stubs
-
     def field_validator(*args, **kwargs):  # type: ignore[no-redef]
         def decorator(func):
             return func
@@ -31,7 +27,8 @@ except ImportError:  # pragma: no cover - test stubs
         if args and callable(args[0]):
             return decorator(args[0])
         return decorator
-try:
+
+try:  # pragma: no cover - support for environments without pydantic-settings
     from pydantic_settings import BaseSettings, SettingsConfigDict
 except ImportError:  # pragma: no cover - test stubs
     import os
@@ -82,6 +79,14 @@ class Settings(BaseSettings):
         default=Path("/opt/knowlab/data/files"),
         validation_alias=AliasChoices("DATA_DIR", "FILES_ROOT"),
     )
+    cors_allow_origins: list[str] = Field(
+        default_factory=lambda: ["*"],
+        validation_alias=AliasChoices(
+            "CORS_ALLOW_ORIGINS",
+            "CORS_ALLOWED_ORIGINS",
+            "ALLOWED_ORIGINS",
+        ),
+    )
     chat_db_backend: str = Field(
         default="sqlite",
         validation_alias=AliasChoices("CHAT_DB_BACKEND"),
@@ -122,15 +127,9 @@ class Settings(BaseSettings):
         default=False,
         validation_alias=AliasChoices("RERANK_ENABLED"),
     )
-        codex/implement-reranking-functionality-and-tests
     rerank_topk: int | None = Field(
         default=None,
-        validation_alias=AliasChoices("RERANK_TOPK"),
-
-    rerank_topk: int = Field(
-        default=10,
-        validation_alias=AliasChoices("RERANK_TOP_K", "RERANK_TOPK"),
-        main
+        validation_alias=AliasChoices("RERANK_TOPK", "RERANK_TOP_K"),
     )
     chat_memory_enabled: bool = Field(
         default=False,
@@ -188,10 +187,6 @@ class Settings(BaseSettings):
         default=384,
         validation_alias=AliasChoices("VECTOR_EMBED_DIMENSION", "EMBED_DIMENSION"),
     )
-    embed_batch_size: int = Field(
-        default=32,
-        validation_alias=AliasChoices("EMBED_BATCH_SIZE"),
-    )
     llm_provider: str = Field(
         default="ollama",
         validation_alias=AliasChoices("LLM_PROVIDER"),
@@ -227,36 +222,26 @@ class Settings(BaseSettings):
         "chat_min_citations",
         "chat_max_citations",
         "retrieve_topk",
-        "rerank_topk",
         "rag_chunk",
         "rag_overlap",
         "vector_embed_dimension",
         "embed_batch_size",
         "chat_memory_ttl_days",
         "chat_memory_max_tokens",
-        "embed_batch_size",
         "access_token_expire_minutes",
+        "max_context_tokens",
         mode="before",
     )
     @classmethod
-    def _ensure_int(cls, value: object) -> int:
-        return int(value) if value not in {None, ""} else 0
-
-    @field_validator(
-        "chat_memory_enabled",
-        "rerank_enabled",
-        mode="before",
-    )
-    @classmethod
-    def _normalise_bool(cls, value: object) -> bool:
-        if isinstance(value, str):
-            return value.lower() in {"1", "true", "yes", "on"}
-        return bool(value)
+    def _ensure_int(cls, value: object) -> object:
+        if value in {None, "", Ellipsis}:
+            return value
+        return int(value)
 
     @field_validator("rerank_topk", mode="before")
     @classmethod
     def _optional_int(cls, value: object) -> int | None:
-        if value in {None, ""}:
+        if value in {None, "", Ellipsis}:
             return None
         return int(value)
 
@@ -269,10 +254,69 @@ class Settings(BaseSettings):
             raise ValueError("RERANK_TOPK must be at least 1")
         return value
 
-    @field_validator("ollama_base_url")
+    @field_validator("chat_memory_enabled", "rerank_enabled", mode="before")
+    @classmethod
+    def _normalise_bool(cls, value: object) -> bool:
+        if isinstance(value, str):
+            return value.lower() in {"1", "true", "yes", "on"}
+        return bool(value)
+
+    @field_validator("ollama_base_url", mode="after")
     @classmethod
     def _strip_trailing_slash(cls, value: str) -> str:
         return value.rstrip("/")
+
+    @field_validator("cors_allow_origins", mode="before")
+    @classmethod
+    def _normalise_origins(cls, value: object) -> list[str]:
+        if value in {None, "", Ellipsis}:
+            return ["*"]
+        if isinstance(value, str):
+            items = [piece.strip() for piece in value.split(",") if piece.strip()]
+            return items or ["*"]
+        if isinstance(value, Iterable):
+            items = [str(item).strip() for item in value if str(item).strip()]
+            return items or ["*"]
+        raise ValueError("CORS origins must be a string or iterable")
+
+    @field_validator("cors_allow_origins", mode="after")
+    @classmethod
+    def _ensure_origins(cls, value: list[str]) -> list[str]:
+        return value or ["*"]
+
+    @field_validator("chat_db_backend", mode="after")
+    @classmethod
+    def _normalise_backend(cls, value: str) -> str:
+        return (value or "sqlite").strip().lower()
+
+    @field_validator("vector_backend", mode="after")
+    @classmethod
+    def _normalise_vector_backend(cls, value: str) -> str:
+        return (value or "qdrant").strip().lower()
+
+    @field_validator("llm_provider", mode="after")
+    @classmethod
+    def _normalise_provider(cls, value: str) -> str:
+        return (value or "ollama").strip().lower()
+
+    @field_validator("data_dir", "chat_db_path", "memory_db_path", mode="before")
+    @classmethod
+    def _expand_path(cls, value: object) -> object:
+        if isinstance(value, str) and value:
+            return Path(value).expanduser()
+        return value
+
+    @field_validator("chat_db_path", "memory_db_path", mode="after")
+    @classmethod
+    def _absolute_path(cls, value: Path | None) -> Path | None:
+        if value is None:
+            return None
+        return value.expanduser().resolve()
+
+    @field_validator("data_dir", mode="after")
+    @classmethod
+    def _ensure_dir(cls, value: Path) -> Path:
+        return value.expanduser()
 
     @computed_field
     @property
@@ -296,43 +340,9 @@ class Settings(BaseSettings):
     @computed_field
     @property
     def citations_bounds(self) -> tuple[int, int]:
-        minimum = max(1, self.chat_min_citations)
-        maximum = max(minimum, self.chat_max_citations)
+        minimum = max(1, int(self.chat_min_citations))
+        maximum = max(minimum, int(self.chat_max_citations))
         return minimum, maximum
-
-    @field_validator("chat_db_backend")
-    @classmethod
-    def _normalise_backend(cls, value: str) -> str:
-        return (value or "sqlite").strip().lower()
-
-    @field_validator("vector_backend")
-    @classmethod
-    def _normalise_vector_backend(cls, value: str) -> str:
-        return (value or "qdrant").strip().lower()
-
-    @field_validator("llm_provider")
-    @classmethod
-    def _normalise_provider(cls, value: str) -> str:
-        return (value or "ollama").strip().lower()
-
-    @field_validator("data_dir", "chat_db_path", "memory_db_path", mode="before")
-    @classmethod
-    def _expand_path(cls, value: object) -> object:
-        if isinstance(value, str) and value:
-            return Path(value).expanduser()
-        return value
-
-    @field_validator("chat_db_path", "memory_db_path", mode="after")
-    @classmethod
-    def _absolute_path(cls, value: Path | None) -> Path | None:
-        if value is None:
-            return None
-        return value.expanduser().resolve()
-
-    @field_validator("data_dir", mode="after")
-    @classmethod
-    def _ensure_dir(cls, value: Path) -> Path:
-        return value.expanduser()
 
     def iter_secret_fields(self) -> Iterable[str]:
         """Return names of settings that contain secrets."""
