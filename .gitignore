@@ -1,2 +1,7 @@
 __pycache__/
 *.pyc
+var/*
+!var/.gitkeep
+!var/data/
+var/data/*
+!var/data/.gitkeep
