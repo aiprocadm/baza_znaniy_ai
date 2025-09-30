@@ -79,6 +79,7 @@ _install_qdrant_stubs()
 
 from app import qdrant_client as qc
 from qdrant_client.http import models as qmodels
+from qdrant_client.http.exceptions import UnexpectedResponse
 
 
 @pytest.fixture(autouse=True)
@@ -212,6 +213,16 @@ def test_ensure_collection_recreates_when_missing(mocked_qdrant: MagicMock) -> N
     assert {c.kwargs["field_name"] for c in payload_calls} == {"file", "page", "sha256"}
 
 
+def test_ensure_collection_handles_unexpected_response(mocked_qdrant: MagicMock) -> None:
+    mocked_qdrant.get_collection.side_effect = UnexpectedResponse("boom")
+
+    qc.ensure_collection()
+
+    mocked_qdrant.recreate_collection.assert_called_once()
+    payload_calls = mocked_qdrant.create_payload_index.call_args_list
+    assert len(payload_calls) == 3
+
+
 def test_ensure_collection_skips_recreate_for_matching_size(mocked_qdrant: MagicMock) -> None:
     mocked_qdrant.get_collection.return_value = _collection_info(qc.EMBED_DIMENSION)
 
@@ -263,6 +274,23 @@ def test_upsert_chunks_deduplicates_by_sha256(monkeypatch: pytest.MonkeyPatch, m
         if point.id == "a":
             assert point.payload["text"] == "updated"
             assert point.payload["page"] == 3
+
+
+def test_upsert_chunks_skips_client_when_no_embeddings(
+    monkeypatch: pytest.MonkeyPatch, mocked_qdrant: MagicMock
+) -> None:
+    ensure_mock = MagicMock()
+    monkeypatch.setattr(qc, "ensure_collection", ensure_mock)
+    encode_mock = MagicMock(
+        return_value=np.zeros((0, qc.EMBED_DIMENSION), dtype=np.float32)
+    )
+    monkeypatch.setattr(qc, "_encode_texts", encode_mock)
+
+    qc.upsert_chunks([{"sha256": "a", "text": "ignored"}])
+
+    ensure_mock.assert_called_once()
+    encode_mock.assert_called_once_with(["ignored"])
+    mocked_qdrant.upsert.assert_not_called()
 
 
 def test_upsert_chunks_raises_without_sha(monkeypatch: pytest.MonkeyPatch, mocked_qdrant: MagicMock) -> None:
@@ -345,6 +373,19 @@ def test_search_chunks_skips_search_for_empty_query(monkeypatch: pytest.MonkeyPa
     ensure_mock.assert_called_once()
     mocked_qdrant.search.assert_not_called()
     assert results == []
+
+
+def test_search_chunks_uses_default_top_k(monkeypatch: pytest.MonkeyPatch, mocked_qdrant: MagicMock) -> None:
+    ensure_mock = MagicMock()
+    monkeypatch.setattr(qc, "ensure_collection", ensure_mock)
+    query_vector = np.full((1, qc.EMBED_DIMENSION), 1.0 / qc.EMBED_DIMENSION, dtype=np.float32)
+    monkeypatch.setattr(qc, "_encode_texts", MagicMock(return_value=query_vector))
+    mocked_qdrant.search.return_value = []
+
+    qc.search_chunks("query")
+
+    mocked_qdrant.search.assert_called_once()
+    assert mocked_qdrant.search.call_args.kwargs["limit"] == 10
 
 
 def test_encode_texts_returns_zeros_for_empty_input() -> None:
