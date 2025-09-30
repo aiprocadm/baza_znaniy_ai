@@ -92,6 +92,8 @@ class ChatResponse(BaseModel):
     conversation_id: str
     citations_insufficient: bool
     latency_ms: float
+    max_context_tokens: Optional[int] = None
+    max_generation_tokens: Optional[int] = None
 
 
 class FileInfo(BaseModel):

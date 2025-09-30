@@ -53,6 +53,7 @@ def settings() -> Settings:
         ollama_base_url="http://ollama:11434",
         llm_model_name="test-model",
         max_context_tokens=1024,
+        max_generation_tokens=256,
     )
 
 
@@ -137,7 +138,10 @@ def test_generate_posts_prompt_and_returns_response(
                 "model": provider.model_name,
                 "prompt": "hello world",
                 "stream": False,
-                "options": {"num_ctx": settings.max_context_tokens},
+                "options": {
+                    "num_ctx": settings.max_context_tokens,
+                    "num_predict": settings.max_generation_tokens,
+                },
             },
         )
     ]

@@ -197,7 +197,7 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("LLM_PROVIDER"),
     )
     llm_model_name: str = Field(
-        default="qwen2.5:3b-instruct",
+        default="llama3.1:8b",
         validation_alias=AliasChoices("LLM_MODEL_NAME", "GEN_MODEL", "OLLAMA_MODEL"),
     )
     ollama_base_url: str = Field(
@@ -205,8 +205,12 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("OLLAMA_BASE_URL", "OLLAMA_HOST"),
     )
     max_context_tokens: int = Field(
-        default=4096,
+        default=6000,
         validation_alias=AliasChoices("MAX_CONTEXT_TOKENS"),
+    )
+    max_generation_tokens: int = Field(
+        default=0,
+        validation_alias=AliasChoices("MAX_GENERATION_TOKENS"),
     )
     secret_key: str = Field(
         default="change-me",
@@ -234,6 +238,7 @@ class Settings(BaseSettings):
         "embed_batch_size",
         "chat_memory_ttl_days",
         "chat_memory_max_tokens",
+        "max_generation_tokens",
         "embed_batch_size",
         "access_token_expire_minutes",
         mode="before",

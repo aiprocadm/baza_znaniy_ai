@@ -249,6 +249,8 @@ def chat(request: Request, inp: ChatIn) -> dict[str, Any]:
         "conversation_id": conversation_id,
         "citations_insufficient": not has_minimum_citations,
         "latency_ms": (time.perf_counter() - start) * 1000,
+        "max_context_tokens": settings.max_context_tokens or None,
+        "max_generation_tokens": settings.max_generation_tokens or None,
     }
 
 
