@@ -84,11 +84,36 @@ class Settings(BaseSettings):
         populate_by_name=True,
     )
 
+        codex/expand-env.example-and-update-configuration
+    app_env: str = Field(
+        default="development",
+        validation_alias=AliasChoices("APP_ENV", "ENV", "ENVIRONMENT"),
+    )
+    app_host: str = Field(
+        default="0.0.0.0",
+        validation_alias=AliasChoices("APP_HOST", "HOST"),
+    )
+    app_port: int = Field(
+        default=8000,
+        validation_alias=AliasChoices("APP_PORT", "PORT"),
+    )
+
     # Core paths ---------------------------------------------------------
+        main
     data_dir: Path = Field(
-        default=Path("/opt/knowlab/data/files"),
+        default=Path("./var/data"),
         validation_alias=AliasChoices("DATA_DIR", "FILES_ROOT"),
     )
+        codex/expand-env.example-and-update-configuration
+    db_url: str = Field(
+        default="sqlite+aiosqlite:///./var/data/kb.sqlite",
+        validation_alias=AliasChoices("DB_URL", "INGEST_DB_URL"),
+    )
+    max_upload_mb: int = Field(
+        default=25,
+        validation_alias=AliasChoices("MAX_UPLOAD_MB", "UPLOAD_MAX_MB"),
+    )
+
         codex/create-file-upload-progress-ui-with-fastapi
     cors_allow_origins: list[str] = Field(
         default_factory=lambda: ["*"],
@@ -102,6 +127,7 @@ class Settings(BaseSettings):
     files_subdir: str = Field(default="files", validation_alias=AliasChoices("FILES_SUBDIR"))
 
     # Chat storage -------------------------------------------------------
+        main
         main
     chat_db_backend: str = Field(
         default="sqlite",
@@ -145,12 +171,18 @@ class Settings(BaseSettings):
         default=False,
         validation_alias=AliasChoices("RERANK_ENABLED"),
     )
+        codex/expand-env.example-and-update-configuration
+    rerank_topk: int = Field(
+        default=10,
+        validation_alias=AliasChoices("RERANK_TOP_K", "RERANK_TOPK"),
+
     rerank_topk: int | None = Field(
         default=None,
         codex/clean-up-code-and-run-tests
         validation_alias=AliasChoices("RERANK_TOP_K", "RERANK_TOPK"),
 
         validation_alias=AliasChoices("RERANK_TOPK", "RERANK_TOP_K"),
+        main
         main
     )
 
@@ -215,10 +247,13 @@ class Settings(BaseSettings):
         default=384,
         validation_alias=AliasChoices("VECTOR_EMBED_DIMENSION", "EMBED_DIMENSION"),
     )
+        codex/expand-env.example-and-update-configuration
+
         codex/create-file-upload-progress-ui-with-fastapi
 
 
     # LLM provider -------------------------------------------------------
+        main
         main
     llm_provider: str = Field(
         default="ollama",
@@ -236,6 +271,12 @@ class Settings(BaseSettings):
         default=6000,
         validation_alias=AliasChoices("MAX_CONTEXT_TOKENS"),
     )
+        codex/expand-env.example-and-update-configuration
+    max_generation_tokens: int = Field(
+        default=512,
+        validation_alias=AliasChoices("MAX_GENERATION_TOKENS"),
+    )
+
         codex/update-default-model-and-settings-5pychu
     max_generation_tokens: int = Field(
         default=1024,
@@ -244,6 +285,7 @@ class Settings(BaseSettings):
 
 
     # Security -----------------------------------------------------------
+        main
         main
     secret_key: str = Field(
         default="change-me",
@@ -279,6 +321,13 @@ class Settings(BaseSettings):
         "embed_batch_size",
         "chat_memory_ttl_days",
         "chat_memory_max_tokens",
+        codex/expand-env.example-and-update-configuration
+        "access_token_expire_minutes",
+        "app_port",
+        "max_upload_mb",
+        "max_context_tokens",
+        "max_generation_tokens",
+
         codex/create-file-upload-progress-ui-with-fastapi
         "access_token_expire_minutes",
         "max_context_tokens",
@@ -298,6 +347,7 @@ class Settings(BaseSettings):
         main
         "access_token_expire_minutes",
         "rate_burst",
+        main
         mode="before",
     )
     @classmethod
@@ -314,16 +364,21 @@ class Settings(BaseSettings):
 
     @field_validator("rerank_topk", mode="before")
     @classmethod
+        codex/expand-env.example-and-update-configuration
+    def _optional_int(cls, value: object) -> int:
+        if value in {None, ""}:
+            default = cls.model_fields["rerank_topk"].default  # type: ignore[index]
+            return int(default) if default is not None else 0
+
     def _optional_int(cls, value: object) -> int | None:
         if value in {None, "", Ellipsis}:
             return None
+        main
         return int(value)
 
     @field_validator("rerank_topk", mode="after")
     @classmethod
-    def _validate_rerank_topk(cls, value: int | None) -> int | None:
-        if value is None:
-            return None
+    def _validate_rerank_topk(cls, value: int) -> int:
         if value < 1:
             raise ValueError("RERANK_TOPK must be at least 1")
         return value
