@@ -1,4 +1,4 @@
-        codex/implement-vector-store-interface-and-refactor-qdrant-logic
+        # codex/implement-vector-store-interface-and-refactor-qdrant-logic
 """Vector store abstractions and concrete implementations."""
 
 from __future__ import annotations
@@ -20,12 +20,12 @@ from __future__ import annotations
 
 from functools import lru_cache
 from typing import Iterable, Protocol, runtime_checkable
-        main
+        # main
 
 from app.core.config import Settings, get_settings
 
 
-        codex/implement-vector-store-interface-and-refactor-qdrant-logic
+        # codex/implement-vector-store-interface-and-refactor-qdrant-logic
 logger = logging.getLogger(__name__)
 
 
@@ -528,4 +528,4 @@ def get_vector_store(settings: Settings | None = None) -> VectorStore:
 
 
 __all__ = ["VectorStore", "get_vector_store"]
-        main
+        # main

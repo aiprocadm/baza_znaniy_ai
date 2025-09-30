@@ -171,7 +171,7 @@ def chat(request: Request, inp: ChatIn) -> dict[str, Any]:
             logger.exception("Vector search failed; using fallback index")
     if not hits and fallback_index:
         hits = fallback_index[: settings.retrieve_topk]
-        codex/implement-reranking-functionality-and-tests
+        # codex/implement-reranking-functionality-and-tests
     rerank_limit = settings.rerank_limit
     if hits:
         if settings.rerank_enabled and reranker is not None:
@@ -192,7 +192,7 @@ def chat(request: Request, inp: ChatIn) -> dict[str, Any]:
         settings.rerank_enabled,
         reranker,
     )
-        main
+        # main
     context = build_context(hits, token_limit=3000)
 
     prompt_parts = [

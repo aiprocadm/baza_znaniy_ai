@@ -1,4 +1,4 @@
-        codex/implement-reranking-functionality-and-tests
+        # codex/implement-reranking-functionality-and-tests
 """Cross-encoder based reranking utilities."""
 
 from __future__ import annotations
@@ -82,25 +82,25 @@ class CrossEncoderReranker:
     def __init__(self, model_name: str = DEFAULT_MODEL_NAME) -> None:
         self.model_name = model_name
         self._model = CrossEncoder(model_name)
-        main
+        # main
 
     def rerank(
         self,
         query: str,
         hits: Sequence[dict[str, object]],
         top_k: int,
-        codex/implement-reranking-functionality-and-tests
+        # codex/implement-reranking-functionality-and-tests
     ) -> List[dict[str, object]]:
         """Return the highest scoring hits ordered by cross-encoder scores."""
 
     ) -> list[dict[str, object]]:
         """Return the highest scoring hits for ``query`` with updated scores."""
-        main
+        # main
 
         if not hits:
             return []
 
-        codex/implement-reranking-functionality-and-tests
+        # codex/implement-reranking-functionality-and-tests
         limit = max(1, min(int(top_k), len(hits)))
 
         pairs: List[tuple[str, str]] = []
@@ -177,4 +177,4 @@ __all__ = [
     "get_reranker",
     "is_rerank_enabled",
 ]
-        main
+        # main

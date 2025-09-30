@@ -3,15 +3,17 @@
 from __future__ import annotations
 
 import hashlib
+import time
 from importlib import reload
 from pathlib import Path
 from typing import Iterator, List
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlmodel import Session
 
 from tests.service_stubs import install_service_stubs
-from app.services.files import FileStore, IngestQueue
+from app.models import file as file_models
 
 
 @pytest.fixture()
@@ -19,57 +21,74 @@ def api_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Test
     """Provide a test client with deterministic stubs for external services."""
 
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("DB_URL", f"sqlite:///{tmp_path / 'ingest.db'}")
     install_service_stubs()
+
+    from app.core import config as config_module
+
+    config_module.get_settings.cache_clear()
+    file_models.get_engine.cache_clear()
 
     import app.main as app_main  # noqa: WPS433 - imported inside fixture for stubbing
 
     reload(app_main)
     app = app_main.app
 
-    app.state.file_store = FileStore()
-    app.state.ingest_queue = IngestQueue()
-
     import app.api.v1.chat as chat_module
-    import app.api.v1.ingest as ingest_module
     import app.api.v1.search as search_module
     from app.core import deps as core_deps
+    from app.services import vectorstore as vectorstore_module
 
     assert any(route.path == "/api/v1/upload" for route in app.routes)
 
+    app.dependency_overrides = {}
+
+    def session_override():
+        service = app.state.ingest_service
+        with Session(service.engine) as session:
+            yield session
+
     app.dependency_overrides = {
-        core_deps.get_file_store: lambda: app.state.file_store,
-        core_deps.get_ingest_queue: lambda: app.state.ingest_queue,
+        core_deps.get_ingest_service: lambda: app.state.ingest_service,
+        core_deps.get_ingest_session: session_override,
         core_deps.get_tenant: lambda: "default",
     }
 
     chunks: List[dict[str, object]] = []
 
-    def fake_parse(filename: str, data: bytes) -> List[dict[str, object]]:
-        text = data.decode("utf-8")
-        sha = hashlib.sha256(f"{filename}:1:{text}".encode("utf-8")).hexdigest()
-        return [
-            {
-                "file": filename,
-                "page": 1,
-                "sha256": sha,
-                "text": text,
-                "score": 1.0,
-            }
-        ]
-
     def fake_index(parsed: List[dict[str, object]]) -> int:
+        chunks.clear()
         chunks.extend(parsed)
         return len(parsed)
 
-    monkeypatch.setattr(ingest_module, "parse_and_chunk", fake_parse)
-    monkeypatch.setattr(ingest_module, "index_chunks", fake_index)
+    monkeypatch.setattr(vectorstore_module, "index_chunks", fake_index)
     monkeypatch.setattr(search_module, "search", lambda query, top_k=5: chunks[:top_k])
     monkeypatch.setattr(chat_module, "search", lambda query, top_k=10: chunks[:top_k])
     monkeypatch.setattr(chat_module, "ensure_model", lambda: None)
     monkeypatch.setattr(chat_module, "generate", lambda prompt: "Ответ")
 
     client = TestClient(app)
-    yield client
+    try:
+        yield client
+    finally:
+        client.close()
+        file_models.get_engine.cache_clear()
+        config_module.get_settings.cache_clear()
+
+
+def _wait_for_completion(client: TestClient, file_id: str, timeout: float = 2.0) -> None:
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        files_response = client.get("/api/v1/files")
+        if files_response.status_code != 200:
+            time.sleep(0.05)
+            continue
+        files_payload = files_response.json()
+        for entry in files_payload.get("files", []):
+            if entry["id"] == file_id and entry["status"] == "completed":
+                return
+        time.sleep(0.05)
+    raise AssertionError("file did not complete ingestion in time")
 
 
 def test_full_pipeline(api_client: TestClient) -> None:
@@ -86,7 +105,9 @@ def test_full_pipeline(api_client: TestClient) -> None:
     assert upload_payload["queued"] is True
     file_id = upload_payload["file_id"]
 
-    ingest_response = api_client.post("/api/v1/ingest", json={"file_id": file_id})
+    _wait_for_completion(api_client, file_id)
+
+    ingest_response = api_client.post("/api/v1/ingest", json={"file_id": file_id, "force": True})
     assert ingest_response.status_code == 200
     ingest_payload = ingest_response.json()
     assert ingest_payload["status"] == "completed"

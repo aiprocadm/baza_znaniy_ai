@@ -5,11 +5,13 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Iterable, Optional
+from typing import Iterable, Iterator, Optional
 
 from fastapi import Request
 
-from app.services.files import FileStore, IngestQueue
+from sqlmodel import Session
+
+from app.ingest.service import IngestService
 
 
 @dataclass
@@ -66,27 +68,27 @@ def get_tenant(request: Request = None) -> str:
     return tenant or "default"
 
 
-def get_file_store(request: Request = None) -> FileStore:
-    """Access the shared :class:`~app.services.files.FileStore` instance."""
+def get_ingest_service(request: Request = None) -> IngestService:
+    """Access the shared :class:`~app.ingest.service.IngestService` instance."""
 
     if request is None:
-        raise RuntimeError("Request context is required for file store access")
-    return request.app.state.file_store
+        raise RuntimeError("Request context is required for ingest service access")
+    return request.app.state.ingest_service
 
 
-def get_ingest_queue(request: Request = None) -> IngestQueue:
-    """Access the shared :class:`~app.services.files.IngestQueue` instance."""
+def get_ingest_session(request: Request = None) -> Iterator[Session]:
+    """Provide a database session tied to the ingest service engine."""
 
-    if request is None:
-        raise RuntimeError("Request context is required for ingest queue access")
-    return request.app.state.ingest_queue
+    service = get_ingest_service(request)
+    with Session(service.engine) as session:
+        yield session
 
 
 __all__ = [
     "UploadLimits",
     "get_data_dir",
-    "get_file_store",
-    "get_ingest_queue",
+    "get_ingest_service",
+    "get_ingest_session",
     "get_tenant",
     "get_upload_limits",
 ]

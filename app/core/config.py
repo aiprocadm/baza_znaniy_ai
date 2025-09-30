@@ -122,15 +122,9 @@ class Settings(BaseSettings):
         default=False,
         validation_alias=AliasChoices("RERANK_ENABLED"),
     )
-        codex/implement-reranking-functionality-and-tests
-    rerank_topk: int | None = Field(
-        default=None,
-        validation_alias=AliasChoices("RERANK_TOPK"),
-
     rerank_topk: int = Field(
         default=10,
         validation_alias=AliasChoices("RERANK_TOP_K", "RERANK_TOPK"),
-        main
     )
     chat_memory_enabled: bool = Field(
         default=False,
@@ -159,6 +153,14 @@ class Settings(BaseSettings):
     rag_overlap: int = Field(
         default=140,
         validation_alias=AliasChoices("RAG_OVERLAP"),
+    )
+    ingest_max_retries: int = Field(
+        default=3,
+        validation_alias=AliasChoices("INGEST_MAX_RETRIES"),
+    )
+    ingest_backoff_seconds: float = Field(
+        default=1.0,
+        validation_alias=AliasChoices("INGEST_BACKOFF_SECONDS", "INGEST_BACKOFF_BASE"),
     )
     vector_backend: str = Field(
         default="qdrant",

@@ -28,9 +28,12 @@ class FileRecord(SQLModel, table=True):
     tenant_id: str = Field(index=True)
     sha256: str = Field(index=True)
     path: str
+    filename: str
+    size: int = Field(default=0, ge=0)
     status: str = Field(default=FileStatus.QUEUED, index=True)
     retries: int = Field(default=0)
     error: Optional[str] = Field(default=None)
+    chunks: Optional[int] = Field(default=None)
     created_at: datetime = Field(default_factory=datetime.utcnow, nullable=False)
     updated_at: datetime = Field(default_factory=datetime.utcnow, nullable=False)
 
