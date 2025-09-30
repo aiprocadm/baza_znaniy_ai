@@ -1,7 +1,11 @@
-import importlib.util
-from pathlib import Path
 import sys
 import types
+import importlib.util
+from pathlib import Path
+
+import pytest
+
+from app.rag import context as app_context
 
 ROOT = Path(__file__).resolve().parents[1]
 SERVICE_ROOT = ROOT / "srv" / "projects" / "kb" / "app"
@@ -85,4 +89,58 @@ def test_select_citations_caps_at_maximum():
     assert len(citations) == 5
     assert citations[0]["file"] == "doc0.pdf"
     assert citations[-1]["file"] == "doc4.pdf"
+    assert has_minimum is True
+
+
+def test_app_build_context_skips_hits_with_empty_tokens(monkeypatch):
+    def stub_tokenize(text: str):
+        if text == "ignored":
+            return []
+        return list(text)
+
+    monkeypatch.setattr(app_context, "tokenize", stub_tokenize)
+    monkeypatch.setattr(app_context, "detokenize", lambda tokens: "".join(tokens))
+
+    hits = [
+        {"text": "ignored"},
+        {"text": "kept"},
+    ]
+
+    context = app_context.build_context(hits, token_limit=10)
+
+    assert context == "kept"
+
+
+def test_app_build_context_breaks_when_separator_exhausts_limit(monkeypatch):
+    monkeypatch.setattr(app_context, "tokenize", lambda text: list(text))
+    monkeypatch.setattr(app_context, "detokenize", lambda tokens: "".join(tokens))
+
+    hits = [
+        {"text": "abc"},
+        {"text": "def"},
+        {"text": "ghi"},
+    ]
+
+    context = app_context.build_context(hits, token_limit=4)
+
+    assert context == "abc\n"
+
+
+def test_app_select_citations_raises_on_invalid_bounds():
+    with pytest.raises(ValueError):
+        app_context.select_citations([], minimum=3, maximum=2)
+
+
+def test_app_select_citations_deduplicates_without_file_and_page():
+    hits = [
+        {"chunk_id": "chunk-a", "id": 1, "text": "alpha"},
+        {"chunk_id": "chunk-b", "id": 2, "text": "beta"},
+        {"chunk_id": "chunk-a", "id": 1, "text": "alpha"},
+    ]
+
+    citations, has_minimum = app_context.select_citations(hits, minimum=1, maximum=5)
+
+    assert len(citations) == 2
+    assert citations[0]["chunk_id"] == "chunk-a"
+    assert citations[1]["chunk_id"] == "chunk-b"
     assert has_minimum is True
