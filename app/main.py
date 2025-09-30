@@ -23,8 +23,8 @@ from app.api.main import api_router
 from app.chat.store import ChatStore, ChatStoreProtocol
 from app.chat.summarizer import ConversationSummarizer
 from app.core.deps import get_data_dir
+from app.llm.providers import get_llm_provider
 from app.memory.store import MemoryStore
-from app.ollama_client import generate
 from app.services.files import FileStore, IngestQueue
 
 load_dotenv()
@@ -92,6 +92,7 @@ MAX_CITATIONS = max(MIN_CITATIONS, int(os.getenv("CHAT_MAX_CITATIONS", "5")))
 RETRIEVE_TOPK = max(1, int(os.getenv("RETRIEVE_TOPK", "10")))
 _configured_rerank = int(os.getenv("RERANK_TOPK", str(RETRIEVE_TOPK)))
 RERANK_TOPK = max(1, min(RETRIEVE_TOPK, _configured_rerank))
+CONTEXT_TOKEN_LIMIT = max(1, int(os.getenv("MAX_CONTEXT_TOKENS", "3000")))
 
 
 def _get_env_value(*names: str, default: str | None = None) -> str | None:
@@ -126,7 +127,8 @@ def _init_chat_store() -> ChatStoreProtocol:
 
 
 chat_store = _init_chat_store()
-summarizer = ConversationSummarizer(chat_store, generate)
+llm_provider = get_llm_provider()
+summarizer = ConversationSummarizer(chat_store, lambda prompt: llm_provider.generate(prompt))
 
 
 def _init_memory_store() -> MemoryStore | None:
@@ -163,6 +165,7 @@ def _init_memory_store() -> MemoryStore | None:
 
 
 app.state.chat_store = chat_store
+app.state.llm_provider = llm_provider
 app.state.summarizer = summarizer
 app.state.memory_store = _init_memory_store()
 app.state.file_store = FileStore()
@@ -173,11 +176,20 @@ app.state.min_citations = MIN_CITATIONS
 app.state.max_citations = MAX_CITATIONS
 app.state.chat_history_limit = CHAT_HISTORY_LIMIT
 app.state.chat_summary_trigger = CHAT_SUMMARY_TRIGGER
+app.state.context_token_limit = CONTEXT_TOKEN_LIMIT
 
 
 @app.on_event("startup")
 def _ensure_data_dir() -> None:  # pragma: no cover - trivial filesystem side effect
     get_data_dir()
+    provider = getattr(app.state, "llm_provider", None)
+    if provider is None:
+        provider = get_llm_provider()
+        app.state.llm_provider = provider
+    try:
+        provider.ensure_model()
+    except Exception:  # pragma: no cover - defensive guard
+        logger.debug("Failed to eagerly ensure LLM model availability", exc_info=True)
 
 
 @app.get("/health", response_class=JSONResponse)

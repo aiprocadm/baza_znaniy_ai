@@ -128,13 +128,13 @@ async def upload(
 def chat(request: Request, inp: ChatIn) -> dict[str, Any]:
     settings = request.app.state.settings
     chat_store = request.app.state.chat_store
-    llm_client = request.app.state.llm_client
+    llm_provider = request.app.state.llm_provider
     vector_store = getattr(request.app.state, "vector_store", None)
     summarizer = request.app.state.summarizer
     memory_store = getattr(request.app.state, "memory_store", None)
     fallback_index = getattr(request.app.state, "fallback_index", [])
 
-    llm_client.ensure_model()
+    llm_provider.ensure_model()
     if vector_store is not None:
         try:  # pragma: no cover - defensive ensure call
             vector_store.ensure_collection()
@@ -173,7 +173,15 @@ def chat(request: Request, inp: ChatIn) -> dict[str, Any]:
     rerank_limit = settings.rerank_limit
     if len(hits) > rerank_limit:
         hits = hits[:rerank_limit]
-    context = build_context(hits, token_limit=3000)
+    context_text = build_context(hits, token_limit=settings.max_context_tokens)
+    context_for_provider = "\n".join(
+        part
+        for part in (
+            "Retrieved context:",
+            context_text or "(нет подходящего контекста)",
+        )
+        if part
+    )
 
     prompt_parts = [
         "You are a helpful assistant providing concise answers based on the provided documentation context.",
@@ -186,18 +194,15 @@ def chat(request: Request, inp: ChatIn) -> dict[str, Any]:
     if memory_text:
         prompt_parts.extend(["Long-term memory:", memory_text])
     prompt_parts.extend([
-        "Retrieved context:",
-        context or "(нет подходящего контекста)",
-        "",
         f"User message: {inp.message}",
         "Сформулируй точный ответ, используя контекст, если он релевантен. Если данных недостаточно, сообщи об этом.",
     ])
-    prompt = "\n".join(part for part in prompt_parts if part is not None)
-
-    answer = llm_client.generate(prompt).strip()
-
     min_citations, max_citations = settings.citations_bounds
     citations, has_minimum_citations = _select_citations(hits, min_citations, max_citations)
+
+    message = "\n".join(part for part in prompt_parts if part is not None)
+
+    answer = llm_provider.generate(message, context=context_for_provider, citations=citations).strip()
 
     chat_store.record_exchange(conversation_id, inp.message, answer)
     if chat_store.messages_since_summary(conversation_id) >= settings.chat_summary_trigger:
@@ -209,8 +214,9 @@ def chat(request: Request, inp: ChatIn) -> dict[str, Any]:
         except Exception:  # pragma: no cover - defensive persistence handling
             logger.exception("Failed to persist memory entry")
 
-    answer_text = answer
-    if citations:
+    if llm_provider.formats_citations:
+        answer_text = answer
+    elif citations:
         formatted = []
         for idx, citation in enumerate(citations, start=1):
             location = citation.get("page")
@@ -221,6 +227,8 @@ def chat(request: Request, inp: ChatIn) -> dict[str, Any]:
                     f"[{idx}] {citation.get('file', 'неизвестный источник')} — страница {location}"
                 )
         answer_text = "\n\n".join([answer.strip(), "Источники:", "\n".join(formatted)])
+    else:
+        answer_text = answer
 
     return {
         "answer": answer_text,

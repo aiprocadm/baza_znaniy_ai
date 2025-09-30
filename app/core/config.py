@@ -180,7 +180,11 @@ class Settings(BaseSettings):
     )
     llm_model_name: str = Field(
         default="qwen2.5:3b-instruct",
-        validation_alias=AliasChoices("LLM_MODEL_NAME", "GEN_MODEL"),
+        validation_alias=AliasChoices("LLM_MODEL_NAME", "GEN_MODEL", "OLLAMA_MODEL"),
+    )
+    max_context_tokens: int = Field(
+        default=3000,
+        validation_alias=AliasChoices("MAX_CONTEXT_TOKENS"),
     )
     ollama_base_url: str = Field(
         default="http://ollama:11434",
@@ -210,6 +214,7 @@ class Settings(BaseSettings):
         "vector_embed_dimension",
         "chat_memory_ttl_days",
         "chat_memory_max_tokens",
+        "max_context_tokens",
         "access_token_expire_minutes",
         mode="before",
     )

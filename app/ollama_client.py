@@ -1,20 +1,20 @@
-"""Backward compatible wrappers for the Ollama client."""
+"""Backward compatible wrappers for the configured LLM provider."""
 
 from __future__ import annotations
 
-from app.llm import get_llm_client
+from app.llm import LLMProviderProtocol, get_llm_provider
 
-_client = get_llm_client()
-OLLAMA_BASE_URL = _client.base_url
-MODEL_NAME = _client.model_name
+_provider: LLMProviderProtocol = get_llm_provider()
+OLLAMA_BASE_URL = getattr(_provider, "base_url", "")
+MODEL_NAME = getattr(_provider, "model_name", "")
 
 
 def ensure_model() -> None:
-    _client.ensure_model()
+    _provider.ensure_model()
 
 
-def generate(prompt: str) -> str:
-    return _client.generate(prompt)
+def generate(prompt: str, context: str | None = None) -> str:
+    return _provider.generate(prompt, context=context)
 
 
 __all__ = ["ensure_model", "generate", "OLLAMA_BASE_URL", "MODEL_NAME"]

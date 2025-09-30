@@ -1,58 +1,23 @@
-"""Client wrapper around an Ollama deployment."""
+"""Backward compatible wrappers for the Ollama LLM provider."""
 
 from __future__ import annotations
 
-from typing import Any
-
-import httpx
-
-from app.core.config import Settings, get_settings
+from app.core.config import Settings
+from app.llm.providers import OllamaProvider
 
 
-class OllamaClient:
-    """HTTP client for interacting with an Ollama server."""
+class OllamaClient(OllamaProvider):
+    """Compatibility alias for legacy imports."""
 
     def __init__(self, settings: Settings | None = None) -> None:
-        self.settings = settings or get_settings()
-
-    @property
-    def base_url(self) -> str:
-        return self.settings.ollama_base_url.rstrip("/")
-
-    @property
-    def model_name(self) -> str:
-        return self.settings.llm_model_name
-
-    def ensure_model(self) -> None:
-        """Ensure the configured model is available locally."""
-
-        try:
-            with httpx.Client(timeout=60) as client:
-                response = client.get(f"{self.base_url}/api/tags")
-                response.raise_for_status()
-                models: list[dict[str, Any]] = response.json().get("models", [])
-                names = {item.get("name") for item in models}
-            if self.model_name in names:
-                return
-            with httpx.Client(timeout=None) as client:
-                client.post(f"{self.base_url}/api/pull", json={"name": self.model_name})
-        except Exception:  # pragma: no cover - service may be offline in tests
-            pass
-
-    def generate(self, prompt: str) -> str:
-        with httpx.Client(timeout=None) as client:
-            response = client.post(
-                f"{self.base_url}/api/generate",
-                json={"model": self.model_name, "prompt": prompt, "stream": False},
-            )
-            response.raise_for_status()
-            return response.json().get("response", "")
+        super().__init__(settings=settings)
 
 
 def get_llm_client(settings: Settings | None = None) -> OllamaClient:
-    """Return an :class:`OllamaClient` configured from :class:`Settings`."""
+    """Return an :class:`OllamaClient` instance."""
 
     return OllamaClient(settings=settings)
 
 
 __all__ = ["OllamaClient", "get_llm_client"]
+
