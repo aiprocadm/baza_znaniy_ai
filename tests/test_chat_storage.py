@@ -72,6 +72,28 @@ def test_conversation_summarizer_uses_existing_summary(tmp_path: Path) -> None:
     assert "assistant: второй ответ" in prompts[0]
 
 
+def test_conversation_summarizer_ignores_blank_summary(tmp_path: Path) -> None:
+    store = ChatStore(str(tmp_path / "blank.sqlite3"))
+    conversation_id = store.ensure_conversation("alice", None)
+
+    store.record_exchange(conversation_id, "вопрос", "ответ")
+
+    prompts: List[str] = []
+
+    def blank_llm(prompt: str) -> str:
+        prompts.append(prompt)
+        return "   "
+
+    summarizer = ConversationSummarizer(store, blank_llm, max_history=10)
+
+    summary = summarizer.summarize(conversation_id)
+
+    assert summary is None
+    assert store.get_summary(conversation_id) is None
+    assert store.messages_since_summary(conversation_id) == 2
+    assert prompts, "LLM should have been invoked"
+
+
 def test_memory_store_respects_ttl(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     store = MemoryStore(str(tmp_path / "memory.sqlite3"), ttl_days=1, summary_trigger=5, max_tokens=200)
 
