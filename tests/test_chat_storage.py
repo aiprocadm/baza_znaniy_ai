@@ -72,6 +72,21 @@ def test_conversation_summarizer_uses_existing_summary(tmp_path: Path) -> None:
     assert "assistant: второй ответ" in prompts[0]
 
 
+def test_conversation_summarizer_handles_empty_history(tmp_path: Path) -> None:
+    store = ChatStore(str(tmp_path / "empty.sqlite3"))
+    conversation_id = store.ensure_conversation("alice", None)
+
+    def failing_llm(_: str) -> str:
+        raise AssertionError("LLM should not be called for empty history")
+
+    summarizer = ConversationSummarizer(store, failing_llm, max_history=10)
+
+    summary = summarizer.summarize(conversation_id)
+
+    assert summary is None
+    assert store.get_summary(conversation_id) is None
+
+
 def test_memory_store_respects_ttl(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     store = MemoryStore(str(tmp_path / "memory.sqlite3"), ttl_days=1, summary_trigger=5, max_tokens=200)
 
