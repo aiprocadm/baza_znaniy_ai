@@ -78,9 +78,29 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
+    app_env: str = Field(
+        default="development",
+        validation_alias=AliasChoices("APP_ENV", "ENV", "ENVIRONMENT"),
+    )
+    app_host: str = Field(
+        default="0.0.0.0",
+        validation_alias=AliasChoices("APP_HOST", "HOST"),
+    )
+    app_port: int = Field(
+        default=8000,
+        validation_alias=AliasChoices("APP_PORT", "PORT"),
+    )
     data_dir: Path = Field(
-        default=Path("/opt/knowlab/data/files"),
+        default=Path("./var/data"),
         validation_alias=AliasChoices("DATA_DIR", "FILES_ROOT"),
+    )
+    db_url: str = Field(
+        default="sqlite+aiosqlite:///./var/data/kb.sqlite",
+        validation_alias=AliasChoices("DB_URL", "INGEST_DB_URL"),
+    )
+    max_upload_mb: int = Field(
+        default=25,
+        validation_alias=AliasChoices("MAX_UPLOAD_MB", "UPLOAD_MAX_MB"),
     )
     chat_db_backend: str = Field(
         default="sqlite",
@@ -122,15 +142,9 @@ class Settings(BaseSettings):
         default=False,
         validation_alias=AliasChoices("RERANK_ENABLED"),
     )
-        codex/implement-reranking-functionality-and-tests
-    rerank_topk: int | None = Field(
-        default=None,
-        validation_alias=AliasChoices("RERANK_TOPK"),
-
     rerank_topk: int = Field(
         default=10,
         validation_alias=AliasChoices("RERANK_TOP_K", "RERANK_TOPK"),
-        main
     )
     chat_memory_enabled: bool = Field(
         default=False,
@@ -188,10 +202,6 @@ class Settings(BaseSettings):
         default=384,
         validation_alias=AliasChoices("VECTOR_EMBED_DIMENSION", "EMBED_DIMENSION"),
     )
-    embed_batch_size: int = Field(
-        default=32,
-        validation_alias=AliasChoices("EMBED_BATCH_SIZE"),
-    )
     llm_provider: str = Field(
         default="ollama",
         validation_alias=AliasChoices("LLM_PROVIDER"),
@@ -205,8 +215,12 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("OLLAMA_BASE_URL", "OLLAMA_HOST"),
     )
     max_context_tokens: int = Field(
-        default=4096,
+        default=6000,
         validation_alias=AliasChoices("MAX_CONTEXT_TOKENS"),
+    )
+    max_generation_tokens: int = Field(
+        default=512,
+        validation_alias=AliasChoices("MAX_GENERATION_TOKENS"),
     )
     secret_key: str = Field(
         default="change-me",
@@ -234,8 +248,11 @@ class Settings(BaseSettings):
         "embed_batch_size",
         "chat_memory_ttl_days",
         "chat_memory_max_tokens",
-        "embed_batch_size",
         "access_token_expire_minutes",
+        "app_port",
+        "max_upload_mb",
+        "max_context_tokens",
+        "max_generation_tokens",
         mode="before",
     )
     @classmethod
@@ -255,16 +272,15 @@ class Settings(BaseSettings):
 
     @field_validator("rerank_topk", mode="before")
     @classmethod
-    def _optional_int(cls, value: object) -> int | None:
+    def _optional_int(cls, value: object) -> int:
         if value in {None, ""}:
-            return None
+            default = cls.model_fields["rerank_topk"].default  # type: ignore[index]
+            return int(default) if default is not None else 0
         return int(value)
 
     @field_validator("rerank_topk", mode="after")
     @classmethod
-    def _validate_rerank_topk(cls, value: int | None) -> int | None:
-        if value is None:
-            return None
+    def _validate_rerank_topk(cls, value: int) -> int:
         if value < 1:
             raise ValueError("RERANK_TOPK must be at least 1")
         return value

@@ -89,57 +89,46 @@ SaaS.
 
 | Переменная | Значение по умолчанию | Назначение |
 |------------|-----------------------|------------|
-        codex/replace-compose.yml-with-docker-compose.yml
-| `DATA_DIR` | `/app/var/data` | Базовый каталог данных, монтируемый в контейнер. |
-| `FILES_ROOT` | `DATA_DIR/files` | Каталог для загружаемых документов и памяти чата. |
-| `GEN_MODEL` | `qwen2.5:3b-instruct` | Модель для генерации ответов. |
-| `EMBED_MODEL` | `intfloat/multilingual-e5-small` | Модель эмбеддингов. |
-
-| `DATA_DIR` | `/opt/knowlab/data/files` | Каталог для загружаемых документов и базы чатов. |
+| `APP_ENV` | `development` | Рабочий профиль приложения (`development`, `production`, и т.д.). |
+| `APP_HOST` | `0.0.0.0` | Хост, на котором поднимается HTTP-сервер. |
+| `APP_PORT` | `8000` | Порт веб-приложения. |
+| `DATA_DIR` | `./var/data` | Базовый каталог данных, создаётся автоматически при старте. |
+| `DB_URL` | `sqlite+aiosqlite:///./var/data/kb.sqlite` | Хранилище метаданных загрузок и чанков. |
+| `MAX_UPLOAD_MB` | `25` | Максимальный размер загружаемого файла в мегабайтах. |
+| `UPLOAD_ALLOWED_EXTS` | `pdf,docx,txt` | Допустимые расширения файлов. |
 | `VECTOR_BACKEND` | `qdrant` | Тип векторного движка (поддерживаются `qdrant` и `faiss`). |
 | `QDRANT_URL` | `http://qdrant:6333` | Эндпоинт Qdrant. |
 | `QDRANT_COLLECTION` | `kb_chunks` | Коллекция для документов. |
 | `QDRANT_API_KEY` | пусто | Ключ доступа к Qdrant при необходимости. |
 | `VECTOR_EMBED_MODEL` | `intfloat/multilingual-e5-small` | Модель эмбеддингов. |
-| `VECTOR_EMBED_DIMENSION` | `384` | Размерность эмбеддингов (для контроля совместимости). |
-        codex/implement-vector-store-interface-and-refactor-qdrant-logic
+| `VECTOR_EMBED_DIMENSION` | `384` | Размерность эмбеддингов. |
 | `EMBED_BATCH_SIZE` | `32` | Размер батча при расчёте эмбеддингов. |
-| `LLM_PROVIDER` | `ollama` | Провайдер LLM. |
-| `LLM_MODEL_NAME` | `qwen2.5:3b-instruct` | Модель генерации ответов. |
-
 | `LLM_PROVIDER` | `ollama` | Провайдер LLM (`ollama` или `stub`). |
 | `LLM_MODEL_NAME` / `OLLAMA_MODEL` | `qwen2.5:3b-instruct` | Модель генерации ответов. |
-        main
 | `OLLAMA_BASE_URL` | `http://ollama:11434` | Базовый URL Ollama. |
-| `MAX_CONTEXT_TOKENS` | `4096` | Максимальное количество токенов контекста для Ollama. |
+| `MAX_CONTEXT_TOKENS` | `6000` | Максимальное количество токенов контекста для LLM. |
+| `MAX_GENERATION_TOKENS` | `512` | Лимит токенов на ответ модели. |
 | `RAG_TOKENIZER_NAME` | `cl100k_base` | Название токенизатора для разбиения. |
-        main
 | `RAG_CHUNK` | `900` | Размер чанка в токенах. |
 | `RAG_OVERLAP` | `140` | Перекрытие чанков. |
 | `RETRIEVE_TOPK` | `10` | Количество кандидатов из векторного поиска. |
+| `RERANK_ENABLED` | `false` | Включить этап повторного ранжирования. |
 | `RERANK_TOPK` | `10` | Сколько документов оставлять после повторного ранжирования. |
-| `CHAT_MEMORY_ENABLED` | `true` | Включить долговременную память чата. |
-| `MEMORY_DB_PATH` | пусто | Необязательный путь к базе памяти (по умолчанию `DATA_DIR/db/memory.sqlite`). |
-| `CHAT_MEMORY_TTL_DAYS` | `90` | Сколько дней хранить сообщения в памяти. |
-| `CHAT_MEMORY_MAXTOK` | `2000` | Максимальный объём памяти в условных «токенах». |
-| `CHAT_SUMMARY_TRIGGER` | `10` | Порог сообщений для запуска саммаризации. |
 | `CHAT_HISTORY_LIMIT` | `12` | Количество последних сообщений в краткосрочном контексте. |
-| `CHAT_DB_BACKEND` | `sqlite` | Тип хранилища истории чатов: `sqlite` или `postgres`. |
-| `CHAT_DB_PATH` | пусто | Необязательный путь к SQLite (по умолчанию `DATA_DIR/db/chat_history.sqlite`). |
-| `CHAT_DB_DSN` | пусто | Строка подключения к PostgreSQL при `CHAT_DB_BACKEND=postgres`. |
-| `CHAT_DB_SCHEMA` | пусто | Необязательная схема PostgreSQL. |
+| `CHAT_SUMMARY_TRIGGER` | `10` | Порог сообщений для запуска саммаризации. |
 | `CHAT_MIN_CITATIONS` | `3` | Минимальное число источников в ответе. |
 | `CHAT_MAX_CITATIONS` | `5` | Максимальное число источников в ответе. |
-        codex/replace-compose.yml-with-docker-compose.yml
-| `QDRANT_URL` | `http://qdrant:6333` | Эндпоинт Qdrant. |
-| `QDRANT_COLLECTION` | `kb_chunks` | Коллекция для документов. |
-| `QDRANT_API_KEY` | пусто | Ключ доступа к Qdrant при необходимости. |
-| `OLLAMA_HOST` | `http://ollama:11434` | Эндпоинт Ollama. |
-
+| `CHAT_DB_BACKEND` | `sqlite` | Тип хранилища истории чатов: `sqlite` или `postgres`. |
+| `CHAT_DB_PATH` | пусто | Путь к SQLite (по умолчанию `DATA_DIR/db/chat_history.sqlite`). |
+| `CHAT_DB_DSN` | пусто | Строка подключения к PostgreSQL при `CHAT_DB_BACKEND=postgres`. |
+| `CHAT_DB_SCHEMA` | пусто | Необязательная схема PostgreSQL. |
+| `CHAT_MEMORY_ENABLED` | `false` | Включить долговременную память чата. |
+| `MEMORY_DB_PATH` | пусто | Путь к базе памяти (по умолчанию `DATA_DIR/db/memory.sqlite`). |
+| `CHAT_MEMORY_TTL_DAYS` | `90` | Сколько дней хранить сообщения в памяти. |
+| `CHAT_MEMORY_MAXTOK` | `2000` | Максимальный объём памяти в условных «токенах». |
 | `SECRET_KEY` | `change-me` | Ключ подписи JWT. |
 | `JWT_ALGORITHM` | `HS256` | Алгоритм подписи JWT. |
 | `ACCESS_TOKEN_EXPIRE_MINUTES` | `30` | Время жизни токена в минутах. |
-        main
 
 > Примечание: если размер окна разбиения (`RAG_CHUNK`) нормализуется до 1, система
 > автоматически переключается на символьный токенизатор и генерирует окна по
@@ -147,13 +136,11 @@ SaaS.
 
 ## Логирование и память
 
-        codex/replace-compose.yml-with-docker-compose.yml
-История диалогов по умолчанию сохраняется в SQLite-файле по пути `FILES_ROOT/db/chat_history.sqlite`. При необходимости можно переключить приложение на PostgreSQL, задав `CHAT_DB_BACKEND=postgres` и передав строку подключения через `CHAT_DB_DSN`. Для каждого сообщения хранится пользователь, идентификатор диалога, роли (`user`/`assistant`) и содержание. Эти данные используются для восстановления контекста между запросами.
+История диалогов по умолчанию сохраняется в SQLite-файле по пути `DATA_DIR/db/chat_history.sqlite`. При необходимости можно переключить приложение на PostgreSQL, задав `CHAT_DB_BACKEND=postgres` и передав строку подключения через `CHAT_DB_DSN`. Для каждого сообщения хранится пользователь, идентификатор диалога, роли (`user`/`assistant`) и содержание. Эти данные используются для восстановления контекста между запросами.
 
-Логи приложения пишутся как в stdout, так и в файл `DATA_DIR/logs/app.log`. Каталоги `DATA_DIR`, `FILES_ROOT` и `DATA_DIR/logs` создаются автоматически при старте сервиса.
+Логи приложения пишутся как в stdout, так и в файл `DATA_DIR/logs/app.log`. Каталоги `DATA_DIR` и вложенные директории создаются автоматически при старте сервиса.
 
-История диалогов по умолчанию сохраняется в SQLite-файле по пути `DATA_DIR/db/kb.sqlite`. При необходимости можно переключить приложение на PostgreSQL, задав `CHAT_DB_BACKEND=postgres` и передав строку подключения через `CHAT_DB_DSN`. Для каждого сообщения хранится пользователь, идентификатор диалога, роли (`user`/`assistant`) и содержание. Эти данные используются для восстановления контекста между запросами.
-        main
+Метаданные загрузок и чанков по умолчанию сохраняются в SQLite-базе `./var/data/kb.sqlite` (см. `DB_URL`). Путь можно поменять, указав собственный DSN в переменной окружения.
 
 ## Тестирование
 
