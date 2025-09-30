@@ -1,4 +1,9 @@
 """Retriever package exposing vector store implementations and helpers."""
+        codex/create-vectorstore-package-and-implementations
+
+from app.core.config import Settings
+
+
 
 from __future__ import annotations
 
@@ -15,6 +20,7 @@ __all__ = ["QdrantVectorStore", "CrossEncoderReranker", "get_vector_store", "Set
 
 
       codex/create-vectorstore-package-and-implementations-p7jgtz
+        main
 from .faiss import FaissVectorStore
 from .qdrant import QdrantVectorStore
 from .vector_store import VectorStore, get_vector_store
@@ -26,6 +32,8 @@ __all__ = [
     "get_vector_store",
     "Settings",
 ]
+        codex/create-vectorstore-package-and-implementations
+
 
 __all__ = [
     "CrossEncoderReranker",
