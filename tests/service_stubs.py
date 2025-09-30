@@ -108,4 +108,14 @@ def install_service_stubs() -> None:
                 return 1
 
         st_module.SentenceTransformer = DummySentenceTransformer
+        
+        class DummyCrossEncoder:
+            def __init__(self, *args: Any, **kwargs: Any) -> None:
+                self.args = args
+                self.kwargs = kwargs
+
+            def predict(self, pairs: Any):
+                return [0.0 for _ in pairs]
+
+        st_module.CrossEncoder = DummyCrossEncoder
         sys.modules["sentence_transformers"] = st_module

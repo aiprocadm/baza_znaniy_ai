@@ -1,10 +1,11 @@
-"""Backward compatible wrappers for the Ollama client."""
+"""Backward compatible wrappers for the Ollama provider."""
 
 from __future__ import annotations
 
-from app.llm import get_llm_client
+from app.core.config import get_settings
+from app.llm.providers import OllamaProvider
 
-_client = get_llm_client()
+_client = OllamaProvider(get_settings())
 OLLAMA_BASE_URL = _client.base_url
 MODEL_NAME = _client.model_name
 
