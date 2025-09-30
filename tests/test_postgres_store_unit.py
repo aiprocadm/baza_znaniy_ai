@@ -218,3 +218,105 @@ def test_ensure_conversation_inserts_when_missing(monkeypatch: pytest.MonkeyPatc
 
     assert connection.commit_calls == 1
     assert connection.close_calls == 1
+
+
+def test_get_summary_returns_value(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(PostgresChatStore, "_init_schema", lambda self: None)
+
+    def cursor_factory(connection: FakeConnection) -> FakeCursor:
+        cursor = FakeCursor(connection)
+        cursor.fetchone_result = {"summary": "cached summary"}
+        return cursor
+
+    connection = FakeConnection(cursor_factory)
+    fake_connect = FakeConnect([connection])
+    monkeypatch.setattr(postgres_store.psycopg, "connect", fake_connect)
+
+    store = PostgresChatStore("postgres://test")
+    result = store.get_summary("conv-123")
+
+    assert result == "cached summary"
+
+    executed = [entry for entry in connection.log if entry[0] == "execute"]
+    assert len(executed) == 1
+    assert executed[0][2] == ("conv-123",)
+
+
+def test_get_recent_messages_orders_oldest_first(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(PostgresChatStore, "_init_schema", lambda self: None)
+
+    def cursor_factory(connection: FakeConnection) -> FakeCursor:
+        cursor = FakeCursor(connection)
+        cursor.fetchall_result = [
+            {"role": "assistant", "content": "third"},
+            {"role": "user", "content": "second"},
+            {"role": "system", "content": "first"},
+        ]
+        return cursor
+
+    connection = FakeConnection(cursor_factory)
+    fake_connect = FakeConnect([connection])
+    monkeypatch.setattr(postgres_store.psycopg, "connect", fake_connect)
+
+    store = PostgresChatStore("postgres://test")
+    messages = store.get_recent_messages("conv-xyz")
+
+    assert messages == [
+        ("system", "first"),
+        ("user", "second"),
+        ("assistant", "third"),
+    ]
+
+    executed = [entry for entry in connection.log if entry[0] == "execute"]
+    assert len(executed) == 1
+    assert executed[0][2] == ["conv-xyz"]
+
+
+def test_record_exchange_updates_counters(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(PostgresChatStore, "_init_schema", lambda self: None)
+    monkeypatch.setattr(postgres_store.time, "time", lambda: 123)
+
+    message_connection = FakeConnection()
+
+    def summary_cursor_factory(connection: FakeConnection) -> FakeCursor:
+        cursor = FakeCursor(connection)
+        cursor.fetchone_result = {"messages_since_summary": 2}
+        return cursor
+
+    summary_connection = FakeConnection(summary_cursor_factory)
+
+    fake_connect = FakeConnect([message_connection, summary_connection])
+    monkeypatch.setattr(postgres_store.psycopg, "connect", fake_connect)
+
+    store = PostgresChatStore("postgres://test")
+
+    store.record_exchange("conv-1", "hello", "hi there")
+
+    executed = [entry for entry in message_connection.log if entry[0] == "execute"]
+    assert len(executed) == 3
+
+    user_insert, assistant_insert, update_stmt = executed
+    assert user_insert[2] == ("conv-1", "hello", 123)
+    assert assistant_insert[2] == ("conv-1", "hi there", 123)
+    assert update_stmt[2] == ("conv-1",)
+    assert "messages_since_summary = messages_since_summary + 2" in str(update_stmt[1])
+
+    assert store.messages_since_summary("conv-1") == 2
+
+
+def test_save_summary_resets_counter(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(PostgresChatStore, "_init_schema", lambda self: None)
+
+    connection = FakeConnection()
+    fake_connect = FakeConnect([connection])
+    monkeypatch.setattr(postgres_store.psycopg, "connect", fake_connect)
+
+    store = PostgresChatStore("postgres://test")
+    store.save_summary("conv-1", "new summary text")
+
+    executed = [entry for entry in connection.log if entry[0] == "execute"]
+    assert len(executed) == 1
+
+    query, params = executed[0][1], executed[0][2]
+    assert params == ("new summary text", "conv-1")
+    assert "messages_since_summary = 0" in str(query)
