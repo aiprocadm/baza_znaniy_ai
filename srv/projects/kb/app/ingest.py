@@ -128,6 +128,15 @@ def _handle_small_token_window(
         return None
 
     decoded_text = tokenizer.decode(token_ids)
+
+    if decoded_text and len(decoded_text) > window:
+        char_tokenizer = _CharTokenizer()
+        char_token_ids = char_tokenizer.encode(decoded_text)
+        if char_token_ids:
+            return _WindowPlan(char_token_ids, char_tokenizer)
+
+    fallback_text = decoded_text if decoded_text else text
+
     if decoded_text:
         try:
             reencoded = tokenizer.encode(decoded_text)
