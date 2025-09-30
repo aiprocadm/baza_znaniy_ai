@@ -118,9 +118,13 @@ class Settings(BaseSettings):
         default=10,
         validation_alias=AliasChoices("RETRIEVE_TOPK"),
     )
-    rerank_topk: int | None = Field(
-        default=None,
-        validation_alias=AliasChoices("RERANK_TOPK"),
+    rerank_enabled: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("RERANK_ENABLED"),
+    )
+    rerank_topk: int = Field(
+        default=10,
+        validation_alias=AliasChoices("RERANK_TOP_K", "RERANK_TOPK"),
     )
     chat_memory_enabled: bool = Field(
         default=False,
@@ -209,6 +213,7 @@ class Settings(BaseSettings):
         "chat_min_citations",
         "chat_max_citations",
         "retrieve_topk",
+        "rerank_topk",
         "rag_chunk",
         "rag_overlap",
         "vector_embed_dimension",
@@ -223,6 +228,7 @@ class Settings(BaseSettings):
 
     @field_validator(
         "chat_memory_enabled",
+        "rerank_enabled",
         mode="before",
     )
     @classmethod

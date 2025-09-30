@@ -3,44 +3,20 @@
 from __future__ import annotations
 
 import hashlib
-import importlib.util
-import pathlib
-import sys
-import types
+import io
+import zipfile
 from typing import List
 
 import pytest
+from openpyxl import Workbook
 
-ROOT = pathlib.Path(__file__).resolve().parents[1]
-SERVICE_ROOT = ROOT / "srv" / "projects" / "kb" / "app"
+import app.ingest.chunking as ingest
 
-
-def _load_ingest():
-    package_name = "kb_service_ingest"
-
-    for module_name in list(sys.modules):
-        if module_name == package_name or module_name.startswith(f"{package_name}."):
-            sys.modules.pop(module_name, None)
-
-    package = types.ModuleType(package_name)
-    package.__path__ = [str(SERVICE_ROOT)]  # type: ignore[attr-defined]
-    sys.modules[package_name] = package
-
-    ingest_spec = importlib.util.spec_from_file_location(
-        f"{package_name}.ingest", SERVICE_ROOT / "ingest.py"
-    )
-    assert ingest_spec and ingest_spec.loader
-    ingest_module = importlib.util.module_from_spec(ingest_spec)
-    sys.modules[ingest_spec.name] = ingest_module
-    ingest_spec.loader.exec_module(ingest_module)
-    return ingest_module
-
-
-ingest = _load_ingest()
 _chunk = ingest._chunk
 _clean = ingest._clean
 _get_tokenizer = ingest._get_tokenizer
 parse_and_chunk = ingest.parse_and_chunk
+iter_document_pages = ingest.iter_document_pages
 
 TOKENIZER = _get_tokenizer()
 
@@ -311,6 +287,41 @@ def _expected_sha(file: str, page: int, text: str) -> str:
     return hashlib.sha256(payload).hexdigest()
 
 
+def _make_pptx_bytes(slides: List[str]) -> bytes:
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as archive:
+        for index, text in enumerate(slides, start=1):
+            payload = (
+                "<p:sld xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\" "
+                "xmlns:p=\"http://schemas.openxmlformats.org/presentationml/2006/main\">"
+                "<p:cSld><p:spTree><p:sp><p:txBody><a:p><a:r><a:t>"
+                + text
+                + "</a:t></a:r></a:p></p:txBody></p:sp></p:spTree></p:cSld></p:sld>"
+            )
+            archive.writestr(f"ppt/slides/slide{index}.xml", payload)
+    buffer.seek(0)
+    return buffer.getvalue()
+
+
+
+def _make_xlsx_bytes(sheets: List[List[List[str]]]) -> bytes:
+    workbook = Workbook()
+    first = True
+    for index, rows in enumerate(sheets, start=1):
+        if first:
+            sheet = workbook.active
+            sheet.title = f"Sheet{index}"
+            first = False
+        else:
+            sheet = workbook.create_sheet(title=f"Sheet{index}")
+        for row in rows:
+            sheet.append(row)
+    stream = io.BytesIO()
+    workbook.save(stream)
+    stream.seek(0)
+    return stream.getvalue()
+
+
 def test_parse_and_chunk_pdf_uses_mock_tokenizer(monkeypatch: pytest.MonkeyPatch) -> None:
     texts = ["First page text", "Second page text"]
 
@@ -416,3 +427,61 @@ def test_parse_and_chunk_docx_uses_mock_tokenizer(monkeypatch: pytest.MonkeyPatc
     assert chunks == expected
     assert tokenizer_calls["count"] == 1
     assert cleaned_text in encode_calls
+
+
+def test_iter_document_pages_splits_markdown_sections() -> None:
+    payload = b"# Intro\nFirst paragraph\n# Next\nSecond part"
+    pages = list(iter_document_pages("notes.md", payload))
+
+    assert [number for number, _ in pages] == [1, 2]
+    assert "Intro" in pages[0][1]
+    assert "Second" in pages[1][1]
+
+
+def test_iter_document_pages_reads_pptx_slides() -> None:
+    slides = ["Slide One", "Slide Two"]
+    pages = list(iter_document_pages("deck.pptx", _make_pptx_bytes(slides)))
+
+    assert len(pages) == 2
+    assert [text for _, text in pages] == slides
+
+
+def test_iter_document_pages_reads_xlsx_sheets() -> None:
+    sheets = [["Header", "Value"], ["Row", "1"]]
+    more = [["Another", "Sheet"]]
+    pages = list(iter_document_pages("book.xlsx", _make_xlsx_bytes([sheets, more])))
+
+    assert len(pages) == 2
+    assert "Header Value" in pages[0][1]
+    assert "Another Sheet" in pages[1][1]
+
+
+def test_parse_and_chunk_accepts_markdown(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("RAG_CHUNK", "200")
+    monkeypatch.setenv("RAG_OVERLAP", "0")
+    chunks = parse_and_chunk("notes.md", b"# Title\nContent")
+
+    assert chunks
+    assert all(chunk["file"] == "notes.md" for chunk in chunks)
+
+
+def test_parse_and_chunk_accepts_pptx(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("RAG_CHUNK", "200")
+    monkeypatch.setenv("RAG_OVERLAP", "0")
+    slides = ["Slide A", "Slide B"]
+    payload = _make_pptx_bytes(slides)
+    chunks = parse_and_chunk("slides.pptx", payload)
+
+    assert len(chunks) == len(slides)
+    assert [chunk["page"] for chunk in chunks] == [1, 2]
+
+
+def test_parse_and_chunk_accepts_xlsx(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("RAG_CHUNK", "200")
+    monkeypatch.setenv("RAG_OVERLAP", "0")
+    sheets = [["Header", "Value"], ["Row", "1"]]
+    payload = _make_xlsx_bytes([sheets])
+    chunks = parse_and_chunk("workbook.xlsx", payload)
+
+    assert chunks
+    assert chunks[0]["page"] == 1
