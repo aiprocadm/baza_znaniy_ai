@@ -1,0 +1,186 @@
+from __future__ import annotations
+
+import sys
+from importlib import util as importlib_util
+from pathlib import Path
+from typing import Any, List
+import types
+
+import pytest
+from app.core.config import Settings
+
+
+_ROUTES_PATH = Path(__file__).resolve().parents[1] / "app" / "api" / "routes.py"
+_ROUTES_SPEC = importlib_util.spec_from_file_location("app_api_routes_test", _ROUTES_PATH)
+assert _ROUTES_SPEC is not None and _ROUTES_SPEC.loader is not None
+routes_module = importlib_util.module_from_spec(_ROUTES_SPEC)
+_original_ingest = sys.modules.get("app.ingest")
+ingest_stub = types.ModuleType("app.ingest")
+setattr(ingest_stub, "parse_and_chunk", lambda *args, **kwargs: [])
+sys.modules["app.ingest"] = ingest_stub
+try:
+    _ROUTES_SPEC.loader.exec_module(routes_module)  # type: ignore[misc]
+finally:
+    if _original_ingest is None:
+        sys.modules.pop("app.ingest", None)
+    else:
+        sys.modules["app.ingest"] = _original_ingest
+
+
+class StubChatStore:
+    def __init__(self) -> None:
+        self.records: list[tuple[str, str, str]] = []
+
+    def ensure_conversation(self, user_id: str, conversation_id: str | None) -> str:
+        return "conversation-id"
+
+    def get_summary(self, conversation_id: str) -> str:
+        return ""
+
+    def get_recent_messages(self, conversation_id: str, limit: int) -> list[tuple[str, str]]:
+        return []
+
+    def record_exchange(self, conversation_id: str, message: str, answer: str) -> None:
+        self.records.append((conversation_id, message, answer))
+
+    def messages_since_summary(self, conversation_id: str) -> int:
+        return 0
+
+
+class StubSummarizer:
+    def __init__(self) -> None:
+        self.calls: List[str] = []
+
+    def summarize(self, conversation_id: str) -> None:
+        self.calls.append(conversation_id)
+
+
+class StubLLM:
+    def __init__(self) -> None:
+        self.prompts: list[str] = []
+
+    def ensure_model(self) -> None:
+        return None
+
+    def generate(self, prompt: str) -> str:
+        self.prompts.append(prompt)
+        return "Ответ"
+
+
+class StubVectorStore:
+    def __init__(self, hits: List[dict[str, Any]], expected_top_k: int) -> None:
+        self._hits = hits
+        self._expected_top_k = expected_top_k
+        self.calls: list[tuple[str, int]] = []
+
+    def ensure_collection(self) -> None:
+        return None
+
+    def search(self, query: str, top_k: int) -> List[dict[str, Any]]:
+        self.calls.append((query, top_k))
+        assert top_k == self._expected_top_k
+        return list(self._hits)
+
+
+class DummyRequest:
+    def __init__(self, state: types.SimpleNamespace) -> None:
+        self.app = types.SimpleNamespace(state=state)
+
+
+def _build_request(
+    settings: Settings,
+    hits: List[dict[str, Any]],
+    reranker: Any,
+) -> tuple[DummyRequest, types.SimpleNamespace]:
+    state = types.SimpleNamespace(
+        settings=settings,
+        chat_store=StubChatStore(),
+        llm_client=StubLLM(),
+        vector_store=StubVectorStore(hits, settings.retrieve_topk),
+        summarizer=StubSummarizer(),
+        memory_store=None,
+        fallback_index=[],
+        reranker=reranker,
+    )
+    return DummyRequest(state), state
+
+
+@pytest.fixture()
+def sample_hits() -> List[dict[str, Any]]:
+    return [
+        {"file": f"doc{i}.pdf", "page": i, "text": f"text {i}", "score": 0.5 - i * 0.1}
+        for i in range(1, 5)
+    ]
+
+
+def test_chat_uses_reranker_when_enabled(sample_hits: List[dict[str, Any]]) -> None:
+    settings = Settings().model_copy(
+        update={
+            "retrieve_topk": 4,
+            "rerank_topk": 2,
+            "rerank_enabled": True,
+            "chat_min_citations": 2,
+            "chat_max_citations": 2,
+        }
+    )
+
+    class StubReranker:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, List[dict[str, Any]], int]] = []
+
+        def rerank(
+            self, query: str, hits: List[dict[str, Any]], top_k: int
+        ) -> List[dict[str, Any]]:
+            self.calls.append((query, list(hits), top_k))
+            return list(reversed(hits))[:top_k]
+
+    reranker = StubReranker()
+    request, state = _build_request(settings, sample_hits, reranker)
+    payload = types.SimpleNamespace(user_id="u", message="hello", conversation_id=None)
+
+    assert settings.rerank_enabled is True
+    assert request.app.state.reranker is reranker
+
+    response = routes_module.chat(request, payload)
+
+    assert isinstance(response, dict)
+    assert reranker.calls
+    rerank_call = reranker.calls[0]
+    assert rerank_call[0] == "hello"
+    assert rerank_call[2] == settings.rerank_limit
+    expected_files = [item["file"] for item in list(reversed(sample_hits))[: settings.rerank_limit]]
+    assert [item["file"] for item in response["citations"]] == expected_files
+
+
+def test_chat_skips_reranker_when_disabled(sample_hits: List[dict[str, Any]]) -> None:
+    settings = Settings().model_copy(
+        update={
+            "retrieve_topk": 4,
+            "rerank_topk": 2,
+            "rerank_enabled": False,
+            "chat_min_citations": 2,
+            "chat_max_citations": 2,
+        }
+    )
+
+    class StubReranker:
+        def __init__(self) -> None:
+            self.called = False
+
+        def rerank(self, *args: Any, **kwargs: Any) -> List[dict[str, Any]]:
+            self.called = True
+            return []
+
+    reranker = StubReranker()
+    request, state = _build_request(settings, sample_hits, reranker)
+    payload = types.SimpleNamespace(user_id="u", message="hello", conversation_id=None)
+
+    assert settings.rerank_enabled is False
+    assert request.app.state.reranker is reranker
+
+    response = routes_module.chat(request, payload)
+
+    assert isinstance(response, dict)
+    assert reranker.called is False
+    expected_files = [item["file"] for item in sample_hits[: settings.rerank_limit]]
+    assert [item["file"] for item in response["citations"]] == expected_files

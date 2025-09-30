@@ -133,6 +133,7 @@ def chat(request: Request, inp: ChatIn) -> dict[str, Any]:
     summarizer = request.app.state.summarizer
     memory_store = getattr(request.app.state, "memory_store", None)
     fallback_index = getattr(request.app.state, "fallback_index", [])
+    reranker = getattr(request.app.state, "reranker", None)
 
     llm_client.ensure_model()
     if vector_store is not None:
@@ -171,8 +172,15 @@ def chat(request: Request, inp: ChatIn) -> dict[str, Any]:
     if not hits and fallback_index:
         hits = fallback_index[: settings.retrieve_topk]
     rerank_limit = settings.rerank_limit
-    if len(hits) > rerank_limit:
-        hits = hits[:rerank_limit]
+    if hits:
+        if settings.rerank_enabled and reranker is not None:
+            try:
+                hits = reranker.rerank(inp.message, hits, rerank_limit)
+            except Exception:  # pragma: no cover - defensive fallback
+                logger.exception("Reranking failed; falling back to initial ordering")
+                hits = hits[:rerank_limit]
+        elif len(hits) > rerank_limit:
+            hits = hits[:rerank_limit]
     context = build_context(hits, token_limit=3000)
 
     prompt_parts = [

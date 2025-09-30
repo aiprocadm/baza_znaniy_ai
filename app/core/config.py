@@ -118,6 +118,10 @@ class Settings(BaseSettings):
         default=10,
         validation_alias=AliasChoices("RETRIEVE_TOPK"),
     )
+    rerank_enabled: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("RERANK_ENABLED"),
+    )
     rerank_topk: int | None = Field(
         default=None,
         validation_alias=AliasChoices("RERANK_TOPK"),
@@ -205,6 +209,7 @@ class Settings(BaseSettings):
         "chat_min_citations",
         "chat_max_citations",
         "retrieve_topk",
+        "rerank_topk",
         "rag_chunk",
         "rag_overlap",
         "vector_embed_dimension",
@@ -219,6 +224,7 @@ class Settings(BaseSettings):
 
     @field_validator(
         "chat_memory_enabled",
+        "rerank_enabled",
         mode="before",
     )
     @classmethod
@@ -226,6 +232,22 @@ class Settings(BaseSettings):
         if isinstance(value, str):
             return value.lower() in {"1", "true", "yes", "on"}
         return bool(value)
+
+    @field_validator("rerank_topk", mode="before")
+    @classmethod
+    def _optional_int(cls, value: object) -> int | None:
+        if value in {None, ""}:
+            return None
+        return int(value)
+
+    @field_validator("rerank_topk", mode="after")
+    @classmethod
+    def _validate_rerank_topk(cls, value: int | None) -> int | None:
+        if value is None:
+            return None
+        if value < 1:
+            raise ValueError("RERANK_TOPK must be at least 1")
+        return value
 
     @field_validator("ollama_base_url")
     @classmethod
