@@ -218,8 +218,15 @@ def _index_chunks(chunks: Iterable[dict[str, Any]]) -> int:
 from __future__ import annotations
 
 from app.core.app import create_app
+        codex/create-llm-provider-package-and-implementations
+from app.llm import get_cached_provider
+
+        main
         main
 
-app = create_app()
+_provider = get_cached_provider()
+_provider.ensure_model()
+
+app = create_app(provider=_provider)
 
 __all__ = ["app"]

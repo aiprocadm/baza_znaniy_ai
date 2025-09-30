@@ -1,4 +1,4 @@
-"""Tests for :mod:`app.ollama_client`."""
+"""Tests for :class:`app.llm.providers.OllamaProvider`."""
 
 from __future__ import annotations
 
@@ -7,7 +7,8 @@ from typing import Any
 
 import pytest
 
-import app.ollama_client as ollama_client
+from app.core.config import Settings
+from app.llm.providers import OllamaProvider
 
 
 class DummyResponse:
@@ -46,22 +47,37 @@ class DummyClient:
         return next(self._responses)
 
 
-def test_ensure_model_skips_pull_when_model_present(monkeypatch: pytest.MonkeyPatch):
+@pytest.fixture()
+def settings() -> Settings:
+    return Settings(
+        ollama_base_url="http://ollama:11434",
+        llm_model_name="test-model",
+        max_context_tokens=1024,
+    )
+
+
+def test_ensure_model_skips_pull_when_model_present(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings
+) -> None:
     calls: list = []
 
     def client_stub(*, timeout):
-        responses = iter([DummyResponse({"models": [{"name": ollama_client.MODEL_NAME}]})])
+        responses = iter([DummyResponse({"models": [{"name": settings.llm_model_name}]})])
         client = DummyClient(timeout=timeout, responses=responses, calls=calls)
         return client
 
-    monkeypatch.setattr(ollama_client.httpx, "Client", client_stub)
+    monkeypatch.setattr("app.llm.providers.httpx.Client", client_stub)
+    provider = OllamaProvider(settings)
 
-    ollama_client.ensure_model()
+    provider.ensure_model()
 
-    assert calls == [("get", 60, f"{ollama_client.OLLAMA_BASE_URL}/api/tags")]
+    assert provider._model_ensured is True
+    assert calls == [("get", 60, f"{provider.base_url}/api/tags")]
 
 
-def test_ensure_model_pulls_when_model_missing(monkeypatch: pytest.MonkeyPatch):
+def test_ensure_model_pulls_when_model_missing(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings
+) -> None:
     calls_first: list = []
     calls_second: list = []
 
@@ -78,23 +94,27 @@ def test_ensure_model_pulls_when_model_missing(monkeypatch: pytest.MonkeyPatch):
         clients.append(client)
         return client
 
-    monkeypatch.setattr(ollama_client.httpx, "Client", client_stub)
+    monkeypatch.setattr("app.llm.providers.httpx.Client", client_stub)
+    provider = OllamaProvider(settings)
 
-    ollama_client.ensure_model()
+    provider.ensure_model()
 
+    assert provider._model_ensured is True
     assert len(clients) == 2
-    assert calls_first == [("get", 60, f"{ollama_client.OLLAMA_BASE_URL}/api/tags")]
+    assert calls_first == [("get", 60, f"{provider.base_url}/api/tags")]
     assert calls_second == [
         (
             "post",
             None,
-            f"{ollama_client.OLLAMA_BASE_URL}/api/pull",
-            {"name": ollama_client.MODEL_NAME},
+            f"{provider.base_url}/api/pull",
+            {"name": provider.model_name},
         )
     ]
 
 
-def test_generate_posts_prompt_and_returns_response(monkeypatch: pytest.MonkeyPatch):
+def test_generate_posts_prompt_and_returns_response(
+    monkeypatch: pytest.MonkeyPatch, settings: Settings
+) -> None:
     calls: list = []
     response_payload = {"response": "generated text"}
 
@@ -102,33 +122,39 @@ def test_generate_posts_prompt_and_returns_response(monkeypatch: pytest.MonkeyPa
         responses = iter([DummyResponse(response_payload)])
         return DummyClient(timeout=timeout, responses=responses, calls=calls)
 
-    monkeypatch.setattr(ollama_client.httpx, "Client", client_stub)
+    monkeypatch.setattr("app.llm.providers.httpx.Client", client_stub)
+    provider = OllamaProvider(settings)
 
-    result = ollama_client.generate("hello world")
+    result = provider.generate("hello world")
 
     assert result == "generated text"
     assert calls == [
         (
             "post",
             None,
-            f"{ollama_client.OLLAMA_BASE_URL}/api/generate",
-            {"model": ollama_client.MODEL_NAME, "prompt": "hello world", "stream": False},
+            f"{provider.base_url}/api/generate",
+            {
+                "model": provider.model_name,
+                "prompt": "hello world",
+                "stream": False,
+                "options": {"num_ctx": settings.max_context_tokens},
+            },
         )
     ]
 
 
-def test_ensure_model_swallows_network_errors(monkeypatch: pytest.MonkeyPatch):
-    class ExplodingClient:
-        def __init__(self, *, timeout):
-            pass
+def test_generate_merges_context_payload(monkeypatch: pytest.MonkeyPatch, settings: Settings) -> None:
+    calls: list = []
 
-        def __enter__(self):
-            raise RuntimeError("boom")
+    def client_stub(*, timeout):
+        responses = iter([DummyResponse({"response": "ok"})])
+        return DummyClient(timeout=timeout, responses=responses, calls=calls)
 
-        def __exit__(self, exc_type, exc, tb):
-            return False
+    monkeypatch.setattr("app.llm.providers.httpx.Client", client_stub)
+    provider = OllamaProvider(settings)
 
-    monkeypatch.setattr(ollama_client.httpx, "Client", ExplodingClient)
+    context = {"system": "test", "prompt": "ignored"}
+    provider.generate("prompt", context=context)
 
-    # Should not raise despite the runtime error.
-    ollama_client.ensure_model()
+    assert calls[0][3]["system"] == "test"
+    assert calls[0][3]["prompt"] == "prompt"

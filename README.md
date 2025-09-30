@@ -102,10 +102,16 @@ SaaS.
 | `QDRANT_API_KEY` | пусто | Ключ доступа к Qdrant при необходимости. |
 | `VECTOR_EMBED_MODEL` | `intfloat/multilingual-e5-small` | Модель эмбеддингов. |
 | `VECTOR_EMBED_DIMENSION` | `384` | Размерность эмбеддингов (для контроля совместимости). |
+        codex/implement-vector-store-interface-and-refactor-qdrant-logic
 | `EMBED_BATCH_SIZE` | `32` | Размер батча при расчёте эмбеддингов. |
 | `LLM_PROVIDER` | `ollama` | Провайдер LLM. |
 | `LLM_MODEL_NAME` | `qwen2.5:3b-instruct` | Модель генерации ответов. |
+
+| `LLM_PROVIDER` | `ollama` | Провайдер LLM (`ollama` или `stub`). |
+| `LLM_MODEL_NAME` / `OLLAMA_MODEL` | `qwen2.5:3b-instruct` | Модель генерации ответов. |
+        main
 | `OLLAMA_BASE_URL` | `http://ollama:11434` | Базовый URL Ollama. |
+| `MAX_CONTEXT_TOKENS` | `4096` | Максимальное количество токенов контекста для Ollama. |
 | `RAG_TOKENIZER_NAME` | `cl100k_base` | Название токенизатора для разбиения. |
         main
 | `RAG_CHUNK` | `900` | Размер чанка в токенах. |
