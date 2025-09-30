@@ -180,11 +180,15 @@ class Settings(BaseSettings):
     )
     llm_model_name: str = Field(
         default="qwen2.5:3b-instruct",
-        validation_alias=AliasChoices("LLM_MODEL_NAME", "GEN_MODEL"),
+        validation_alias=AliasChoices("LLM_MODEL_NAME", "GEN_MODEL", "OLLAMA_MODEL"),
     )
     ollama_base_url: str = Field(
         default="http://ollama:11434",
         validation_alias=AliasChoices("OLLAMA_BASE_URL", "OLLAMA_HOST"),
+    )
+    max_context_tokens: int = Field(
+        default=4096,
+        validation_alias=AliasChoices("MAX_CONTEXT_TOKENS"),
     )
     secret_key: str = Field(
         default="change-me",
