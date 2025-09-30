@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import pathlib
 import sys
@@ -303,3 +304,115 @@ def test_parse_and_chunk_rejects_unsupported_extension() -> None:
     payload = b"contents"
 
     assert parse_and_chunk("example.csv", payload) == []
+
+
+def _expected_sha(file: str, page: int, text: str) -> str:
+    payload = f"{file}\u0000{page}\u0000{text}".encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
+
+
+def test_parse_and_chunk_pdf_uses_mock_tokenizer(monkeypatch: pytest.MonkeyPatch) -> None:
+    texts = ["First page text", "Second page text"]
+
+    class FakePage:
+        def __init__(self, text: str) -> None:
+            self._text = text
+
+        def extract_text(self) -> str:
+            return self._text
+
+    class FakePdfReader:
+        def __init__(self, _stream: object) -> None:
+            self.pages = [FakePage(text) for text in texts]
+
+    encode_calls: List[str] = []
+
+    class RecordingTokenizer:
+        def encode(self, text: str) -> List[int]:
+            encode_calls.append(text)
+            return [ord(ch) for ch in text]
+
+        def decode(self, tokens: List[int]) -> str:
+            return "".join(chr(token) for token in tokens)
+
+    tokenizer = RecordingTokenizer()
+    tokenizer_calls = {"count": 0}
+
+    def fake_get_tokenizer() -> RecordingTokenizer:
+        tokenizer_calls["count"] += 1
+        return tokenizer
+
+    monkeypatch.setattr(ingest, "PdfReader", FakePdfReader)
+    monkeypatch.setattr(ingest, "_get_tokenizer", fake_get_tokenizer)
+    monkeypatch.setenv("RAG_CHUNK", "50")
+    monkeypatch.setenv("RAG_OVERLAP", "0")
+
+    filename = "file.pdf"
+    chunks = parse_and_chunk(filename, b"binary-pdf")
+
+    cleaned_texts = [_clean(text) for text in texts]
+    expected = [
+        {
+            "file": filename,
+            "page": index + 1,
+            "sha256": _expected_sha(filename, index + 1, text),
+            "text": text,
+        }
+        for index, text in enumerate(cleaned_texts)
+    ]
+
+    assert chunks == expected
+    assert tokenizer_calls["count"] == 1
+    for text in cleaned_texts:
+        assert text in encode_calls
+
+
+def test_parse_and_chunk_docx_uses_mock_tokenizer(monkeypatch: pytest.MonkeyPatch) -> None:
+    paragraphs = ["First   paragraph", "Second paragraph"]
+
+    class FakeParagraph:
+        def __init__(self, text: str) -> None:
+            self.text = text
+
+    class FakeDocument:
+        def __init__(self, _stream: object) -> None:
+            self.paragraphs = [FakeParagraph(text) for text in paragraphs]
+
+    encode_calls: List[str] = []
+
+    class RecordingTokenizer:
+        def encode(self, text: str) -> List[int]:
+            encode_calls.append(text)
+            return [ord(ch) for ch in text]
+
+        def decode(self, tokens: List[int]) -> str:
+            return "".join(chr(token) for token in tokens)
+
+    tokenizer = RecordingTokenizer()
+    tokenizer_calls = {"count": 0}
+
+    def fake_get_tokenizer() -> RecordingTokenizer:
+        tokenizer_calls["count"] += 1
+        return tokenizer
+
+    monkeypatch.setattr(ingest, "Document", FakeDocument)
+    monkeypatch.setattr(ingest, "_get_tokenizer", fake_get_tokenizer)
+    monkeypatch.setenv("RAG_CHUNK", "50")
+    monkeypatch.setenv("RAG_OVERLAP", "0")
+
+    filename = "report.docx"
+    chunks = parse_and_chunk(filename, b"binary-docx")
+
+    cleaned_text = _clean("\n".join(paragraphs))
+    expected = [
+        {
+            "file": filename,
+            "page": 1,
+            "sha256": _expected_sha(filename, 1, cleaned_text),
+            "text": cleaned_text,
+        }
+    ]
+
+    assert chunks == expected
+    assert tokenizer_calls["count"] == 1
+    assert cleaned_text in encode_calls
