@@ -166,6 +166,7 @@ def _chunk(
     chunk: int = 900,
     overlap: int = 140,
     encoder: Optional[_Tokenizer] = None,
+    token_ids: Optional[List[int]] = None,
 ) -> List[str]:
     """Split ``text`` into overlapping windows based on token counts."""
 
@@ -187,9 +188,28 @@ def _chunk(
         )
 
     tokenizer = encoder or _get_tokenizer()
-    token_ids = tokenizer.encode(text)
-    if not token_ids:
+    working_token_ids = list(token_ids) if token_ids is not None else tokenizer.encode(text)
+    if not working_token_ids:
         return []
+
+    decoded_text: str = ""
+    try:
+        decoded_text = tokenizer.decode(working_token_ids)
+    except Exception:  # pragma: no cover - defensive fallback
+        decoded_text = ""
+
+    if decoded_text:
+        try:
+            reencoded = tokenizer.encode(decoded_text)
+        except Exception:  # pragma: no cover - defensive fallback
+            reencoded = []
+        if reencoded and len(reencoded) < len(working_token_ids):
+            char_tokenizer = _CharTokenizer()
+            char_ids = char_tokenizer.encode(decoded_text)
+            if char_ids:
+                working_token_ids = char_ids
+                tokenizer = char_tokenizer
+    token_ids = working_token_ids
 
     small_window_plan = _handle_small_token_window(
         text,
