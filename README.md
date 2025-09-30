@@ -178,8 +178,8 @@ pytest
 
 - `python -m scripts.ingest_path <путь>` — проиндексировать документы из файла или каталога.
 - `python -m scripts.rebuild_index [<путь>]` — очистить коллекцию и переиндексировать содержимое (`DATA_DIR`, если путь не указан).
-- `python -m scripts.export_all [export.json]` — выгрузить все чанки из векторного хранилища в JSON.
-- `python -m scripts.import_all [--reset] export.json` — импортировать чанки из JSON и при необходимости сбросить коллекцию перед загрузкой.
+- `python -m scripts.export_all [export.tar.gz]` — выгрузить все чанки из векторного хранилища и SQLite-базы в архив `tar.gz`.
+- `python -m scripts.import_all [--reset] export.tar.gz` — импортировать чанки и восстановить базы данных из архива, при необходимости сбрасывая коллекцию перед загрузкой.
 
 ## Проверка сценария с загрузкой документов
 
