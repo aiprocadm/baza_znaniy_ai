@@ -56,9 +56,15 @@ def chat(
     memory_store = getattr(app_state, "memory_store", None)
     history_limit = getattr(app_state, "chat_history_limit", 12)
     retrieve_topk = payload.top_k or getattr(app_state, "retrieve_topk", 10)
-    rerank_topk = getattr(app_state, "rerank_topk", retrieve_topk)
+
+    rerank_limit = getattr(app_state, "rerank_topk", None)
+    rerank_limit = rerank_limit or retrieve_topk
+    rerank_limit = max(1, min(rerank_limit, retrieve_topk))
+
     min_citations = getattr(app_state, "min_citations", 3)
     max_citations = getattr(app_state, "max_citations", max(min_citations, 5))
+    rerank_enabled = getattr(app_state, "rerank_enabled", False)
+    reranker = getattr(app_state, "reranker", None)
 
     start = time.perf_counter()
 
@@ -79,9 +85,16 @@ def chat(
             LOGGER.exception("Failed to load memory context")
             memory_text = ""
 
-    hits = search(payload.message, top_k=retrieve_topk)
-    if len(hits) > rerank_topk:
-        hits = hits[:rerank_topk]
+    hits = list(search(payload.message, top_k=retrieve_topk))
+    if hits:
+        if rerank_enabled and reranker is not None:
+            try:
+                hits = reranker.rerank(payload.message, hits, rerank_limit)
+            except Exception:  # pragma: no cover - defensive fallback
+                LOGGER.exception("Reranking failed; falling back to initial ordering")
+                hits = hits[:rerank_limit]
+        elif len(hits) > rerank_limit:
+            hits = hits[:rerank_limit]
 
     context = build_context(hits, token_limit=3000)
 
