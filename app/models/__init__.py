@@ -92,6 +92,12 @@ class ChatResponse(BaseModel):
     conversation_id: str
     citations_insufficient: bool
     latency_ms: float
+    max_context_tokens: Optional[int] = Field(
+        None, description="Configured maximum size of the model context window"
+    )
+    max_generation_tokens: Optional[int] = Field(
+        None, description="Upper bound for generated tokens per response"
+    )
 
 
 class FileInfo(BaseModel):

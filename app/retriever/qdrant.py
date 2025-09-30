@@ -1,12 +1,6 @@
-"""Compatibility wrapper exposing Qdrant vector store symbols."""
+"""Qdrant vector store implementation."""
 
 from __future__ import annotations
-
-        codex/implement-vector-store-interface-and-refactor-qdrant-logic
-from .vector_store import QdrantVectorStore, get_vector_store
-
-__all__ = ["QdrantVectorStore", "get_vector_store"]
-
 
 import os
 from pathlib import Path
@@ -64,10 +58,14 @@ class QdrantVectorStore:
 
     def _client_instance(self) -> QdrantClient:
         if self._client is None:
-            self._client = self._client_factory(path=str(self._storage_dir))
+            kwargs = {"url": self.settings.qdrant_url}
+            if self.settings.qdrant_api_key:
+                kwargs["api_key"] = self.settings.qdrant_api_key
+            self._client = self._client_factory(**kwargs)
         return self._client
 
-    def _normalise(self, vectors: np.ndarray) -> np.ndarray:
+    @staticmethod
+    def _normalise(vectors: np.ndarray) -> np.ndarray:
         if not len(vectors):
             return vectors
         norm = np.linalg.norm(vectors, axis=1, keepdims=True) + 1e-12
@@ -85,13 +83,6 @@ class QdrantVectorStore:
             batches.append(np.asarray(encoded, dtype=np.float32))
         embeddings = np.vstack(batches)
         return self._normalise(embeddings)
-
-    def _collection_exists(self, client: QdrantClient) -> bool:
-        try:
-            client.get_collection(self.settings.qdrant_collection)
-        except UnexpectedResponse:
-            return False
-        return True
 
     def _ensure_schema(self, client: QdrantClient) -> None:
         collection = self.settings.qdrant_collection
@@ -269,4 +260,3 @@ class QdrantVectorStore:
 
 
 __all__ = ["QdrantVectorStore"]
-        main
