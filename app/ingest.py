@@ -129,7 +129,6 @@ def _handle_small_token_window(
         return None
 
     decoded_text = tokenizer.decode(token_ids)
-        codex/add-guard-for-token-window-in-_handle_small_token_window
     if decoded_text and len(decoded_text) > window:
         char_tokenizer = _CharTokenizer()
         char_token_ids = char_tokenizer.encode(decoded_text)
@@ -143,7 +142,6 @@ def _handle_small_token_window(
             if char_token_ids:
                 return _WindowPlan(char_token_ids, char_tokenizer)
         return _WindowPlan(token_ids, tokenizer)
-        main
 
     if decoded_text:
         try:
