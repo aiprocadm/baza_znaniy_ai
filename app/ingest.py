@@ -8,7 +8,7 @@ import logging
 import os
 import re
 from functools import lru_cache
-from typing import Iterable, List, Optional, Protocol
+from typing import Iterable, List, NamedTuple, Optional, Protocol
 
 from docx import Document
 from pypdf import PdfReader
@@ -89,6 +89,11 @@ def _clean(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
+class _WindowPlan(NamedTuple):
+    token_ids: List[int]
+    tokenizer: _Tokenizer
+
+
 def _iterate_windows(
     token_ids: List[int], *, window: int, overlap: int, tokenizer: _Tokenizer
 ) -> List[str]:
@@ -119,7 +124,7 @@ def _handle_small_token_window(
     window: int,
     overlap: int,
     tokenizer: _Tokenizer,
-) -> Optional[List[str]]:
+) -> Optional[_WindowPlan]:
     if len(token_ids) > window:
         return None
 
@@ -131,7 +136,9 @@ def _handle_small_token_window(
             reencoded = []
         if reencoded:
             if len(reencoded) <= window and len(decoded_text) <= window:
-                return [decoded_text]
+                if reencoded == token_ids:
+                    return _WindowPlan(token_ids, tokenizer)
+                return _WindowPlan(reencoded, tokenizer)
             fallback_text = decoded_text
         else:
             fallback_text = decoded_text
@@ -139,18 +146,13 @@ def _handle_small_token_window(
         fallback_text = text
 
     if not fallback_text:
-        return []
+        return _WindowPlan(token_ids, tokenizer)
     char_tokenizer = _CharTokenizer()
     char_token_ids = char_tokenizer.encode(fallback_text)
     if not char_token_ids:
-        return []
+        return _WindowPlan(token_ids, tokenizer)
 
-    return _iterate_windows(
-        char_token_ids,
-        window=window,
-        overlap=overlap,
-        tokenizer=char_tokenizer,
-    )
+    return _WindowPlan(char_token_ids, char_tokenizer)
 
 
 def _chunk(
@@ -185,15 +187,15 @@ def _chunk(
     if not token_ids:
         return []
 
-    small_window_chunks = _handle_small_token_window(
+    small_window_plan = _handle_small_token_window(
         text,
         token_ids,
         window=window,
         overlap=overlap,
         tokenizer=tokenizer,
     )
-    if small_window_chunks is not None:
-        return small_window_chunks
+    if small_window_plan is not None:
+        token_ids, tokenizer = small_window_plan
 
     return _iterate_windows(
         token_ids,
