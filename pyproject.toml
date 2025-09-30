@@ -1,16 +1,17 @@
 [project]
 name = "kb-ai"
 version = "0.1.0"
-dependencies = [
-    "passlib[argon2]",
-    "python-jose[cryptography]",
-]
+dynamic = ["dependencies"]
 
 [build-system]
 requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
+[tool.setuptools.dynamic]
+dependencies = {file = ["requirements.txt"]}
+
 [tool.black]
 line-length = 100
+
 [tool.ruff]
 line-length = 100
