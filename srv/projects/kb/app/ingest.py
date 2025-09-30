@@ -142,10 +142,13 @@ def _handle_small_token_window(
         except Exception:  # pragma: no cover - defensive fallback
             reencoded = []
         if reencoded:
-            if len(reencoded) <= window and reencoded == token_ids:
-                return _WindowPlan(token_ids, tokenizer)
-            return _WindowPlan(reencoded, tokenizer)
-        fallback_text = decoded_text
+            if len(reencoded) <= window and len(decoded_text) <= window:
+                if reencoded == token_ids:
+                    return _WindowPlan(token_ids, tokenizer)
+                return _WindowPlan(reencoded, tokenizer)
+            fallback_text = decoded_text
+        else:
+            fallback_text = decoded_text
     else:
         fallback_text = text
 
