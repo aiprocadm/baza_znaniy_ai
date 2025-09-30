@@ -2,9 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
+import copy
 import importlib.util
+import logging
 import os
+import shutil
 import sys
+import time
 import types
 from pathlib import Path
 from typing import Any
@@ -389,3 +394,232 @@ def test_root_serves_index_html(service_app: Any):
     assert "/api/docs/upload" in response.text
     assert "/api/chat" in response.text
     assert "/health" in response.text
+
+
+def _clone_settings(settings: Any) -> Any:
+    return copy.deepcopy(settings)
+
+
+def test_init_memory_store_toggle(service_app: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    settings = _clone_settings(service_app.get_settings())
+    settings.data_dir = tmp_path
+    monkeypatch.setattr(service_app, "get_settings", lambda: settings)
+
+    monkeypatch.setenv("CHAT_MEMORY_ENABLED", "0")
+    store = service_app._init_memory_store(settings)
+    assert store is None
+
+    monkeypatch.setenv("CHAT_MEMORY_ENABLED", "true")
+    monkeypatch.setenv("CHAT_MEMORY_DB_PATH", str(tmp_path / "memory" / "store.sqlite"))
+    monkeypatch.setenv("CHAT_MEMORY_TTL_DAYS", "5")
+    monkeypatch.setenv("CHAT_SUMMARY_TRIGGER", "7")
+    monkeypatch.setenv("CHAT_MEMORY_MAXTOK", "4321")
+
+    enabled_store = service_app._init_memory_store(settings)
+    assert isinstance(enabled_store, service_app.MemoryStore)
+    assert enabled_store.ttl == 5 * 86400
+    assert enabled_store.trigger == 7
+    assert enabled_store.max_tokens == 4321
+
+
+def test_bootstrap_initialises_state(service_app: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    settings = _clone_settings(service_app.get_settings())
+    settings.log_level = "DEBUG"
+    settings.data_dir = tmp_path / "bootstrap-data"
+    settings.rate_limit = "42r/m"
+    settings.rate_burst = 13
+    monkeypatch.setattr(service_app, "get_settings", lambda: settings)
+
+    monkeypatch.setenv("CHAT_MEMORY_ENABLED", "1")
+    if settings.data_dir.exists():
+        shutil.rmtree(settings.data_dir)
+
+    service_app.bootstrap()
+
+    assert logging.getLogger().level == logging.DEBUG
+    assert (settings.data_dir / "files").exists()
+    assert (settings.data_dir / "db").exists()
+    assert hasattr(service_app.app.state, "chat_store")
+    assert hasattr(service_app.app.state, "summarizer")
+    assert isinstance(service_app.app.state.memory_store, service_app.MemoryStore)
+    assert service_app.app.extra["public_host"] == settings.app_host
+    assert service_app.app.extra["rate_limit"] == settings.rate_limit
+    assert service_app.app.extra["rate_burst"] == settings.rate_burst
+
+
+def test_normalise_extension_edge_cases(service_app: Any):
+    assert service_app._normalise_extension("") == ""
+    assert service_app._normalise_extension("no_extension") == ""
+    assert service_app._normalise_extension("  Report.PDF  ") == "pdf"
+
+
+def test_index_chunks(monkeypatch: pytest.MonkeyPatch, service_app: Any):
+    calls: list[list[dict[str, Any]]] = []
+
+    def fake_upsert(chunks: list[dict[str, Any]]):
+        calls.append(list(chunks))
+
+    monkeypatch.setattr(service_app, "upsert_chunks", fake_upsert)
+
+    empty_result = service_app._index_chunks([])
+    assert empty_result == 0
+    assert calls == []
+
+    chunks = [{"file": "doc", "content": "chunk"}]
+    count = service_app._index_chunks(chunks)
+    assert count == 1
+    assert calls == [chunks]
+
+
+def test_upload_document_skips_empty_reads(
+    service_app: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    settings = _clone_settings(service_app.get_settings())
+    settings.data_dir = tmp_path
+    monkeypatch.setattr(service_app, "get_settings", lambda: settings)
+
+    parse_called = False
+
+    def fake_parse(filename: str, data: bytes):
+        nonlocal parse_called
+        parse_called = True
+        return [{"file": filename, "content": "chunk"}]
+
+    monkeypatch.setattr(service_app, "ensure_collection", lambda: None)
+    monkeypatch.setattr(service_app, "parse_and_chunk", fake_parse)
+    monkeypatch.setattr(service_app, "_save_file", lambda path, data: None)
+    monkeypatch.setattr(service_app, "upsert_chunks", lambda chunks: None)
+
+    class EmptyFile:
+        filename = "empty.txt"
+
+        async def read(self) -> bytes:  # pragma: no cover - trivial coroutine
+            return b""
+
+    async def invoke() -> None:
+        await service_app.upload_document(files=[EmptyFile()], user_id="u", conversation_id=None)
+
+    with pytest.raises(service_app.HTTPException) as exc:
+        asyncio.run(invoke())
+
+    assert exc.value.status_code == service_app.status.HTTP_400_BAD_REQUEST
+    assert exc.value.detail == "NO_TEXT_FOUND"
+    assert parse_called is False
+
+
+def test_upload_document_appends_timestamp_for_existing_files(
+    service_app: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    settings = _clone_settings(service_app.get_settings())
+    settings.data_dir = tmp_path
+    settings.retrieve_topk = 3
+    monkeypatch.setattr(service_app, "get_settings", lambda: settings)
+
+    target_dir = settings.files_dir
+    target_dir.mkdir(parents=True, exist_ok=True)
+    existing_path = target_dir / "report.txt"
+    existing_path.write_bytes(b"old")
+
+    monkeypatch.setattr(service_app, "ensure_collection", lambda: None)
+
+    parsed_chunks = [{"file": "report.txt", "page": 1, "content": "chunk"}]
+    monkeypatch.setattr(service_app, "parse_and_chunk", lambda name, data: parsed_chunks)
+
+    upsert_calls: list[list[dict[str, Any]]] = []
+
+    def fake_upsert(chunks: list[dict[str, Any]]):
+        upsert_calls.append(list(chunks))
+
+    monkeypatch.setattr(service_app, "upsert_chunks", fake_upsert)
+
+    saved_paths: list[Path] = []
+
+    def fake_save(path: Path, data: bytes):
+        saved_paths.append(path)
+
+    monkeypatch.setattr(service_app, "_save_file", fake_save)
+    monkeypatch.setattr(service_app.time, "time", lambda: 1700000000)
+
+    class NonEmptyFile:
+        filename = "report.txt"
+
+        async def read(self) -> bytes:  # pragma: no cover - trivial coroutine
+            return b"data"
+
+    async def invoke() -> service_app.UploadResponse:
+        return await service_app.upload_document(
+            files=[NonEmptyFile()],
+            user_id="u",
+            conversation_id=None,
+        )
+
+    response = asyncio.run(invoke())
+
+    assert response.ok is True
+    assert response.files == ["report.txt"]
+    assert response.chunks == 1
+    assert saved_paths[0].name == "report.txt.1700000000"
+    assert saved_paths[0].parent == target_dir
+    assert upsert_calls == [parsed_chunks]
+
+
+def test_format_answer_with_and_without_pages(service_app: Any):
+    answer = "Ответ"
+    citations = [
+        {"file": "doc1.pdf", "page": 2},
+        {"file": "doc2.txt"},
+    ]
+    formatted = service_app._format_answer(answer, citations)
+    assert "страница 2" in formatted
+    assert "doc2.txt" in formatted
+
+    no_citations = service_app._format_answer(answer, [])
+    assert no_citations == "Ответ"
+
+
+def test_chat_truncates_hits_and_formats_response(
+    service_app: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    settings = _clone_settings(service_app.get_settings())
+    settings.data_dir = tmp_path / "chat-data"
+    settings.retrieve_topk = 5
+    settings.rerank_topk = 2
+    settings.chat_min_citations = 1
+    settings.chat_max_citations = 3
+    settings.chat_summary_trigger = 2
+    settings.chat_history_limit = 5
+    monkeypatch.setattr(service_app, "get_settings", lambda: settings)
+
+    service_app.bootstrap()
+
+    monkeypatch.setattr(service_app, "ensure_model", lambda: None)
+    monkeypatch.setattr(service_app, "ensure_collection", lambda: None)
+
+    hits = [
+        {"file": f"doc{i}.pdf", "page": i, "score": 1 - i * 0.1}
+        for i in range(1, 5)
+    ]
+
+    def fake_search(_query: str, top_k: int = 10):
+        assert top_k == settings.retrieve_topk
+        return list(hits)
+
+    monkeypatch.setattr(service_app, "search_chunks", fake_search)
+
+    recorded_hits: list[dict[str, Any]] = []
+
+    def fake_select(hits_input: list[dict[str, Any]], minimum: int, maximum: int):
+        recorded_hits.extend(hits_input)
+        return hits_input[:minimum], True
+
+    monkeypatch.setattr(service_app, "select_citations", fake_select)
+    monkeypatch.setattr(service_app, "build_context", lambda h, token_limit=3000: "context")
+    monkeypatch.setattr(service_app, "generate", lambda prompt: "Готовый ответ")
+
+    payload = service_app.ChatRequest(user_id="u", message="Привет", conversation_id=None)
+    response = service_app.chat(payload)
+
+    assert recorded_hits == hits[: settings.rerank_topk]
+    assert response.answer.startswith("Готовый ответ")
+    assert response.citations == hits[: settings.chat_min_citations]
+    assert response.citations_insufficient is False
