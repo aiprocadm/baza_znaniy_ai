@@ -1,30 +1,26 @@
 from __future__ import annotations
 
-import sys
-from importlib import util as importlib_util
-from pathlib import Path
 from typing import Any, List
 import types
 
 import pytest
+from app.api.v1 import chat as chat_module
 from app.core.config import Settings
+from app.models import ChatRequest, ChatResponse
 
 
-_ROUTES_PATH = Path(__file__).resolve().parents[1] / "app" / "api" / "routes.py"
-_ROUTES_SPEC = importlib_util.spec_from_file_location("app_api_routes_test", _ROUTES_PATH)
-assert _ROUTES_SPEC is not None and _ROUTES_SPEC.loader is not None
-routes_module = importlib_util.module_from_spec(_ROUTES_SPEC)
-_original_ingest = sys.modules.get("app.ingest")
-ingest_stub = types.ModuleType("app.ingest")
-setattr(ingest_stub, "parse_and_chunk", lambda *args, **kwargs: [])
-sys.modules["app.ingest"] = ingest_stub
-try:
-    _ROUTES_SPEC.loader.exec_module(routes_module)  # type: ignore[misc]
-finally:
-    if _original_ingest is None:
-        sys.modules.pop("app.ingest", None)
-    else:
-        sys.modules["app.ingest"] = _original_ingest
+_ORIGINAL_GENERATE = chat_module.generate
+_ORIGINAL_ENSURE_MODEL = chat_module.ensure_model
+
+
+def setup_module(module: types.ModuleType) -> None:  # pragma: no cover - test scaffolding
+    chat_module.ensure_model = lambda: None
+    chat_module.generate = lambda prompt: "Ответ"
+
+
+def teardown_module(module: types.ModuleType) -> None:  # pragma: no cover - test scaffolding
+    chat_module.ensure_model = _ORIGINAL_ENSURE_MODEL
+    chat_module.generate = _ORIGINAL_GENERATE
 
 
 class StubChatStore:
@@ -92,6 +88,7 @@ def _build_request(
     hits: List[dict[str, Any]],
     reranker: Any,
 ) -> tuple[DummyRequest, types.SimpleNamespace]:
+    min_citations, max_citations = settings.citations_bounds
     state = types.SimpleNamespace(
         settings=settings,
         chat_store=StubChatStore(),
@@ -101,6 +98,13 @@ def _build_request(
         memory_store=None,
         fallback_index=[],
         reranker=reranker,
+        chat_history_limit=settings.chat_history_limit,
+        retrieve_topk=settings.retrieve_topk,
+        rerank_topk=settings.rerank_limit,
+        min_citations=min_citations,
+        max_citations=max_citations,
+        rerank_enabled=settings.rerank_enabled,
+        chat_summary_trigger=settings.chat_summary_trigger,
     )
     return DummyRequest(state), state
 
@@ -136,20 +140,30 @@ def test_chat_uses_reranker_when_enabled(sample_hits: List[dict[str, Any]]) -> N
 
     reranker = StubReranker()
     request, state = _build_request(settings, sample_hits, reranker)
-    payload = types.SimpleNamespace(user_id="u", message="hello", conversation_id=None)
+    payload = ChatRequest(user_id="u", message="hello", conversation_id=None)
 
     assert settings.rerank_enabled is True
     assert request.app.state.reranker is reranker
 
-    response = routes_module.chat(request, payload)
+    original_search = chat_module.search
 
-    assert isinstance(response, dict)
+    def stub_search(query: str, top_k: int = 10) -> List[dict[str, Any]]:
+        assert top_k == settings.retrieve_topk
+        return list(sample_hits)
+
+    chat_module.search = stub_search
+    try:
+        response = chat_module.chat(payload, request=request)
+    finally:
+        chat_module.search = original_search
+
+    assert isinstance(response, ChatResponse)
     assert reranker.calls
     rerank_call = reranker.calls[0]
     assert rerank_call[0] == "hello"
     assert rerank_call[2] == settings.rerank_limit
     expected_files = [item["file"] for item in list(reversed(sample_hits))[: settings.rerank_limit]]
-    assert [item["file"] for item in response["citations"]] == expected_files
+    assert [item.file for item in response.citations] == expected_files
 
 
 def test_chat_skips_reranker_when_disabled(sample_hits: List[dict[str, Any]]) -> None:
@@ -173,14 +187,24 @@ def test_chat_skips_reranker_when_disabled(sample_hits: List[dict[str, Any]]) ->
 
     reranker = StubReranker()
     request, state = _build_request(settings, sample_hits, reranker)
-    payload = types.SimpleNamespace(user_id="u", message="hello", conversation_id=None)
+    payload = ChatRequest(user_id="u", message="hello", conversation_id=None)
 
     assert settings.rerank_enabled is False
     assert request.app.state.reranker is reranker
 
-    response = routes_module.chat(request, payload)
+    original_search = chat_module.search
 
-    assert isinstance(response, dict)
+    def stub_search(query: str, top_k: int = 10) -> List[dict[str, Any]]:
+        assert top_k == settings.retrieve_topk
+        return list(sample_hits)
+
+    chat_module.search = stub_search
+    try:
+        response = chat_module.chat(payload, request=request)
+    finally:
+        chat_module.search = original_search
+
+    assert isinstance(response, ChatResponse)
     assert reranker.called is False
     expected_files = [item["file"] for item in sample_hits[: settings.rerank_limit]]
-    assert [item["file"] for item in response["citations"]] == expected_files
+    assert [item.file for item in response.citations] == expected_files
