@@ -102,24 +102,16 @@ def _iterate_windows(
         return []
 
     step_overlap = _normalise_overlap(window, overlap)
-    stride = max(1, window - step_overlap)
 
     pieces: List[str] = []
     start = 0
-    last_end = 0
     while start < total:
         end = min(start + window, total)
         pieces.append(tokenizer.decode(token_ids[start:end]))
-        last_end = end
         if end >= total:
             break
-        start += stride
-
-    if last_end < total:
-        tail_start = max(total - window, 0)
-        tail = tokenizer.decode(token_ids[tail_start:total])
-        if tail:
-            pieces.append(tail)
+        next_start = max(end - step_overlap, start + 1)
+        start = next_start
 
     return pieces
 
