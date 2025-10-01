@@ -24,7 +24,7 @@ class VectorStore(Protocol):
 _cached_store: VectorStore | None = None
 
 
-def _build_store(settings: Settings) -> VectorStore:
+def _build_backend(settings: Settings) -> VectorStore:
     backend = settings.vector_backend.lower()
     if backend == "faiss":
         from .faiss import FaissVectorStore
@@ -42,11 +42,23 @@ def get_vector_store(settings: Settings | None = None) -> VectorStore:
 
     global _cached_store
     if settings is not None:
-        _cached_store = _build_store(settings)
+        _cached_store = _build_backend(settings)
         return _cached_store
     if _cached_store is None:
-        _cached_store = _build_store(get_settings())
+        _cached_store = _build_backend(get_settings())
     return _cached_store
 
 
-__all__ = ["VectorStore", "get_vector_store"]
+def _clear_cache() -> None:
+    global _cached_store
+    _cached_store = None
+
+
+get_vector_store.cache_clear = _clear_cache  # type: ignore[attr-defined]
+
+
+# Backwards compatibility alias for older tests/imports
+_build_store = _build_backend
+
+
+__all__ = ["VectorStore", "get_vector_store", "_build_backend"]
