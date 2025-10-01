@@ -162,6 +162,48 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("INGEST_BACKOFF_SECONDS", "INGEST_BACKOFF_BASE"),
     )
 
+    # HTML conversion --------------------------------------------------
+    html2text_bodywidth: int = Field(
+        default=0,
+        validation_alias=AliasChoices("HTML2TEXT_BODYWIDTH"),
+        description="Maximum column width for html2text output. Zero disables wrapping.",
+    )
+    html2text_links: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("HTML2TEXT_LINKS", "HTML2TEXT_INCLUDE_LINKS"),
+        description="Include link targets in converted HTML output when set to true.",
+    )
+    html2text_ignore_images: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("HTML2TEXT_IGNORE_IMAGES"),
+        description="Ignore image tags during HTML conversion when set to true.",
+    )
+    html2text_ignore_emphasis: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("HTML2TEXT_IGNORE_EMPHASIS"),
+        description="Strip emphasis markers such as bold and italics when converting HTML.",
+    )
+    html2text_inline_links: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("HTML2TEXT_INLINE_LINKS"),
+        description="Render links inline rather than collecting references at the end of paragraphs.",
+    )
+    html2text_single_line_break: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("HTML2TEXT_SINGLE_LINE_BREAK"),
+        description="Collapse consecutive line breaks into a single break during HTML conversion.",
+    )
+    html2text_wrap_links: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("HTML2TEXT_WRAP_LINKS"),
+        description="Allow html2text to wrap long link targets across multiple lines.",
+    )
+    html2text_unicode_snob: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("HTML2TEXT_UNICODE_SNOB"),
+        description="Prefer unicode characters for typographical symbols when converting HTML.",
+    )
+
     # Vector store -------------------------------------------------------
     vector_backend: str = Field(default="qdrant", validation_alias=AliasChoices("VECTOR_BACKEND"))
     vector_embed_model: str = Field(
