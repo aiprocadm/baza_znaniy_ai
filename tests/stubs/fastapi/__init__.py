@@ -6,6 +6,9 @@ import inspect
 from dataclasses import dataclass
 from datetime import date, datetime
 
+from types import SimpleNamespace
+
+
 
 from tempfile import SpooledTemporaryFile
 
@@ -15,17 +18,25 @@ from typing import Annotated, Any, Callable, Dict, IO, List, Optional, get_args,
 
 
 from tempfile import SpooledTemporaryFile
+
 from typing import (
     Annotated,
     Any,
     Callable,
     Dict,
+    IO,
+    Iterable,
     List,
     Optional,
+    Tuple,
+    TypeVar,
     get_args,
     get_origin,
     get_type_hints,
 )
+
+
+from tempfile import SpooledTemporaryFile
 
 from io import BytesIO
 
@@ -39,6 +50,7 @@ from typing import Annotated, Any, Callable, Dict, List, Optional, get_args, get
 from types import SimpleNamespace
 from typing import Annotated, Any, Callable, Dict, IO, List, Optional, get_args, get_origin, get_type_hints
 
+
 from pydantic import BaseModel
 
 from . import status
@@ -47,7 +59,12 @@ from .responses import HTMLResponse, JSONResponse
 try:  # pragma: no cover - optional dependency
     from starlette.requests import Request as StarletteRequest
 except Exception:  # pragma: no cover - fallback when Starlette is unavailable
-    StarletteRequest = None
+    StarletteRequest = None  # type: ignore[assignment]
+
+
+
+T = TypeVar("T")
+
 
 
 class HTTPException(Exception):
@@ -60,7 +77,7 @@ class HTTPException(Exception):
 
 
 class Request:
-    """Placeholder request object."""
+    """Placeholder request object used by the tests."""
 
     def __init__(self, scope: Optional[dict[str, Any]] = None) -> None:
         self.scope = scope or {}
@@ -68,6 +85,10 @@ class Request:
     @property
     def app(self) -> Any:
         return self.scope.get("app")
+
+    @app.setter
+    def app(self, value: Any) -> None:
+        self.scope["app"] = value
 
 
 class UploadFile:
@@ -77,6 +98,9 @@ class UploadFile:
         self,
         filename: str | None = None,
         file: IO[bytes] | None = None,
+
+        *,
+
         *,
         content: bytes | str | None = None,
         content_type: str | None = None,
@@ -103,7 +127,22 @@ class UploadFile:
 
         content: bytes | None = None,
         content_type: str | None = None,
+        headers: Any | None = None,
     ) -> None:
+
+        self.filename = filename
+        self.content_type = content_type
+        self.headers = headers
+        self._owns_file = False
+        if file is None:
+            stream = SpooledTemporaryFile(mode="w+b")
+            if content:
+                stream.write(content)
+            stream.seek(0)
+            file = stream
+            self._owns_file = True
+        self.file = file
+
 
         if file is None:
             stream: IO[bytes] = SpooledTemporaryFile(mode="w+b")
@@ -136,11 +175,18 @@ class UploadFile:
 
             file = io.BytesIO()
         self.file: IO[bytes] = file
+
         if hasattr(self.file, "seek"):
             try:
                 self.file.seek(0)
             except Exception:  # pragma: no cover - defensive
                 pass
+
+
+    async def read(self, size: int = -1) -> bytes:
+        data = self.file.read(size)
+        if isinstance(data, str):
+
 
     async def read(self, size: int = -1) -> bytes:
         data = self.file.read(size)
@@ -163,10 +209,12 @@ class UploadFile:
         if isinstance(data, str):
 
 
+
             return data.encode()
         if data is None:
             return b""
         return data
+
 
 
 
@@ -178,9 +226,11 @@ class UploadFile:
 
 
 
+
     async def close(self) -> None:
-        if hasattr(self.file, "close") and not getattr(self.file, "closed", False):
+        if self._owns_file and hasattr(self.file, "close"):
             self.file.close()
+
 
 
 
@@ -275,10 +325,9 @@ class _RouterBase:
         return self._add_route("HEAD", path, **options)
 
     def include_router(self, router: "APIRouter") -> None:
-        for route in router._routes:
-            self._routes.append(route)
+        self._routes.extend(router._routes)
         for key, handlers in router._event_handlers.items():
-            self._event_handlers[key].extend(handlers)
+            self._event_handlers.setdefault(key, []).extend(handlers)
 
     def on_event(self, event_type: str) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
         def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
@@ -287,7 +336,7 @@ class _RouterBase:
 
         return decorator
 
-    def _find_route(self, method: str, path: str) -> tuple[_Route, Dict[str, str]] | tuple[None, None]:
+    def _find_route(self, method: str, path: str) -> tuple[_Route | None, Dict[str, str] | None]:
         for route in self._routes:
             if route.method != method:
                 continue
@@ -332,13 +381,11 @@ def _serialise(data: Any) -> Any:
     return data
 
 
-def _resolve_dependency(
-    dependency: Callable[..., Any] | Any, app: "FastAPI"
-) -> Any:
+def _resolve_dependency(dependency: Callable[..., Any] | Any, app: "FastAPI") -> Any:
     if not callable(dependency):
         return dependency
 
-    override = app.dependency_overrides.get(dependency) if hasattr(app, "dependency_overrides") else None
+    override = app.dependency_overrides.get(dependency)
     target = override or dependency
 
     signature = inspect.signature(target)
@@ -382,6 +429,7 @@ def _build_call_arguments(
     type_hints = get_type_hints(handler, include_extras=True)
     kwargs: Dict[str, Any] = {}
     body_assigned = False
+
     for name, parameter in signature.parameters.items():
         if name in path_params:
             kwargs[name] = path_params[name]
@@ -418,6 +466,7 @@ def _build_call_arguments(
 
         if parameter.default is not inspect._empty:
             kwargs[name] = _resolve_dependency(parameter.default, app)
+
     return kwargs
 
 
@@ -426,11 +475,14 @@ __all__ = [
     "Depends",
     "FastAPI",
     "File",
+    "Form",
     "HTMLResponse",
     "HTTPException",
     "JSONResponse",
     "Query",
     "Request",
     "UploadFile",
+    "_build_call_arguments",
+    "_serialise",
     "status",
 ]

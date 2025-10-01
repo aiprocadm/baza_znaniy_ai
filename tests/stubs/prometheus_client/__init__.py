@@ -142,3 +142,14 @@ class Histogram(_MetricBase):
             for bucket in self._buckets:
                 lines.append(f"{self._name}_bucket{suffix},le=\"{bucket}\" {value}")
         return lines
+
+
+class _HistogramChild(_MetricChild):
+    def observe(self, amount: float) -> None:
+        value = float(amount)
+        self._metric._counts[self._label_values] = self._metric._counts.get(self._label_values, 0.0) + 1.0
+        self._metric._sums[self._label_values] = self._metric._sums.get(self._label_values, 0.0) + value
+        # Histograms expose both ``_count`` and ``_sum`` samples.  The base sample tracks
+        # the observation count to keep the registry data consistent.
+        self._metric._samples[self._label_values] = self._metric._counts[self._label_values]
+
