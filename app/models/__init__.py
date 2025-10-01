@@ -129,7 +129,7 @@ class JobInfo(BaseModel):
     """Representation of an asynchronous job entry."""
 
     id: str
-    tenant_id: str
+    tenant_slug: Optional[str]
     job_type: str
     status: str
     priority: int

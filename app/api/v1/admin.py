@@ -9,7 +9,7 @@ from sqlmodel import Session, select
 
 from app.core.deps import get_ingest_session
 from app.models import JobInfo, JobsResponse
-from app.models.entities import JobRecord
+from app.models.file import JobRecord
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -18,15 +18,15 @@ router = APIRouter(prefix="/admin", tags=["admin"])
 def list_jobs(
     *,
     session: Session = Depends(get_ingest_session),
-    tenant_id: Optional[str] = Query(None, alias="tenant"),
+    tenant_slug: Optional[str] = Query(None, alias="tenant"),
     job_type: Optional[str] = Query(None),
     status: Optional[str] = Query(None),
 ) -> JobsResponse:
     """Return information about queued and historical jobs."""
 
     statement = select(JobRecord).order_by(JobRecord.created_at.desc())
-    if tenant_id:
-        statement = statement.where(JobRecord.tenant_id == tenant_id)
+    if tenant_slug:
+        statement = statement.where(JobRecord.tenant_slug == tenant_slug)
     if job_type:
         statement = statement.where(JobRecord.job_type == job_type)
     if status:
@@ -36,7 +36,7 @@ def list_jobs(
     items = [
         JobInfo(
             id=str(record.id),
-            tenant_id=record.tenant_id,
+            tenant_slug=record.tenant_slug,
             job_type=record.job_type,
             status=record.status,
             priority=record.priority,
