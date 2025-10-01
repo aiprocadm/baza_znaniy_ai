@@ -198,6 +198,42 @@ Front-end состоит из одного HTML-файла с нативным J
 
 ## Логирование и память
 
+## Обучение и развёртывание LoRA адаптеров
+
+### Экспорт датасета из индекса
+
+1. Активируйте виртуальное окружение и загрузите переменные из `.env`, чтобы скрипты получили доступ к Qdrant и базе данных.
+2. Выполните `python -m scripts.export_all ./var/backups/index.tar.gz`. Архив содержит `vector_payloads.json`, в котором для каждого чанка хранится исходный текст и дополнительные поля.
+3. Сформируйте тренировочный набор с колонками `question`, `context`, `answer`. Для простого чата можно использовать заголовок чанка в качестве вопроса, сам текст в поле контекста и ожидаемый ответ (либо пустую строку) — сохраните файл в формате CSV или JSONL.
+
+### Обучение QLoRA на CPU или GPU
+
+1. Установите дополнительные пакеты: `pip install transformers peft datasets bitsandbytes accelerate` (для CPU можно пропустить `bitsandbytes`).
+2. Запустите обучение: 
+   ```bash
+   python -m scripts.train_lora \
+       ./data/dataset.jsonl \
+       meta-llama/Meta-Llama-3-8B-Instruct \
+       ./var/adapters/my-llama \
+       --lora-r 8 \
+       --lora-alpha 16 \
+       --lora-dropout 0.05 \
+       --num-epochs 3 \
+       --per-device-train-batch-size 2 \
+       --gradient-accumulation-steps 4
+   ```
+   Скрипт подхватывает токены и прокси из `.env`, логирует процесс обучения и сохраняет LoRA-адаптер в подкаталоге `adapter/`.
+
+### Конвертация в форматы llama.cpp
+
+- После обучения в каталоге `ggml/` автоматически появится файл `adapter.ggml`, совместимый с `llama.cpp` (скрипт вызывает `llama_cpp.convert_lora`).
+- Для генерации GGUF можно выполнить `python -m llama_cpp.convert_lora --to-gguf --base-model <модель> --adapter ./var/adapters/my-llama/adapter --output ./var/adapters/my-llama/gguf/my-llama.gguf`.
+
+### Размещение и горячая загрузка
+
+1. Скопируйте каталоги `adapter/` и `ggml/` в `./var/adapters/<имя_адаптера>/`.
+2. Вызовите новый эндпоинт `POST /api/v1/llm/adapters/hot-load` с JSON `{ "name": "<имя_адаптера>" }`, чтобы перезагрузить адаптер без рестарта сервиса. Эндпоинт ищет файлы в `./var/adapters/` и подключает их для текущей LLM.
+
 ### Переключение провайдера и модели LLM
 
 История диалогов по умолчанию сохраняется в SQLite-файле по пути `DATA_DIR/db/chat_history.sqlite`. При необходимости можно переключить приложение на PostgreSQL, задав `CHAT_DB_BACKEND=postgres` и передав строку подключения через `CHAT_DB_DSN`. Для каждого сообщения хранится пользователь, идентификатор диалога, роли (`user`/`assistant`) и содержание. Эти данные используются для восстановления контекста между запросами.
