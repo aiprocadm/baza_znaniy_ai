@@ -191,7 +191,10 @@ class IngestService:
             self._spawn_job_thread(job)
         else:
             await self.queue.put(job)
+        codex/clean-up-models-and-validate-tables
 
+
+        main
         worker = getattr(self, "worker", None)
         if worker is not None:
             worker.ensure_started()
@@ -214,13 +217,21 @@ class IngestService:
         with Session(self.engine) as session:
             document = session.exec(
                 select(DocumentRecord).where(
+        codex/clean-up-models-and-validate-tables
+                    DocumentRecord.tenant_id == tenant_id,
+
                     DocumentRecord.tenant_slug == tenant_id,
+        main
                     DocumentRecord.sha256 == sha,
                 )
             ).first()
             if document is None:
                 document = DocumentRecord(
+        codex/clean-up-models-and-validate-tables
+                    tenant_id=tenant_id,
+
                     tenant_slug=tenant_id,
+        main
                     sha256=sha,
                     mime_type=detected_mime,
                     status=DocumentStatus.QUEUED,
@@ -483,6 +494,7 @@ class IngestWorker:
                 except Exception:
                     page_tokens = len(text)
                 page = PageRecord(
+                    tenant_id=job.tenant_id,
                     file_id=job.file_id,
                     number=page_number,
                     sha256=page_sha,
@@ -513,6 +525,7 @@ class IngestWorker:
                     except Exception:
                         chunk_tokens = len(chunk_text)
                     chunk = ChunkRecord(
+                        tenant_id=job.tenant_id,
                         page_id=page.id,
                         index=offset,
                         sha256=chunk_sha,
