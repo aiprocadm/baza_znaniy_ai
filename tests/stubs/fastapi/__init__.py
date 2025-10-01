@@ -6,39 +6,18 @@ import inspect
 import io
 from dataclasses import dataclass
 from datetime import date, datetime
-        codex/update-upload-file-handling-and-tests
-from typing import Annotated, Any, Callable, Dict, IO, List, Optional, get_args, get_origin, get_type_hints
-
-        codex/update-upload-handling-in-upload.py
-from tempfile import SpooledTemporaryFile
-from typing import (
-    Annotated,
-    Any,
-    Callable,
-    Dict,
-    List,
-    Optional,
-    get_args,
-    get_origin,
-    get_type_hints,
-)
-
-from io import BytesIO
-from typing import Annotated, Any, Callable, Dict, List, Optional, get_args, get_origin, get_type_hints
-        main
-        main
 from types import SimpleNamespace
+from typing import Annotated, Any, Callable, Dict, IO, List, Optional, get_args, get_origin, get_type_hints
 
 from pydantic import BaseModel
 
 from . import status
+from .responses import HTMLResponse, JSONResponse
 
 try:  # pragma: no cover - optional dependency
     from starlette.requests import Request as StarletteRequest
 except Exception:  # pragma: no cover - fallback when Starlette is unavailable
     StarletteRequest = None
-
-from .responses import HTMLResponse, JSONResponse
 
 
 class HTTPException(Exception):
@@ -57,7 +36,7 @@ class Request:
         self.scope = scope or {}
 
     @property
-    def app(self):
+    def app(self) -> Any:
         return self.scope.get("app")
 
 
@@ -67,13 +46,22 @@ class UploadFile:
     def __init__(
         self,
         filename: str | None = None,
-        codex/update-upload-file-handling-and-tests
         file: IO[bytes] | None = None,
         content_type: str | None = None,
+        *,
+        headers: Any | None = None,
     ) -> None:
         self.filename = filename
         self.content_type = content_type
-        self.file: IO[bytes] = file or io.BytesIO()
+        self.headers = headers
+        if file is None:
+            file = io.BytesIO()
+        self.file: IO[bytes] = file
+        if hasattr(self.file, "seek"):
+            try:
+                self.file.seek(0)
+            except Exception:  # pragma: no cover - defensive
+                pass
 
     async def read(self, size: int = -1) -> bytes:
         data = self.file.read(size)
@@ -83,55 +71,9 @@ class UploadFile:
             return b""
         return data
 
-        file: Any | None = None,
-        *,
-        codex/update-upload-handling-in-upload.py
-        content: bytes | None = None,
-        content_type: str | None = None,
-    ) -> None:
-        if file is None:
-            stream = SpooledTemporaryFile(mode="w+b")
-            if content:
-                stream.write(content)
-                stream.seek(0)
-            file = stream
-            self._owns_file = True
-        else:
-            self._owns_file = False
-        self.filename = filename
-        self.file = file
-        self.content_type = content_type
-
-        content_type: str | None = None,
-        headers: Any | None = None,
-    ) -> None:
-        self.filename = filename
-        self.content_type = content_type
-        self.headers = headers
-        if file is None:
-            file = BytesIO()
-        self.file = file
-        if hasattr(self.file, "seek"):
-            self.file.seek(0)
-        main
-
-    async def read(self) -> bytes:
-        if hasattr(self.file, "seek"):
-            self.file.seek(0)
-        data = self.file.read()
-        if isinstance(data, str):
-        codex/update-upload-handling-in-upload.py
-            return data.encode()
-        return data or b""
-
     async def close(self) -> None:
         if hasattr(self.file, "close") and not getattr(self.file, "closed", False):
             self.file.close()
-
-            data = data.encode()
-        return data or b""
-        main
-        main
 
 
 def Depends(dependency: Callable[..., Any] | None = None) -> Callable[..., Any] | None:
