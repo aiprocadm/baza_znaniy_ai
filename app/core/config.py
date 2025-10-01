@@ -8,15 +8,9 @@ from typing import Iterable
 
 from pydantic import AliasChoices, BaseModel, Field
 
-        codex/create-file-upload-progress-ui-with-fastapi
 try:  # pragma: no cover - support for environments without computed_field
     from pydantic import computed_field, field_validator
-except ImportError:  # pragma: no cover - test stubs
-
-try:  # pragma: no cover - maintain compatibility with Pydantic v1
-    from pydantic import computed_field, field_validator
 except ImportError:  # pragma: no cover - fallback for test stubs
-        main
 
     def computed_field(*args, **kwargs):  # type: ignore[misc]
         def decorator(func):
@@ -26,11 +20,7 @@ except ImportError:  # pragma: no cover - fallback for test stubs
             return decorator(args[0])
         return decorator
 
-        codex/create-file-upload-progress-ui-with-fastapi
-    def field_validator(*args, **kwargs):  # type: ignore[no-redef]
-
     def field_validator(*args, **kwargs):  # type: ignore[misc]
-        main
         def decorator(func):
             return func
 
@@ -38,11 +28,7 @@ except ImportError:  # pragma: no cover - fallback for test stubs
             return decorator(args[0])
         return decorator
 
-        codex/create-file-upload-progress-ui-with-fastapi
 try:  # pragma: no cover - support for environments without pydantic-settings
-
-try:  # pragma: no cover - optional dependency during tests
-        main
     from pydantic_settings import BaseSettings, SettingsConfigDict
 except ImportError:  # pragma: no cover - lightweight fallback
     import os
@@ -89,7 +75,6 @@ class Settings(BaseSettings):
         default=Path("/opt/knowlab/data/files"),
         validation_alias=AliasChoices("DATA_DIR", "FILES_ROOT"),
     )
-        codex/create-file-upload-progress-ui-with-fastapi
     cors_allow_origins: list[str] = Field(
         default_factory=lambda: ["*"],
         validation_alias=AliasChoices(
@@ -102,7 +87,6 @@ class Settings(BaseSettings):
     files_subdir: str = Field(default="files", validation_alias=AliasChoices("FILES_SUBDIR"))
 
     # Chat storage -------------------------------------------------------
-        main
     chat_db_backend: str = Field(
         default="sqlite",
         validation_alias=AliasChoices("CHAT_DB_BACKEND"),
@@ -211,11 +195,8 @@ class Settings(BaseSettings):
         default=384,
         validation_alias=AliasChoices("VECTOR_EMBED_DIMENSION", "EMBED_DIMENSION"),
     )
-        codex/create-file-upload-progress-ui-with-fastapi
-
 
     # LLM provider -------------------------------------------------------
-        main
     llm_provider: str = Field(
         default="ollama",
         validation_alias=AliasChoices("LLM_PROVIDER"),
@@ -232,15 +213,12 @@ class Settings(BaseSettings):
         default=6000,
         validation_alias=AliasChoices("MAX_CONTEXT_TOKENS"),
     )
-        codex/update-default-model-and-settings-5pychu
     max_generation_tokens: int = Field(
         default=1024,
         validation_alias=AliasChoices("MAX_GENERATION_TOKENS"),
     )
 
-
     # Security -----------------------------------------------------------
-        main
     secret_key: str = Field(
         default="change-me",
         validation_alias=AliasChoices("SECRET_KEY"),
@@ -275,9 +253,9 @@ class Settings(BaseSettings):
         "embed_batch_size",
         "chat_memory_ttl_days",
         "chat_memory_max_tokens",
-        codex/create-file-upload-progress-ui-with-fastapi
         "access_token_expire_minutes",
         "max_context_tokens",
+        "max_generation_tokens",
         mode="before",
     )
     @classmethod
@@ -286,19 +264,12 @@ class Settings(BaseSettings):
             return value
         return int(value)
 
-        codex/update-default-model-and-settings-5pychu
-        "embed_batch_size",
-        "max_context_tokens",
-        "max_generation_tokens",
-
-        main
-        "access_token_expire_minutes",
-        "rate_burst",
-        mode="before",
-    )
+    @field_validator("rate_burst", mode="before")
     @classmethod
-    def _ensure_int(cls, value: object) -> int:
-        return int(value) if value not in {None, ""} else 0
+    def _ensure_rate_burst(cls, value: object) -> int:
+        if value in {None, "", Ellipsis}:
+            return 0
+        return int(value)
 
     @field_validator("chat_memory_enabled", "rerank_enabled", mode="before")
     @classmethod
@@ -306,7 +277,6 @@ class Settings(BaseSettings):
         if isinstance(value, str):
             return value.lower() in {"1", "true", "yes", "on"}
         return bool(value)
-        main
 
     @field_validator("rerank_topk", mode="before")
     @classmethod
@@ -324,19 +294,11 @@ class Settings(BaseSettings):
             raise ValueError("RERANK_TOPK must be at least 1")
         return value
 
-    @field_validator("chat_memory_enabled", "rerank_enabled", mode="before")
-    @classmethod
-    def _normalise_bool(cls, value: object) -> bool:
-        if isinstance(value, str):
-            return value.lower() in {"1", "true", "yes", "on"}
-        return bool(value)
-
     @field_validator("ollama_base_url", mode="after")
     @classmethod
     def _strip_trailing_slash(cls, value: str) -> str:
         return value.rstrip("/")
 
-        codex/create-file-upload-progress-ui-with-fastapi
     @field_validator("cors_allow_origins", mode="before")
     @classmethod
     def _normalise_origins(cls, value: object) -> list[str]:
@@ -391,57 +353,6 @@ class Settings(BaseSettings):
 
     @computed_field
     @property
-    def chat_db_path_resolved(self) -> Path:
-        base = self.chat_db_path or (self.data_dir / "db" / "chat_history.sqlite")
-        return Path(base)
-
-    @computed_field
-    @property
-    def memory_db_path_resolved(self) -> Path:
-        base = self.memory_db_path or (self.data_dir / "db" / "memory.sqlite")
-        return Path(base)
-
-    @computed_field
-    @property
-    def rerank_limit(self) -> int:
-        candidate = self.rerank_topk or self.retrieve_topk
-        candidate = max(1, candidate)
-        return min(self.retrieve_topk, candidate)
-
-    @computed_field
-    @property
-    def citations_bounds(self) -> tuple[int, int]:
-        minimum = max(1, int(self.chat_min_citations))
-        maximum = max(minimum, int(self.chat_max_citations))
-        return minimum, maximum
-
-
-    @field_validator("llm_provider", "vector_backend", "chat_db_backend", mode="after")
-    @classmethod
-    def _normalise_lower(cls, value: str) -> str:
-        return (value or "").strip().lower()
-
-    @field_validator("data_dir", "chat_db_path", "memory_db_path", mode="before")
-    @classmethod
-    def _expand_path(cls, value: object) -> object:
-        if isinstance(value, str) and value:
-            return Path(value).expanduser()
-        return value
-
-    @field_validator("data_dir", mode="after")
-    @classmethod
-    def _ensure_dir(cls, value: Path) -> Path:
-        return value.expanduser()
-
-    @field_validator("chat_db_path", "memory_db_path", mode="after")
-    @classmethod
-    def _absolute_path(cls, value: Path | None) -> Path | None:
-        if value is None:
-            return None
-        return value.expanduser().resolve()
-
-    @computed_field
-    @property
     def files_dir(self) -> Path:
         return self.data_dir / self.files_subdir
 
@@ -467,11 +378,10 @@ class Settings(BaseSettings):
     @computed_field
     @property
     def citations_bounds(self) -> tuple[int, int]:
-        minimum = max(1, self.chat_min_citations)
-        maximum = max(minimum, self.chat_max_citations)
+        minimum = max(1, int(self.chat_min_citations))
+        maximum = max(minimum, int(self.chat_max_citations))
         return minimum, maximum
 
-        main
     def iter_secret_fields(self) -> Iterable[str]:
         """Return names of settings that contain secrets."""
 
