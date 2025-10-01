@@ -31,6 +31,11 @@ DOCUMENT_PARSE_CHUNKS_TOTAL = Counter(
     "Number of document chunks produced during parsing.",
     labelnames=("extension",),
 )
+DOCUMENT_OCR_PAGES_TOTAL = Counter(
+    "kb_document_ocr_pages_total",
+    "Number of document pages processed via OCR.",
+    labelnames=("status", "extension"),
+)
 
 INDEX_OPERATIONS_TOTAL = Counter(
     "kb_index_operations_total",
@@ -96,6 +101,20 @@ def record_document_parse(extension: str | None, status: str, chunks: int, durat
     DOCUMENT_PARSE_DURATION_SECONDS.labels(status=status_label).observe(max(duration, 0.0))
     if chunks > 0 and status_label == "success":
         DOCUMENT_PARSE_CHUNKS_TOTAL.labels(extension=ext_label).inc(chunks)
+
+
+def record_document_ocr_pages(pages: int, status: str, extension: str | None) -> None:
+    """Record metrics for OCR processing attempts."""
+
+    ext_label = _normalise(extension, _DEFAULT_EXTENSION)
+    status_label = _normalise(status, _DEFAULT_STATUS)
+
+    increment = max(int(pages), 0)
+    if increment == 0 and status_label != "success":
+        increment = 1
+
+    if increment > 0:
+        DOCUMENT_OCR_PAGES_TOTAL.labels(status=status_label, extension=ext_label).inc(increment)
 
 
 def record_index_operation(

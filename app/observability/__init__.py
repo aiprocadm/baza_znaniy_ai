@@ -8,6 +8,7 @@ from .metrics import (
     DOCUMENT_PARSE_CHUNKS_TOTAL,
     DOCUMENT_PARSE_DURATION_SECONDS,
     DOCUMENT_PARSE_TOTAL,
+    DOCUMENT_OCR_PAGES_TOTAL,
     INDEX_CHUNKS_TOTAL,
     INDEX_DURATION_SECONDS,
     INDEX_OPERATIONS_TOTAL,
@@ -16,6 +17,7 @@ from .metrics import (
     SEARCH_QUERIES_TOTAL,
     record_chat_completion,
     record_document_parse,
+    record_document_ocr_pages,
     record_index_operation,
     record_search_operation,
 )
@@ -28,6 +30,7 @@ __all__ = [
     "DOCUMENT_PARSE_CHUNKS_TOTAL",
     "DOCUMENT_PARSE_DURATION_SECONDS",
     "DOCUMENT_PARSE_TOTAL",
+    "DOCUMENT_OCR_PAGES_TOTAL",
     "INDEX_CHUNKS_TOTAL",
     "INDEX_DURATION_SECONDS",
     "INDEX_OPERATIONS_TOTAL",
@@ -36,6 +39,7 @@ __all__ = [
     "SEARCH_QUERIES_TOTAL",
     "record_chat_completion",
     "record_document_parse",
+    "record_document_ocr_pages",
     "record_index_operation",
     "record_search_operation",
 ]
