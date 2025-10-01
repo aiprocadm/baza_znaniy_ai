@@ -171,7 +171,26 @@ def chat(request: Request, inp: ChatIn) -> dict[str, Any]:
             logger.exception("Vector search failed; using fallback index")
     if not hits and fallback_index:
         hits = fallback_index[: settings.retrieve_topk]
+        codex/refactor-upload-and-ingest-apis-to-use-ingestservice
+        # codex/implement-reranking-functionality-and-tests
+    rerank_limit = settings.rerank_limit
+    if hits:
+        if settings.rerank_enabled and reranker is not None:
+            try:
+                hits = reranker.rerank(inp.message, hits, rerank_limit)
+            except Exception:  # pragma: no cover - defensive fallback
+                logger.exception("Reranking failed; falling back to initial ordering")
+                hits = hits[:rerank_limit]
+        elif len(hits) > rerank_limit:
+            hits = hits[:rerank_limit]
 
+
+        main
+
+        codex/clean-up-code-and-run-tests
+    reranker = getattr(request.app.state, "reranker", None)
+
+        main
     hits = apply_rerank(
         inp.message,
         hits,
@@ -179,6 +198,10 @@ def chat(request: Request, inp: ChatIn) -> dict[str, Any]:
         settings.rerank_enabled,
         reranker,
     )
+        codex/refactor-upload-and-ingest-apis-to-use-ingestservice
+        # main
+
+        main
     context = build_context(hits, token_limit=3000)
 
     prompt_parts = [
@@ -235,8 +258,13 @@ def chat(request: Request, inp: ChatIn) -> dict[str, Any]:
         "conversation_id": conversation_id,
         "citations_insufficient": not has_minimum_citations,
         "latency_ms": (time.perf_counter() - start) * 1000,
+        codex/update-default-model-and-settings
+        "max_context_tokens": settings.max_context_tokens or None,
+        "max_generation_tokens": settings.max_generation_tokens or None,
+
         "max_context_tokens": settings.max_context_tokens,
         "max_generation_tokens": settings.max_generation_tokens,
+        main
     }
 
 

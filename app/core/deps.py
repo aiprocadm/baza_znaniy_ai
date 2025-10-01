@@ -5,11 +5,18 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Iterable, Optional
+from typing import Iterable, Iterator, Optional
 
 from fastapi import Request
 
+        codex/refactor-upload-and-ingest-apis-to-use-ingestservice
+from sqlmodel import Session
+
+from app.ingest.service import IngestService
+
+from app.core.config import get_settings
 from app.services.files import FileStore, IngestQueue
+        main
 
 
 DEFAULT_ALLOWED_EXTENSIONS = frozenset({"pdf", "docx", "pptx", "xlsx", "txt", "md"})
@@ -57,7 +64,8 @@ class UploadLimits:
 def get_data_dir() -> Path:
     """Return the directory where uploaded files are stored."""
 
-    root = Path(os.getenv("DATA_DIR", "/opt/knowlab/data/files")).expanduser()
+    settings = get_settings()
+    root = settings.data_dir
     root.mkdir(parents=True, exist_ok=True)
     return root
 
@@ -65,9 +73,32 @@ def get_data_dir() -> Path:
 def get_upload_limits() -> UploadLimits:
     """Provide upload limit configuration from environment variables."""
 
+        codex/expand-env.example-and-update-configuration
+    settings = get_settings()
+
+    def _mb_to_bytes(value: float | int) -> int:
+        return int(float(value) * 1024 * 1024)
+
+    raw_max_mb = os.getenv("MAX_UPLOAD_MB")
+    if raw_max_mb not in {None, ""}:
+        try:
+            max_size = _mb_to_bytes(float(raw_max_mb))
+        except ValueError as exc:  # pragma: no cover - defensive conversion
+            raise ValueError("MAX_UPLOAD_MB must be a number") from exc
+    else:
+        legacy = os.getenv("UPLOAD_MAX_SIZE")
+        if legacy not in {None, ""}:
+            max_size = UploadLimits._normalise_max_size(legacy)
+        else:
+            max_size = _mb_to_bytes(settings.max_upload_mb)
+
+    extensions = os.getenv("UPLOAD_ALLOWED_EXTS", "pdf,docx,txt")
+    return UploadLimits(max_size=max_size, allowed_extensions=extensions)
+
     defaults = UploadLimits()
     max_upload_mb = os.getenv("MAX_UPLOAD_MB", defaults.max_upload_mb)
     return UploadLimits(max_upload_mb=max_upload_mb)
+        main
 
 
 def get_tenant(request: Request = None) -> str:
@@ -78,28 +109,28 @@ def get_tenant(request: Request = None) -> str:
     return tenant or "default"
 
 
-def get_file_store(request: Request = None) -> FileStore:
-    """Access the shared :class:`~app.services.files.FileStore` instance."""
+def get_ingest_service(request: Request = None) -> IngestService:
+    """Access the shared :class:`~app.ingest.service.IngestService` instance."""
 
     if request is None:
-        raise RuntimeError("Request context is required for file store access")
-    return request.app.state.file_store
+        raise RuntimeError("Request context is required for ingest service access")
+    return request.app.state.ingest_service
 
 
-def get_ingest_queue(request: Request = None) -> IngestQueue:
-    """Access the shared :class:`~app.services.files.IngestQueue` instance."""
+def get_ingest_session(request: Request = None) -> Iterator[Session]:
+    """Provide a database session tied to the ingest service engine."""
 
-    if request is None:
-        raise RuntimeError("Request context is required for ingest queue access")
-    return request.app.state.ingest_queue
+    service = get_ingest_service(request)
+    with Session(service.engine) as session:
+        yield session
 
 
 __all__ = [
     "DEFAULT_ALLOWED_EXTENSIONS",
     "UploadLimits",
     "get_data_dir",
-    "get_file_store",
-    "get_ingest_queue",
+    "get_ingest_service",
+    "get_ingest_session",
     "get_tenant",
     "get_upload_limits",
 ]

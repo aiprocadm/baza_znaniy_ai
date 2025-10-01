@@ -1,12 +1,13 @@
-"""Endpoint for deleting uploaded files."""
-
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from pathlib import Path
 
-from app.core.deps import get_file_store, get_ingest_queue, get_tenant
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlmodel import Session
+
+from app.core.deps import get_ingest_session, get_tenant
 from app.models import DeleteResponse
-from app.services.files import FileStore, IngestQueue
+from app.models.file import FileRecord
 
 router = APIRouter(tags=["files"])
 
@@ -14,25 +15,27 @@ router = APIRouter(tags=["files"])
 @router.delete("/file/{file_id}", response_model=DeleteResponse)
 def delete_file(
     file_id: str,
-    store: FileStore = Depends(get_file_store),
-    queue: IngestQueue = Depends(get_ingest_queue),
+    session: Session = Depends(get_ingest_session),
     tenant: str = Depends(get_tenant),
 ) -> DeleteResponse:
     """Delete file metadata and remove the file from storage."""
 
-    record = store.get(file_id)
-    if record is None or record.tenant != tenant:
+    try:
+        record_id = int(file_id)
+    except (TypeError, ValueError):  # pragma: no cover - invalid identifier
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="FILE_NOT_FOUND") from None
+
+    record = session.get(FileRecord, record_id)
+    if record is None or record.tenant_id != tenant:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="FILE_NOT_FOUND")
 
-    queue.remove(file_id)
-
+    path = Path(record.path)
     try:
-        record.path.unlink(missing_ok=True)
-    except TypeError:  # pragma: no cover - Python <3.8 compatibility
-        try:
-            record.path.unlink()
-        except FileNotFoundError:
-            pass
+        path.unlink()
+    except FileNotFoundError:  # pragma: no cover - best effort cleanup
+        pass
 
-    store.remove(file_id)
-    return DeleteResponse(ok=True, id=file_id)
+    session.delete(record)
+    session.commit()
+
+    return DeleteResponse(ok=True, id=str(file_id))
