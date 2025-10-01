@@ -6,6 +6,9 @@ import asyncio
 
 import inspect
 
+from tempfile import SpooledTemporaryFile
+
+
 
 from tempfile import SpooledTemporaryFile
 from typing import TYPE_CHECKING, Any, Iterable
@@ -22,6 +25,7 @@ from tempfile import SpooledTemporaryFile
 from io import BytesIO
         main
         main
+
 
 from typing import TYPE_CHECKING, Any, Iterable
 
@@ -40,26 +44,6 @@ class _SimpleResponse:
 
     def json(self) -> Any:
         return self._content
-
-
-def _ensure_bytes(data: Any) -> bytes:
-    if isinstance(data, bytes):
-        return data
-    if isinstance(data, bytearray):
-        return bytes(data)
-    if isinstance(data, str):
-        return data.encode()
-    read = getattr(data, "read", None)
-    if callable(read):
-        result = read()
-        if isinstance(result, bytes):
-            return result
-        if isinstance(result, str):
-            return result.encode()
-    try:
-        return bytes(data)
-    except Exception:
-        return b""
 
 
 class TestClient:
@@ -97,6 +81,7 @@ class TestClient:
     ) -> _SimpleResponse:
         if data is not None or files is not None:
             payload: dict[str, Any] = dict(data or {})
+
             if files:
 
                 for key, uploads in _normalise_files(files):
@@ -104,15 +89,26 @@ class TestClient:
 
                 upload_list: list[UploadFile] = []
 
+
+            if files:
                 def _iter_files(items: Any) -> Iterable[tuple[str, Any]]:
                     if isinstance(items, dict):
                         return items.items()
                     return list(items)
 
                 for key, value in _iter_files(files):
-                    if isinstance(value, (list, tuple)) and value and isinstance(value[0], (list, tuple)):
-                        entries = value  # type: ignore[assignment]
+                    entries = _normalise_file_entries(value)
+                    uploads = [_build_upload_file(entry) for entry in entries]
+
+                    existing = payload.get(key)
+                    if existing is None:
+                        payload[key] = uploads[0] if len(uploads) == 1 else uploads
                     else:
+
+                        combined = _ensure_list(existing)
+                        combined.extend(uploads)
+                        payload[key] = combined
+
                         entries = [value]
 
                     for entry in entries:  # type: ignore[assignment]
@@ -156,6 +152,7 @@ class TestClient:
                 if upload_list:
                     payload["files"] = upload_list
 
+
             return self._request("POST", path, body=payload, **options)
 
         return self._request("POST", path, body=json, **options)
@@ -191,6 +188,18 @@ class TestClient:
 
 
             for key, value in files.items():
+
+                entries = _normalise_file_entries(value)
+                uploads = [_build_upload_file(entry) for entry in entries]
+
+                existing = kwargs.get(key)
+                if existing is None:
+                    kwargs[key] = uploads[0] if len(uploads) == 1 else uploads
+                else:
+                    combined = _ensure_list(existing)
+                    combined.extend(uploads)
+                    kwargs[key] = combined
+
                 uploads: list[UploadFile] = []
 
                 if isinstance(value, list):
@@ -265,6 +274,21 @@ class TestClient:
             asyncio.run(result)
 
 
+
+def _normalise_file_entries(value: Any) -> list[Any]:
+    if isinstance(value, list):
+        return value
+    if isinstance(value, tuple) and value and isinstance(value[0], (list, tuple, UploadFile)):
+        return list(value)
+    return [value]
+
+
+def _ensure_list(value: Any) -> list[Any]:
+    return value if isinstance(value, list) else [value]
+
+
+def _build_upload_file(entry: Any) -> UploadFile:
+
 def _normalise_files(files: Any) -> Iterable[tuple[str, list[UploadFile]]]:
     if isinstance(files, dict):
         items = files.items()
@@ -284,6 +308,7 @@ def _normalise_entries(value: Any) -> list[UploadFile]:
 
 
 def _coerce_entry(entry: Any) -> UploadFile:
+
     if isinstance(entry, UploadFile):
         return entry
 
@@ -299,7 +324,10 @@ def _coerce_entry(entry: Any) -> UploadFile:
     if hasattr(content, "read"):
         file_obj = content
         if hasattr(file_obj, "seek"):
-            file_obj.seek(0)
+            try:
+                file_obj.seek(0)
+            except Exception:  # pragma: no cover - defensive
+                pass
     else:
         if isinstance(content, (bytes, bytearray, memoryview)):
             data = bytes(content)

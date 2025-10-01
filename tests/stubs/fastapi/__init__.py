@@ -6,6 +6,7 @@ import inspect
 from dataclasses import dataclass
 from datetime import date, datetime
 
+
 from tempfile import SpooledTemporaryFile
 
 
@@ -34,19 +35,19 @@ from typing import Annotated, Any, Callable, Dict, List, Optional, get_args, get
         main
 
 
+
 from types import SimpleNamespace
 from typing import Annotated, Any, Callable, Dict, IO, List, Optional, get_args, get_origin, get_type_hints
 
 from pydantic import BaseModel
 
 from . import status
+from .responses import HTMLResponse, JSONResponse
 
 try:  # pragma: no cover - optional dependency
     from starlette.requests import Request as StarletteRequest
 except Exception:  # pragma: no cover - fallback when Starlette is unavailable
     StarletteRequest = None
-
-from .responses import HTMLResponse, JSONResponse
 
 
 class HTTPException(Exception):
@@ -65,7 +66,7 @@ class Request:
         self.scope = scope or {}
 
     @property
-    def app(self):
+    def app(self) -> Any:
         return self.scope.get("app")
 
 
@@ -79,6 +80,9 @@ class UploadFile:
         *,
         content: bytes | str | None = None,
         content_type: str | None = None,
+
+        *,
+
         headers: Any | None = None,
     ) -> None:
         self.filename = filename
@@ -121,6 +125,7 @@ class UploadFile:
 
 
         content_type: str | None = None,
+
         headers: Any | None = None,
     ) -> None:
         self.filename = filename
@@ -128,6 +133,19 @@ class UploadFile:
         self.headers = headers
 
         if file is None:
+
+            file = io.BytesIO()
+        self.file: IO[bytes] = file
+        if hasattr(self.file, "seek"):
+            try:
+                self.file.seek(0)
+            except Exception:  # pragma: no cover - defensive
+                pass
+
+    async def read(self, size: int = -1) -> bytes:
+        data = self.file.read(size)
+        if isinstance(data, str):
+
             stream = SpooledTemporaryFile(mode="w+b")
             if content:
                 data = content.encode() if isinstance(content, str) else bytes(content)
@@ -144,10 +162,12 @@ class UploadFile:
         data = self.file.read(size)
         if isinstance(data, str):
 
+
             return data.encode()
         if data is None:
             return b""
         return data
+
 
 
             data = data.encode()
@@ -157,9 +177,11 @@ class UploadFile:
         return data or b""
 
 
+
     async def close(self) -> None:
         if hasattr(self.file, "close") and not getattr(self.file, "closed", False):
             self.file.close()
+
 
 
             data = data.encode()
