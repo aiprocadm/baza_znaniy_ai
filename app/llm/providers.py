@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Any, Protocol, runtime_checkable
-
-import httpx
+from typing import Any, Mapping, Protocol, runtime_checkable
 
 from app.core.config import Settings, get_settings
+
+from .llama_cpp_provider import LlamaCppProvider
 
 
 @runtime_checkable
@@ -18,6 +17,12 @@ class LLMProvider(Protocol):
 
     def ensure_model(self) -> None:
         """Ensure the underlying model (if any) is ready for use."""
+
+        codex/add-dependencies-to-requirements.txt
+    def generate(self, prompt: str, *, context: Mapping[str, Any] | None = None) -> str:
+        """Generate a completion for *prompt*."""
+
+
 
     def ensure_ready(self) -> None:
         """Perform provider specific readiness checks."""
@@ -148,6 +153,7 @@ class OllamaProvider:
         self._adapter_verified = True
 
 
+        main
 class StubProvider:
     """Deterministic provider used in tests and offline environments."""
 
@@ -189,11 +195,11 @@ class StubProvider:
                 lines.append(f"[{index}] {file_name} — страница {page}")
         return "Источники:\n" + "\n".join(lines)
 
-    def generate(self, prompt: str, *, context: dict[str, Any] | None = None) -> str:
+    def generate(self, prompt: str, *, context: Mapping[str, Any] | None = None) -> str:
         base = self._base_response(prompt)
         citations = []
         if context:
-            citations = list(context.get("citations", []) or [])
+            citations = list((context.get("citations") or []))  # type: ignore[arg-type]
         formatted_citations = self._format_citations(citations)
         if formatted_citations:
             return "\n\n".join([base, formatted_citations])
@@ -204,17 +210,17 @@ def get_llm_provider(settings: Settings | None = None) -> LLMProvider:
     """Factory returning an LLM provider according to *settings*."""
 
     resolved_settings = settings or get_settings()
-    provider_name = (resolved_settings.llm_provider or "ollama").lower()
+    provider_name = (resolved_settings.llm_provider or "llama-cpp").lower()
     if provider_name == "stub":
         return StubProvider(resolved_settings)
-    if provider_name in {"ollama", "ollama-provider"}:
-        return OllamaProvider(resolved_settings)
+    if provider_name in {"llama", "llama-cpp", "llama_cpp", "llamacpp"}:
+        return LlamaCppProvider(resolved_settings)
     raise ValueError(f"Unsupported LLM provider: {resolved_settings.llm_provider!r}")
 
 
 __all__ = [
     "LLMProvider",
-    "OllamaProvider",
+    "LlamaCppProvider",
     "StubProvider",
     "get_llm_provider",
 ]

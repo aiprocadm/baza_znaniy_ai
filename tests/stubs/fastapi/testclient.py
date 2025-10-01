@@ -32,15 +32,19 @@ class TestClient:
     def __init__(self, app: "FastAPI") -> None:
         self.app = app
         for handler in self.app._event_handlers.get("startup", []):  # type: ignore[attr-defined]
-            handler()
+            self._run_handler(handler)
 
     def __enter__(self) -> "TestClient":
         return self
 
     def __exit__(self, exc_type, exc, tb) -> bool:
         for handler in reversed(self.app._event_handlers.get("shutdown", [])):  # type: ignore[attr-defined]
-            handler()
+            self._run_handler(handler)
         return False
+
+    def close(self) -> None:
+        for handler in reversed(self.app._event_handlers.get("shutdown", [])):  # type: ignore[attr-defined]
+            self._run_handler(handler)
 
     # ------------------------------------------------------------------
     # Public request helpers
@@ -131,3 +135,8 @@ class TestClient:
 
         content = _serialise(result)
         return _SimpleResponse(route.status_code, content)
+
+    def _run_handler(self, handler: Any) -> None:
+        result = handler()
+        if inspect.isawaitable(result):
+            asyncio.run(result)

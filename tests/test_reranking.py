@@ -9,20 +9,6 @@ from app.core.config import Settings
 from app.models import ChatRequest, ChatResponse
 
 
-_ORIGINAL_GENERATE = chat_module.generate
-_ORIGINAL_ENSURE_MODEL = chat_module.ensure_model
-
-
-def setup_module(module: types.ModuleType) -> None:  # pragma: no cover - test scaffolding
-    chat_module.ensure_model = lambda: None
-    chat_module.generate = lambda prompt: "Ответ"
-
-
-def teardown_module(module: types.ModuleType) -> None:  # pragma: no cover - test scaffolding
-    chat_module.ensure_model = _ORIGINAL_ENSURE_MODEL
-    chat_module.generate = _ORIGINAL_GENERATE
-
-
 class StubChatStore:
     def __init__(self) -> None:
         self.records: list[tuple[str, str, str]] = []
@@ -53,13 +39,13 @@ class StubSummarizer:
 
 class StubLLM:
     def __init__(self) -> None:
-        self.prompts: list[str] = []
+        self.prompts: list[tuple[str, dict[str, Any]]] = []
 
     def ensure_model(self) -> None:
         return None
 
-    def generate(self, prompt: str) -> str:
-        self.prompts.append(prompt)
+    def generate(self, prompt: str, *, context: dict[str, Any] | None = None) -> str:
+        self.prompts.append((prompt, dict(context or {})))
         return "Ответ"
 
 
@@ -92,7 +78,8 @@ def _build_request(
     state = types.SimpleNamespace(
         settings=settings,
         chat_store=StubChatStore(),
-        llm_client=StubLLM(),
+        llm_provider=StubLLM(),
+        llm_client=None,
         vector_store=StubVectorStore(hits, settings.retrieve_topk),
         summarizer=StubSummarizer(),
         memory_store=None,
