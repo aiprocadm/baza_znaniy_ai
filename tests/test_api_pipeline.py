@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
+import threading
 import time
 from importlib import reload
 from pathlib import Path
@@ -107,7 +109,7 @@ def test_full_pipeline(api_client: TestClient) -> None:
 
     _wait_for_completion(api_client, file_id)
 
-    ingest_response = api_client.post("/api/v1/ingest", json={"file_id": file_id, "force": True})
+    ingest_response = api_client.post("/api/v1/ingest", json={"file_id": file_id})
     assert ingest_response.status_code == 200
     ingest_payload = ingest_response.json()
     assert ingest_payload["status"] == "completed"
@@ -138,3 +140,62 @@ def test_full_pipeline(api_client: TestClient) -> None:
     assert chat_payload["citations"]
     assert chat_payload["citations_insufficient"] is True
     assert "Источники" in chat_payload["answer"]
+
+
+def test_ingest_endpoint_returns_quickly(api_client: TestClient) -> None:
+    """Ensure ingest API responds immediately while work continues."""
+
+    worker = api_client.app.state.ingest_worker
+    original_process = worker._process
+    started = threading.Event()
+    release = threading.Event()
+
+    async def blocked_process(self, job):
+        started.set()
+        while not release.is_set():
+            await asyncio.sleep(0.01)
+        return await original_process(job)
+
+    worker._process = blocked_process.__get__(worker, worker.__class__)
+
+    upload_data = b"Background ingestion test"
+    response = api_client.post(
+        "/api/v1/upload",
+        files={"file": ("async.txt", upload_data, "text/plain")},
+    )
+    assert response.status_code == 201
+    file_id = response.json()["file_id"]
+
+    assert started.wait(timeout=1.0)
+
+    try:
+        start = time.perf_counter()
+        ingest_response = api_client.post(
+            "/api/v1/ingest",
+            json={"file_id": file_id, "force": True},
+        )
+        duration = time.perf_counter() - start
+        assert ingest_response.status_code == 200
+        assert duration < 0.2
+        ingest_payload = ingest_response.json()
+        assert ingest_payload["status"] in {"queued", "processing"}
+
+        files_response = api_client.get("/api/v1/files")
+        assert files_response.status_code == 200
+        files_payload = files_response.json()
+        pending_status = None
+        for entry in files_payload.get("files", []):
+            identifier = entry.get("id") if isinstance(entry, dict) else getattr(entry, "id", None)
+            if identifier == file_id:
+                pending_status = (
+                    entry.get("status")
+                    if isinstance(entry, dict)
+                    else getattr(entry, "status", None)
+                )
+                break
+        assert pending_status in {"queued", "processing"}
+    finally:
+        release.set()
+        worker._process = original_process
+
+    _wait_for_completion(api_client, file_id, timeout=3.0)
