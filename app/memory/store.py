@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-import os
 import sqlite3
 import time
 from contextlib import contextmanager
+from pathlib import Path
 from typing import Iterable, Iterator, Optional
 
 
@@ -20,7 +20,11 @@ class MemoryStore:
         self._init_sqlite()
 
     def _init_sqlite(self) -> None:
-        os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
+        if self.db_path != ":memory:":
+            directory = Path(self.db_path).parent
+            if not directory.parts:
+                directory = Path(".")
+            directory.mkdir(parents=True, exist_ok=True)
         with sqlite3.connect(self.db_path) as connection:
             connection.execute(
                 """
