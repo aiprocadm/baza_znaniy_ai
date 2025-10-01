@@ -62,6 +62,14 @@ class Settings(BaseSettings):
         populate_by_name=True,
     )
 
+    def __init__(self, **data: object) -> None:  # pragma: no cover - exercised in integration tests
+        overrides = dict(data)
+        super().__init__(**data)
+        if overrides:
+            updated = self.model_copy(update=overrides)
+            self.__dict__.update(updated.__dict__)
+            self.__pydantic_fields_set__ = updated.__pydantic_fields_set__
+
     # Core application ---------------------------------------------------
     app_env: str = Field(
         default="development",
@@ -223,7 +231,7 @@ class Settings(BaseSettings):
     @field_validator("cors_allow_origins", mode="before")
     @classmethod
     def _normalise_origins(cls, value: object) -> list[str]:
-        if value in {None, "", Ellipsis}:
+        if value is None or value == "" or value is Ellipsis:
             return ["*"]
         if isinstance(value, str):
             items = [item.strip() for item in value.split(",") if item.strip()]

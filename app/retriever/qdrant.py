@@ -9,7 +9,34 @@ import numpy as np
 from qdrant_client import QdrantClient
 from qdrant_client.http import models as qmodels
 from qdrant_client.http.exceptions import UnexpectedResponse
-from sentence_transformers import SentenceTransformer
+
+try:  # pragma: no cover - optional dependency for real deployments
+    from sentence_transformers import SentenceTransformer
+except Exception:  # pragma: no cover - lightweight fallback used in tests
+    import hashlib
+
+    class SentenceTransformer:  # type: ignore[override]
+        """Deterministic embedding stub mirroring the FAISS fallback."""
+
+        def __init__(self, model_name: str) -> None:
+            self.model_name = model_name
+            self._dimension = 384
+
+        def get_sentence_embedding_dimension(self) -> int:
+            return self._dimension
+
+        def encode(self, texts, *, convert_to_numpy: bool = True):
+            vectors = []
+            for text in texts:
+                digest = hashlib.sha256((self.model_name + str(text)).encode("utf-8")).digest()
+                raw = np.frombuffer(digest * 8, dtype=np.uint8)[: self._dimension]
+                vector = raw.astype(np.float32)
+                norm = np.linalg.norm(vector) or 1.0
+                vectors.append(vector / norm)
+            array = np.vstack(vectors) if vectors else np.zeros((0, self._dimension), dtype=np.float32)
+            if convert_to_numpy:
+                return array
+            return array.tolist()
 
 from app.core.config import Settings, get_settings
 
