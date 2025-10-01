@@ -162,6 +162,20 @@ else:
             return str.__new__(cls, str(value))
 
 
+    def computed_field(*args: Any, **__: Any):
+        def decorator(func: Any) -> property:
+            if isinstance(func, property):
+                return func
+            return property(func)
+
+        if args:
+            target = args[0]
+            if isinstance(target, property):
+                return target
+            if callable(target):
+                return decorator(target)
+        return decorator
+
     def field_validator(*fields: str, **_: Any):
         def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
             return func
@@ -185,6 +199,7 @@ else:
         "ConfigDict",
         "EmailStr",
         "Field",
+        "computed_field",
         "field_validator",
         "model_validator",
         "ValidationError",
