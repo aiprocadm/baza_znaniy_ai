@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import html
 import io
 import logging
 import os
@@ -36,11 +35,6 @@ try:  # pragma: no cover - optional dependency for PowerPoint parsing
 except Exception:  # pragma: no cover - fallback when dependency missing
     Presentation = None  # type: ignore[assignment]
 
-try:  # pragma: no cover - optional dependency for HTML conversion
-    import html2text
-except Exception:  # pragma: no cover - fallback when dependency missing
-    html2text = None  # type: ignore[assignment]
-
 try:  # pragma: no cover - optional dependency for Markdown conversion
     import markdown as markdown_lib
 except Exception:  # pragma: no cover - fallback when dependency missing
@@ -64,7 +58,12 @@ try:  # pragma: no cover - tokenizer optional in some environments
 except ImportError:  # pragma: no cover - fallback used in tests
     tiktoken = None  # type: ignore[assignment]
 
+
+from app.ingest.html import html_to_plain_text, html_to_text_sections
+from app.observability.metrics import record_document_parse
+
 from app.observability.metrics import record_document_parse, record_document_ocr_pages
+
 
 LOGGER = logging.getLogger(__name__)
 
@@ -161,28 +160,6 @@ def _clean(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
-def _html_to_plain_text(html_content: str) -> str:
-    if not html_content:
-        return ""
-
-    text = html_content
-    if html2text is not None:
-        converter = html2text.HTML2Text()
-        converter.ignore_images = True
-        converter.ignore_links = True
-        converter.ignore_emphasis = True
-        converter.body_width = 0
-        text = converter.handle(html_content)
-    else:  # pragma: no cover - minimal fallback when dependency missing
-        text = re.sub(r"<[^>]+>", " ", html_content)
-
-    text = re.sub(r"^\s*=+\s*$", " ", text, flags=re.MULTILINE)
-    text = re.sub(r"^\s*#+\s*", "", text, flags=re.MULTILINE)
-    text = text.replace("\r", " ")
-    text = text.replace("\n", " ")
-    return _clean(html.unescape(text))
-
-
 def _markdown_to_plain_text(markdown_content: str) -> str:
     if not markdown_content:
         return ""
@@ -190,7 +167,7 @@ def _markdown_to_plain_text(markdown_content: str) -> str:
     html_content = (
         markdown_lib.markdown(markdown_content) if markdown_lib is not None else markdown_content
     )
-    return _html_to_plain_text(html_content)
+    return html_to_plain_text(html_content)
 
 
 def _read_stream_to_bytes(stream: BinaryIO) -> bytes:
@@ -533,9 +510,9 @@ def _iter_html_text(handle: BinaryIO) -> Iterator[tuple[int, str]]:
     else:  # pragma: no cover - defensive fallback
         text = str(content)
 
-    cleaned = _html_to_plain_text(text)
-    if cleaned:
-        yield 1, cleaned
+    sections = html_to_text_sections(text)
+    for index, section in enumerate(sections, start=1):
+        yield index, section
 
 
 def _iter_pptx_text(handle: BinaryIO) -> Iterator[tuple[int, str]]:
