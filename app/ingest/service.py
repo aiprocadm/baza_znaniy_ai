@@ -15,13 +15,14 @@ from sqlmodel import Session, delete, select
 
 from app.core.config import get_settings
 from app.ingest.chunking import _chunk, _get_tokenizer, iter_document_pages
-from app.models.entities import JobRecord, JobStatus
+from app.models.entities import JobStatus
 from app.models.file import (
     ChunkRecord,
     DocumentRecord,
     DocumentStatus,
     FileRecord,
     FileStatus,
+    JobRecord,
     PageRecord,
     get_engine,
 )
@@ -168,7 +169,7 @@ class IngestService:
 
         with Session(self.engine) as session:
             record = JobRecord(
-                tenant_id=job.tenant_id,
+                tenant_slug=job.tenant_id,
                 job_type="ingest",
                 status=JobStatus.QUEUED,
                 priority=0,
@@ -212,10 +213,14 @@ class IngestService:
         detected_mime = mime_type or "application/octet-stream"
         with Session(self.engine) as session:
             document = session.exec(
-                select(DocumentRecord).where(DocumentRecord.sha256 == sha)
+                select(DocumentRecord).where(
+                    DocumentRecord.tenant_slug == tenant_id,
+                    DocumentRecord.sha256 == sha,
+                )
             ).first()
             if document is None:
                 document = DocumentRecord(
+                    tenant_slug=tenant_id,
                     sha256=sha,
                     mime_type=detected_mime,
                     status=DocumentStatus.QUEUED,
