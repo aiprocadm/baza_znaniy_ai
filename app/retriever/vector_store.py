@@ -5,8 +5,6 @@ from __future__ import annotations
 from typing import Iterable, Protocol, runtime_checkable
 
 from app.core.config import Settings, get_settings
-from .faiss import FaissVectorStore
-from .qdrant import QdrantVectorStore
 
 
 @runtime_checkable
@@ -23,17 +21,23 @@ class VectorStore(Protocol):
         """Return the top matching chunks for the supplied query."""
 
 
-_BACKENDS = {
-    "faiss": FaissVectorStore,
-    "qdrant": QdrantVectorStore,
-}
+
+def _load_backends():
+    from .faiss import FaissVectorStore
+    from .qdrant import QdrantVectorStore
+
+    return {
+        "faiss": FaissVectorStore,
+        "qdrant": QdrantVectorStore,
+    }
 
 
 def _build_backend(settings: Settings) -> VectorStore:
     """Instantiate the backend requested by :class:`Settings`."""
 
     backend = (settings.vector_backend or "").lower()
-    factory = _BACKENDS.get(backend)
+    backends = _load_backends()
+    factory = backends.get(backend)
     if factory is None:
         raise ValueError(f"Unsupported vector backend: {settings.vector_backend!r}")
     return factory(settings=settings)
