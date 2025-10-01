@@ -5,7 +5,35 @@ from __future__ import annotations
 import inspect
 from dataclasses import dataclass
 from datetime import date, datetime
+
 from tempfile import SpooledTemporaryFile
+
+
+
+from typing import Annotated, Any, Callable, Dict, IO, List, Optional, get_args, get_origin, get_type_hints
+
+
+from tempfile import SpooledTemporaryFile
+from typing import (
+    Annotated,
+    Any,
+    Callable,
+    Dict,
+    List,
+    Optional,
+    get_args,
+    get_origin,
+    get_type_hints,
+)
+
+from io import BytesIO
+
+from typing import Annotated, Any, Callable, Dict, List, Optional, get_args, get_origin, get_type_hints
+
+        main
+        main
+
+
 from types import SimpleNamespace
 from typing import Annotated, Any, Callable, Dict, IO, List, Optional, get_args, get_origin, get_type_hints
 
@@ -63,6 +91,16 @@ class UploadFile:
         else:
             payload = content
 
+
+        file: Any | None = None,
+        *,
+
+        content: bytes | str | None = None,
+
+        content: bytes | None = None,
+        content_type: str | None = None,
+    ) -> None:
+
         if file is None:
             stream: IO[bytes] = SpooledTemporaryFile(mode="w+b")
             if payload:
@@ -80,20 +118,59 @@ class UploadFile:
                 if hasattr(self.file, "seek"):
                     self.file.seek(0)
 
+
+
+        content_type: str | None = None,
+        headers: Any | None = None,
+    ) -> None:
+        self.filename = filename
+        self.content_type = content_type
+        self.headers = headers
+
+        if file is None:
+            stream = SpooledTemporaryFile(mode="w+b")
+            if content:
+                data = content.encode() if isinstance(content, str) else bytes(content)
+                stream.write(data)
+            stream.seek(0)
+            file = stream
+
+        self.file = file if file is not None else BytesIO()
+
         if hasattr(self.file, "seek"):
             self.file.seek(0)
 
     async def read(self, size: int = -1) -> bytes:
         data = self.file.read(size)
         if isinstance(data, str):
+
             return data.encode()
         if data is None:
             return b""
         return data
 
+
+            data = data.encode()
+
+            return data.encode()
+
+        return data or b""
+
+
     async def close(self) -> None:
         if hasattr(self.file, "close") and not getattr(self.file, "closed", False):
             self.file.close()
+
+
+            data = data.encode()
+        return data or b""
+
+
+        main
+        main
+
+
+
 
 
 def Depends(dependency: Callable[..., Any] | None = None) -> Callable[..., Any] | None:

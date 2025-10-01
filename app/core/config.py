@@ -4,7 +4,12 @@ from __future__ import annotations
 
 from functools import lru_cache
 from pathlib import Path
-from typing import Iterable, Sequence
+from typing import Any, Iterable, Sequence
+
+try:  # pragma: no cover - Python 3.10 compatibility shim
+    from importlib import metadata as importlib_metadata
+except ImportError:  # pragma: no cover - fallback for older interpreters
+    import importlib_metadata  # type: ignore[import-not-found]
 
 from pydantic import AliasChoices, Field
 
@@ -52,6 +57,17 @@ except ImportError:  # pragma: no cover - minimal shim for tests
             super().__init__(**values)
 
 
+def _default_app_version() -> str:
+    """Return the best effort application version string."""
+
+    try:
+        return importlib_metadata.version("kb-ai")
+    except importlib_metadata.PackageNotFoundError:  # pragma: no cover - editable installs in tests
+        return "0.1.0"
+    except Exception:  # pragma: no cover - defensive guard
+        return "0.1.0"
+
+
 class Settings(BaseSettings):
     """Configuration loaded from environment variables and ``.env`` files."""
 
@@ -74,6 +90,10 @@ class Settings(BaseSettings):
     app_env: str = Field(
         default="development",
         validation_alias=AliasChoices("APP_ENV", "ENV", "ENVIRONMENT"),
+    )
+    app_version: str = Field(
+        default_factory=_default_app_version,
+        validation_alias=AliasChoices("APP_VERSION"),
     )
     app_host: str = Field(
         default="0.0.0.0",
@@ -190,6 +210,10 @@ class Settings(BaseSettings):
         default="kb-llama",
         validation_alias=AliasChoices("LLM_MODEL_NAME", "GEN_MODEL"),
     )
+    llm_model_version: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("LLM_MODEL_VERSION", "MODEL_VERSION"),
+    )
     llm_model_path: Path = Field(
         default=Path("./models/model.gguf"),
         validation_alias=AliasChoices("LLM_MODEL_PATH", "LLAMA_MODEL_PATH"),
@@ -218,6 +242,10 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("LORA_ADAPTER_PATH"),
     )
     lora_scaling: float = Field(default=1.0, validation_alias=AliasChoices("LORA_SCALING"))
+    lora_adapter_version: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("LORA_ADAPTER_VERSION"),
+    )
 
     # Security -----------------------------------------------------------
     secret_key: str = Field(default="change-me", validation_alias=AliasChoices("SECRET_KEY"))
@@ -354,4 +382,23 @@ def get_settings() -> Settings:
     return Settings()
 
 
-__all__ = ["Settings", "get_settings"]
+def get_version_info(settings: Settings | None = None) -> dict[str, Any]:
+    """Return structured version information for API responses."""
+
+    resolved = settings or get_settings()
+    payload: dict[str, Any] = {
+        "app": {"version": resolved.app_version},
+        "model": {
+            "name": resolved.llm_model_name,
+            "version": resolved.llm_model_version,
+        },
+        "lora": {
+            "adapter": resolved.llm_lora_adapter,
+            "version": resolved.lora_adapter_version,
+            "enabled": bool(resolved.llm_lora_adapter or resolved.lora_adapter_path),
+        },
+    }
+    return payload
+
+
+__all__ = ["Settings", "get_settings", "get_version_info"]

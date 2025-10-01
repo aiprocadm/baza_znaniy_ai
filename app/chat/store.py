@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-import os
 import sqlite3
 import time
 import uuid
+from pathlib import Path
 from typing import List, Optional, Protocol, Tuple
 
 __all__ = ["ChatStore", "ConversationAccessError", "ChatStoreProtocol"]
@@ -44,8 +44,17 @@ class ChatStore:
 
     def __init__(self, db_path: str) -> None:
         self.db_path = db_path
-        os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
+        self._ensure_directory()
         self._init_schema()
+
+    def _ensure_directory(self) -> None:
+        if self.db_path == ":memory:":
+            return
+
+        directory = Path(self.db_path).parent
+        if not directory.parts:
+            directory = Path(".")
+        directory.mkdir(parents=True, exist_ok=True)
 
     def _connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(self.db_path)
