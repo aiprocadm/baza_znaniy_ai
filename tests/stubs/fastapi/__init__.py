@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import inspect
+import io
 from dataclasses import dataclass
 from datetime import date, datetime
-from typing import Annotated, Any, Callable, Dict, List, Optional, get_args, get_origin, get_type_hints
+from typing import Annotated, Any, Callable, Dict, IO, List, Optional, get_args, get_origin, get_type_hints
 from types import SimpleNamespace
 
 from pydantic import BaseModel
@@ -43,12 +44,23 @@ class Request:
 class UploadFile:
     """Very small subset of the real UploadFile implementation."""
 
-    def __init__(self, filename: str | None = None, content: bytes | None = None) -> None:
+    def __init__(
+        self,
+        filename: str | None = None,
+        file: IO[bytes] | None = None,
+        content_type: str | None = None,
+    ) -> None:
         self.filename = filename
-        self._content = content or b""
+        self.content_type = content_type
+        self.file: IO[bytes] = file or io.BytesIO()
 
-    async def read(self) -> bytes:
-        return self._content
+    async def read(self, size: int = -1) -> bytes:
+        data = self.file.read(size)
+        if isinstance(data, str):
+            return data.encode()
+        if data is None:
+            return b""
+        return data
 
 
 def Depends(dependency: Callable[..., Any] | None = None) -> Callable[..., Any] | None:

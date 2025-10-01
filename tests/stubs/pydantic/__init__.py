@@ -162,10 +162,30 @@ else:
             return str.__new__(cls, str(value))
 
 
+    def field_validator(*fields: str, **_: Any):
+        def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
+            return func
+
+        return decorator
+
+
+    def model_validator(*fields: str, **_: Any):
+        def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
+            return func
+
+        return decorator
+
+
+    ConfigDict = dict
+
+
     __all__ = [
         "AliasChoices",
         "BaseModel",
+        "ConfigDict",
         "EmailStr",
         "Field",
+        "field_validator",
+        "model_validator",
         "ValidationError",
     ]

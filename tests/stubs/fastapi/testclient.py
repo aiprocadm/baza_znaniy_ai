@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import io
 from typing import TYPE_CHECKING, Any, Iterable
 
 from . import HTTPException, UploadFile, _build_call_arguments, _serialise
@@ -24,6 +25,26 @@ class _SimpleResponse:
     @property
     def text(self) -> str:
         return str(self._content)
+
+
+def _ensure_bytes(data: Any) -> bytes:
+    if isinstance(data, bytes):
+        return data
+    if isinstance(data, bytearray):
+        return bytes(data)
+    if isinstance(data, str):
+        return data.encode()
+    read = getattr(data, "read", None)
+    if callable(read):
+        result = read()
+        if isinstance(result, bytes):
+            return result
+        if isinstance(result, str):
+            return result.encode()
+    try:
+        return bytes(data)
+    except Exception:
+        return b""
 
 
 class TestClient:
@@ -83,7 +104,9 @@ class TestClient:
                         else:
                             filename = str(entry)
                             content = b""
-                        upload_list.append(UploadFile(filename=filename, content=content))
+                        upload_list.append(
+                            UploadFile(filename=filename, file=io.BytesIO(_ensure_bytes(content)))
+                        )
 
                 if upload_list:
                     payload["files"] = upload_list
@@ -118,10 +141,15 @@ class TestClient:
         if files:
             for key, value in files.items():
                 if isinstance(value, list):
-                    uploads = [UploadFile(filename=item[0], content=item[1]) for item in value]
+                    uploads = [
+                        UploadFile(filename=item[0], file=io.BytesIO(_ensure_bytes(item[1])))
+                        for item in value
+                    ]
                 else:
                     filename, content, *_ = value
-                    uploads = [UploadFile(filename=filename, content=content)]
+                    uploads = [
+                        UploadFile(filename=filename, file=io.BytesIO(_ensure_bytes(content)))
+                    ]
                 kwargs[key] = uploads
         try:
             result = route.handler(**kwargs)

@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-import secrets
+import io
 import mimetypes
+import secrets
 from pathlib import Path
 from typing import List, Optional
 
@@ -61,20 +62,7 @@ async def upload_file(
     if not uploads:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="UPLOAD_EMPTY")
 
-    def _coerce(item: object) -> UploadFile:
-        if isinstance(item, UploadFile):
-            return item
-        if isinstance(item, dict):  # pragma: no cover - compatibility for test stubs
-            return UploadFile(filename=item.get("filename"), content=item.get("content", b""))
-        if isinstance(item, (list, tuple)):
-            filename = item[0] if item else "uploaded"
-            content = item[1] if len(item) > 1 else b""
-            return UploadFile(filename=filename, content=content)
-        if isinstance(item, str):
-            return UploadFile(filename=item, content=b"")
-        return UploadFile(filename="uploaded", content=b"")
-
-    coerced = [_coerce(item) for item in uploads]
+    coerced = [_coerce_upload_argument(item) for item in uploads]
     upload = next(
         (
             item
@@ -126,3 +114,45 @@ async def upload_file(
         status=record.status,
         queued=queued,
     )
+
+
+def _coerce_upload_argument(item: object) -> UploadFile:
+    if isinstance(item, UploadFile):
+        return item
+    if isinstance(item, dict):  # pragma: no cover - compatibility for test stubs
+        filename = item.get("filename")
+        content = item.get("content", b"")
+        return UploadFile(filename=filename, file=io.BytesIO(_ensure_bytes(content)))
+    if isinstance(item, (list, tuple)):
+        filename = item[0] if item else "uploaded"
+        content = item[1] if len(item) > 1 else b""
+        return UploadFile(filename=filename, file=io.BytesIO(_ensure_bytes(content)))
+    if isinstance(item, str):
+        return UploadFile(filename=item, file=io.BytesIO())
+    return UploadFile(filename="uploaded", file=io.BytesIO())
+
+
+def _ensure_bytes(payload: object) -> bytes:
+    if isinstance(payload, bytes):
+        return payload
+    if isinstance(payload, bytearray):
+        return bytes(payload)
+    if isinstance(payload, str):
+        return payload.encode()
+    if payload is None:
+        return b""
+    read = getattr(payload, "read", None)
+    if callable(read):
+        data = read()
+        if isinstance(data, bytes):
+            return data
+        if isinstance(data, str):
+            return data.encode()
+        try:
+            return bytes(data)
+        except Exception:
+            return b""
+    try:
+        return bytes(payload)
+    except Exception:
+        return b""

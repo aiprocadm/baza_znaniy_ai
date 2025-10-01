@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import io
 import inspect
 import logging
 import sqlite3
@@ -262,14 +263,62 @@ def _coerce_upload_file(value: Any) -> UploadFile:
         if candidate is not None:
             return _coerce_upload_file(candidate)
     if isinstance(value, (list, tuple)):
+        sequence_candidate = _coerce_sequence(value)
+        if sequence_candidate is not None:
+            return sequence_candidate
         for item in value:
             if isinstance(item, UploadFile):
                 return item
-            if isinstance(item, (list, tuple)) and item:
-                filename = item[0]
-                content = item[1] if len(item) > 1 else b""
-                return UploadFile(filename=filename, content=content)
+            if isinstance(item, (list, tuple)):
+                nested = _coerce_sequence(item)
+                if nested is not None:
+                    return nested
     raise HTTPException(status.HTTP_400_BAD_REQUEST, "UPLOAD_INVALID_FILE")
+
+
+def _coerce_bytes(payload: Any) -> bytes:
+    if isinstance(payload, bytes):
+        return payload
+    if isinstance(payload, bytearray):
+        return bytes(payload)
+    if isinstance(payload, str):
+        return payload.encode()
+    if payload is None:
+        return b""
+    read = getattr(payload, "read", None)
+    if callable(read):
+        data = read()
+        if isinstance(data, bytes):
+            return data
+        if isinstance(data, str):
+            return data.encode()
+        try:
+            return bytes(data)
+        except Exception:
+            return b""
+    try:
+        return bytes(payload)
+    except Exception:
+        return b""
+
+
+def _coerce_sequence(items: Any) -> UploadFile | None:
+    if not isinstance(items, (list, tuple)) or not items:
+        return None
+    first = items[0]
+    if isinstance(first, UploadFile):
+        return first
+    if isinstance(first, (list, tuple)):
+        nested = _coerce_sequence(first)
+        if nested is not None:
+            return nested
+    if isinstance(first, dict):
+        nested = _coerce_upload_file(first)
+        if nested is not None:
+            return nested
+    filename = first
+    content = items[1] if len(items) > 1 else b""
+    return UploadFile(filename=filename, file=io.BytesIO(_coerce_bytes(content)))
 
 
 def _index_chunks(request: Request, chunks: Iterable[dict[str, Any]]) -> int:
