@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+from io import BytesIO
 from typing import TYPE_CHECKING, Any, Iterable
 
 from . import HTTPException, UploadFile, _build_call_arguments, _serialise
@@ -77,13 +78,7 @@ class TestClient:
                         entries = [value]
 
                     for entry in entries:  # type: ignore[assignment]
-                        if isinstance(entry, (list, tuple)):
-                            filename = entry[0]
-                            content = entry[1] if len(entry) > 1 else b""
-                        else:
-                            filename = str(entry)
-                            content = b""
-                        upload_list.append(UploadFile(filename=filename, content=content))
+                        upload_list.append(_build_upload_file(entry))
 
                 if upload_list:
                     payload["files"] = upload_list
@@ -118,10 +113,9 @@ class TestClient:
         if files:
             for key, value in files.items():
                 if isinstance(value, list):
-                    uploads = [UploadFile(filename=item[0], content=item[1]) for item in value]
+                    uploads = [_build_upload_file(item) for item in value]
                 else:
-                    filename, content, *_ = value
-                    uploads = [UploadFile(filename=filename, content=content)]
+                    uploads = [_build_upload_file(value)]
                 kwargs[key] = uploads
         try:
             result = route.handler(**kwargs)
@@ -140,3 +134,35 @@ class TestClient:
         result = handler()
         if inspect.isawaitable(result):
             asyncio.run(result)
+
+
+def _build_upload_file(entry: Any) -> UploadFile:
+    if isinstance(entry, UploadFile):
+        return entry
+
+    if isinstance(entry, (list, tuple)):
+        filename = entry[0] if entry else "uploaded"
+        content = entry[1] if len(entry) > 1 else b""
+        content_type = entry[2] if len(entry) > 2 else None
+    else:
+        filename = str(entry)
+        content = b""
+        content_type = None
+
+    if hasattr(content, "read"):
+        file_obj = content
+        if hasattr(file_obj, "seek"):
+            file_obj.seek(0)
+    else:
+        if isinstance(content, (bytes, bytearray, memoryview)):
+            data = bytes(content)
+        elif content is None:
+            data = b""
+        else:
+            data = str(content).encode()
+        file_obj = BytesIO(data)
+
+    kwargs: dict[str, Any] = {"filename": filename, "file": file_obj}
+    if content_type is not None:
+        kwargs["content_type"] = content_type
+    return UploadFile(**kwargs)
