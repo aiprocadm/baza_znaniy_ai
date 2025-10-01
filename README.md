@@ -81,7 +81,8 @@ pip install --no-cache-dir -r requirements.txt
    ```
    Эндпоинт `/health` проверяет только то, что приложение запущено.
    Для полной проверки зависимостей используйте `/ready` — он дополнительно
-   валидирует соединение с SQLite, состояние векторного стора и доступность LLM:
+   валидирует соединение с SQLite, состояние векторного стора, доступность LLM
+   и активный LoRA-адаптер:
    ```bash
    docker compose exec kb_web curl -s http://localhost:8000/ready
    ```
@@ -137,6 +138,20 @@ curl -X POST http://localhost:8000/api/v1/lora/unload \
 
 ```bash
 curl -s http://localhost:8000/ready
+```
+
+Ответ содержит раздел `details` со статусами всех ключевых подсистем:
+
+```json
+{
+  "status": "ok",
+  "details": {
+    "sqlite": {"status": "ok"},
+    "vector_store": {"status": "ok"},
+    "llm": {"status": "ok", "model": "ok"},
+    "lora": {"status": "ok", "detail": {"loaded": false}}
+  }
+}
 ```
 
 ### Пайплайн ассетов
