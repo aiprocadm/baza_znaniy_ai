@@ -35,6 +35,7 @@ from app.observability.metrics import (
     record_search_operation,
 )
 from app.retriever.rerank import apply_rerank
+from app.api.upload_utils import create_upload_file
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -269,10 +270,18 @@ def _coerce_upload_file(value: Any) -> UploadFile:
         for item in value:
             if isinstance(item, UploadFile):
                 return item
+        codex/update-upload-file-handling-and-tests
             if isinstance(item, (list, tuple)):
                 nested = _coerce_sequence(item)
                 if nested is not None:
                     return nested
+
+            if isinstance(item, (list, tuple)) and item:
+                filename = item[0]
+                content = item[1] if len(item) > 1 else b""
+                content_type = item[2] if len(item) > 2 else None
+                return create_upload_file(filename, content, content_type)
+        main
     raise HTTPException(status.HTTP_400_BAD_REQUEST, "UPLOAD_INVALID_FILE")
 
 

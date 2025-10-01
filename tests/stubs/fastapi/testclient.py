@@ -4,7 +4,15 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+        codex/update-upload-file-handling-and-tests
 import io
+
+        codex/update-upload-handling-in-upload.py
+from tempfile import SpooledTemporaryFile
+
+from io import BytesIO
+        main
+        main
 from typing import TYPE_CHECKING, Any, Iterable
 
 from . import HTTPException, UploadFile, _build_call_arguments, _serialise
@@ -98,15 +106,41 @@ class TestClient:
                         entries = [value]
 
                     for entry in entries:  # type: ignore[assignment]
+        codex/update-upload-handling-in-upload.py
                         if isinstance(entry, (list, tuple)):
                             filename = entry[0]
-                            content = entry[1] if len(entry) > 1 else b""
+                            raw_content = entry[1] if len(entry) > 1 else b""
+                            if hasattr(raw_content, "read"):
+                                file_obj = raw_content
+                                if hasattr(file_obj, "seek"):
+                                    try:
+                                        file_obj.seek(0)
+                                    except Exception:  # pragma: no cover - defensive
+                                        pass
+                            else:
+                                file_obj = SpooledTemporaryFile(mode="w+b")
+                                if raw_content:
+                                    if isinstance(raw_content, bytes):
+                                        file_obj.write(raw_content)
+                                    else:
+                                        file_obj.write(str(raw_content).encode())
+                                    file_obj.seek(0)
+                            content_type = entry[2] if len(entry) > 2 else None
                         else:
                             filename = str(entry)
+        codex/update-upload-file-handling-and-tests
                             content = b""
                         upload_list.append(
                             UploadFile(filename=filename, file=io.BytesIO(_ensure_bytes(content)))
                         )
+
+                            file_obj = SpooledTemporaryFile(mode="w+b")
+                            content_type = None
+                        upload_list.append(UploadFile(filename=filename, file=file_obj, content_type=content_type))
+
+                        upload_list.append(_build_upload_file(entry))
+        main
+        main
 
                 if upload_list:
                     payload["files"] = upload_list
@@ -140,7 +174,10 @@ class TestClient:
                 kwargs.setdefault(key, value)
         if files:
             for key, value in files.items():
+                uploads: list[UploadFile] = []
+
                 if isinstance(value, list):
+        codex/update-upload-file-handling-and-tests
                     uploads = [
                         UploadFile(filename=item[0], file=io.BytesIO(_ensure_bytes(item[1])))
                         for item in value
@@ -150,6 +187,45 @@ class TestClient:
                     uploads = [
                         UploadFile(filename=filename, file=io.BytesIO(_ensure_bytes(content)))
                     ]
+
+        codex/update-upload-handling-in-upload.py
+                    entries = value
+                else:
+                    entries = [value]
+
+                for entry in entries:
+                    if isinstance(entry, (list, tuple)):
+                        filename = entry[0]
+                        raw_content = entry[1] if len(entry) > 1 else b""
+                        if hasattr(raw_content, "read"):
+                            file_obj = raw_content
+                            if hasattr(file_obj, "seek"):
+                                try:
+                                    file_obj.seek(0)
+                                except Exception:  # pragma: no cover - defensive
+                                    pass
+                        else:
+                            file_obj = SpooledTemporaryFile(mode="w+b")
+                            if raw_content:
+                                if isinstance(raw_content, bytes):
+                                    file_obj.write(raw_content)
+                                else:
+                                    file_obj.write(str(raw_content).encode())
+                                file_obj.seek(0)
+                        content_type = entry[2] if len(entry) > 2 else None
+                    else:
+                        filename = str(entry)
+                        file_obj = SpooledTemporaryFile(mode="w+b")
+                        content_type = None
+
+                    uploads.append(UploadFile(filename=filename, file=file_obj, content_type=content_type))
+
+
+                    uploads = [_build_upload_file(item) for item in value]
+                else:
+                    uploads = [_build_upload_file(value)]
+        main
+        main
                 kwargs[key] = uploads
         try:
             result = route.handler(**kwargs)
@@ -168,3 +244,35 @@ class TestClient:
         result = handler()
         if inspect.isawaitable(result):
             asyncio.run(result)
+
+
+def _build_upload_file(entry: Any) -> UploadFile:
+    if isinstance(entry, UploadFile):
+        return entry
+
+    if isinstance(entry, (list, tuple)):
+        filename = entry[0] if entry else "uploaded"
+        content = entry[1] if len(entry) > 1 else b""
+        content_type = entry[2] if len(entry) > 2 else None
+    else:
+        filename = str(entry)
+        content = b""
+        content_type = None
+
+    if hasattr(content, "read"):
+        file_obj = content
+        if hasattr(file_obj, "seek"):
+            file_obj.seek(0)
+    else:
+        if isinstance(content, (bytes, bytearray, memoryview)):
+            data = bytes(content)
+        elif content is None:
+            data = b""
+        else:
+            data = str(content).encode()
+        file_obj = BytesIO(data)
+
+    kwargs: dict[str, Any] = {"filename": filename, "file": file_obj}
+    if content_type is not None:
+        kwargs["content_type"] = content_type
+    return UploadFile(**kwargs)
