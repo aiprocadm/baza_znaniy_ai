@@ -11,7 +11,9 @@ from http import HTTPStatus
 from typing import Any, Iterable, Mapping, Tuple
 
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile, status
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
+
+from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
 from app.chat.store import ChatStore, ConversationAccessError
 from app.ingest import parse_and_chunk
@@ -25,12 +27,25 @@ from app.memory.store import MemoryStore
 from app.models.lora import LoraStatusResponse
 from app.models.chat import ChatIn
 from app.rag.context import build_context
+from app.observability.metrics import (
+    record_chat_completion,
+    record_index_operation,
+    record_search_operation,
+)
 from app.retriever.rerank import apply_rerank
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
 _SERVICE_UNAVAILABLE = getattr(status, "HTTP_503_SERVICE_UNAVAILABLE", 503)
+
+
+@router.get("/metrics")
+def metrics() -> Response:
+    """Expose Prometheus metrics."""
+
+    payload = generate_latest()
+    return Response(payload, media_type=CONTENT_TYPE_LATEST)
 
 
 @router.get("/health", response_class=JSONResponse)
@@ -226,22 +241,26 @@ def _index_chunks(request: Request, chunks: Iterable[dict[str, Any]]) -> int:
     fallback_index = getattr(request.app.state, "fallback_index", [])
     vector_store = getattr(request.app.state, "vector_store", None)
 
+    operation_start = time.perf_counter()
+
     try:  # pragma: no cover - optional dependency initialisation
         if vector_store is None:
             raise RuntimeError("Vector store is not configured")
         vector_store.ensure_ready()
-    except Exception:
-        logger.exception("Failed to ensure vector store; using fallback index")
-        fallback_index.extend(items)
-        return len(items)
-
-    try:  # pragma: no cover - optional dependency for full ingestion pipeline
         vector_store.upsert(items)
     except Exception:
+        duration = time.perf_counter() - operation_start
+        record_index_operation("error", "vector", len(items), duration)
+        logger.exception("Failed to ensure vector store; using fallback index")
+
+        fallback_start = time.perf_counter()
         fallback_index.extend(items)
-        logger.info("Stored %s chunks in fallback index", len(items))
+        record_index_operation(
+            "success", "fallback", len(items), time.perf_counter() - fallback_start
+        )
         return len(items)
 
+    record_index_operation("success", "vector", len(items), time.perf_counter() - operation_start)
     return len(items)
 
 
@@ -343,114 +362,158 @@ def chat(request: Request, inp: ChatIn) -> dict[str, Any]:
             logger.exception("Failed to ensure vector store for chat")
 
     start = time.perf_counter()
+    chat_status = "success"
+    hits: list[dict[str, Any]] = []
+    citations_payload: list[dict[str, Any]] = []
 
     try:
         conversation_id = chat_store.ensure_conversation(inp.user_id, inp.conversation_id)
     except ConversationAccessError as exc:
+        chat_status = "error"
         raise HTTPException(status.HTTP_403_FORBIDDEN, detail="CONVERSATION_FORBIDDEN") from exc
 
-    summary_text = chat_store.get_summary(conversation_id) or ""
-    history = chat_store.get_recent_messages(
-        conversation_id, limit=settings.chat_history_limit
-    )
-    history_text = "\n".join(f"{role}: {content}" for role, content in history) if history else ""
+    response: dict[str, Any]
+    try:
+        summary_text = chat_store.get_summary(conversation_id) or ""
+        history = chat_store.get_recent_messages(
+            conversation_id, limit=settings.chat_history_limit
+        )
+        history_text = "\n".join(f"{role}: {content}" for role, content in history) if history else ""
 
-    memory_text = ""
-    if isinstance(memory_store, MemoryStore):
-        try:
-            memory_text = memory_store.load_context(inp.user_id, conversation_id)
-        except Exception:  # pragma: no cover - defensive lookup
-            logger.exception("Failed to load memory context")
-            memory_text = ""
+        memory_text = ""
+        if isinstance(memory_store, MemoryStore):
+            try:
+                memory_text = memory_store.load_context(inp.user_id, conversation_id)
+            except Exception:  # pragma: no cover - defensive lookup
+                logger.exception("Failed to load memory context")
+                memory_text = ""
 
-    hits: list[dict[str, Any]] = []
-    if vector_store is not None:
-        try:
-            hits = vector_store.search(inp.message, top_k=settings.retrieve_topk)
-        except Exception:
-            logger.exception("Vector search failed; using fallback index")
-    if not hits and fallback_index:
-        hits = fallback_index[: settings.retrieve_topk]
-
-    hits = apply_rerank(
-        inp.message,
-        hits,
-        settings.rerank_limit,
-        settings.rerank_enabled,
-        reranker,
-    )
-    context = build_context(hits, token_limit=3000)
-
-    prompt_sections: list[str] = [
-        "### Система",
-        "Ты — корпоративный ассистент, отвечающий на вопросы по базе знаний.",
-        "Отвечай кратко и по-русски, опираясь на предоставленный контекст.",
-    ]
-    if summary_text:
-        prompt_sections.extend(["\n### Краткое содержание диалога", summary_text])
-    if history_text:
-        prompt_sections.extend(["\n### Недавняя история", history_text])
-    if memory_text:
-        prompt_sections.extend(["\n### Долгосрочная память", memory_text])
-    prompt_sections.extend(
-        [
-            "\n### Контекст",
-            context or "(релевантные фрагменты не найдены)",
-            "\n### Вопрос пользователя",
-            inp.message,
-            "\n### Инструкция",
-            "Если контекст не содержит ответа, честно сообщи об этом. Укажи важные детали кратко.",
-        ]
-    )
-
-    prompt = "\n".join(filter(None, prompt_sections))
-
-    min_citations, max_citations = settings.citations_bounds
-    citations, has_minimum_citations = _select_citations(hits, min_citations, max_citations)
-
-    generation_context: dict[str, object] = {
-        "temperature": getattr(settings, "llm_temperature", 0.7),
-        "top_p": getattr(settings, "llm_top_p", 0.95),
-        "top_k": getattr(settings, "llm_top_k", 40),
-        "max_tokens": getattr(settings, "llm_max_tokens", 1024),
-    }
-    if citations:
-        generation_context["citations"] = citations
-
-    answer = llm_provider.generate(prompt, context=generation_context).strip()
-
-    chat_store.record_exchange(conversation_id, inp.message, answer)
-    if chat_store.messages_since_summary(conversation_id) >= settings.chat_summary_trigger:
-        summarizer.summarize(conversation_id)
-
-    if isinstance(memory_store, MemoryStore):
-        try:
-            memory_store.record(inp.user_id, conversation_id, inp.message, answer)
-        except Exception:  # pragma: no cover - defensive persistence handling
-            logger.exception("Failed to persist memory entry")
-
-    answer_text = answer
-    if citations and not getattr(llm_provider, "handles_citations", False):
-        formatted = []
-        for idx, citation in enumerate(citations, start=1):
-            location = citation.get("page")
-            if location is None:
-                formatted.append(f"[{idx}] {citation.get('file', 'неизвестный источник')}")
-            else:
-                formatted.append(
-                    f"[{idx}] {citation.get('file', 'неизвестный источник')} — страница {location}"
+        if vector_store is not None:
+            search_start = time.perf_counter()
+            try:
+                hits = vector_store.search(inp.message, top_k=settings.retrieve_topk)
+            except Exception:
+                record_search_operation(
+                    "chat_vector",
+                    "error",
+                    time.perf_counter() - search_start,
+                    0,
                 )
-        answer_text = "\n\n".join([answer.strip(), "Источники:", "\n".join(formatted)])
+                logger.exception("Vector search failed; using fallback index")
+            else:
+                record_search_operation(
+                    "chat_vector",
+                    "success",
+                    time.perf_counter() - search_start,
+                    len(hits),
+                )
+        if not hits and fallback_index:
+            fallback_start = time.perf_counter()
+            hits = fallback_index[: settings.retrieve_topk]
+            record_search_operation(
+                "chat_fallback",
+                "success",
+                time.perf_counter() - fallback_start,
+                len(hits),
+            )
 
-    return {
-        "answer": answer_text,
-        "citations": citations,
-        "conversation_id": conversation_id,
-        "citations_insufficient": not has_minimum_citations,
-        "latency_ms": (time.perf_counter() - start) * 1000,
-        "max_context_tokens": getattr(settings, "llm_ctx", None),
-        "max_generation_tokens": getattr(settings, "llm_max_tokens", None),
-    }
+        hits = apply_rerank(
+            inp.message,
+            hits,
+            settings.rerank_limit,
+            settings.rerank_enabled,
+            reranker,
+        )
+        context = build_context(hits, token_limit=3000)
+
+        prompt_sections: list[str] = [
+            "### Система",
+            "Ты — корпоративный ассистент, отвечающий на вопросы по базе знаний.",
+            "Отвечай кратко и по-русски, опираясь на предоставленный контекст.",
+        ]
+        if summary_text:
+            prompt_sections.extend(["\n### Краткое содержание диалога", summary_text])
+        if history_text:
+            prompt_sections.extend(["\n### Недавняя история", history_text])
+        if memory_text:
+            prompt_sections.extend(["\n### Долгосрочная память", memory_text])
+        prompt_sections.extend(
+            [
+                "\n### Контекст",
+                context or "(релевантные фрагменты не найдены)",
+                "\n### Вопрос пользователя",
+                inp.message,
+                "\n### Инструкция",
+                "Если контекст не содержит ответа, честно сообщи об этом. Укажи важные детали кратко.",
+            ]
+        )
+
+        prompt = "\n".join(filter(None, prompt_sections))
+
+        min_citations, max_citations = settings.citations_bounds
+        citations, has_minimum_citations = _select_citations(hits, min_citations, max_citations)
+        citations_payload = list(citations)
+
+        generation_context: dict[str, object] = {
+            "temperature": getattr(settings, "llm_temperature", 0.7),
+            "top_p": getattr(settings, "llm_top_p", 0.95),
+            "top_k": getattr(settings, "llm_top_k", 40),
+            "max_tokens": getattr(settings, "llm_max_tokens", 1024),
+        }
+        if citations:
+            generation_context["citations"] = citations
+
+        answer = llm_provider.generate(prompt, context=generation_context).strip()
+
+        chat_store.record_exchange(conversation_id, inp.message, answer)
+        if chat_store.messages_since_summary(conversation_id) >= settings.chat_summary_trigger:
+            summarizer.summarize(conversation_id)
+
+        if isinstance(memory_store, MemoryStore):
+            try:
+                memory_store.record(inp.user_id, conversation_id, inp.message, answer)
+            except Exception:  # pragma: no cover - defensive persistence handling
+                logger.exception("Failed to persist memory entry")
+
+        answer_text = answer
+        if citations and not getattr(llm_provider, "handles_citations", False):
+            formatted = []
+            for idx, citation in enumerate(citations, start=1):
+                location = citation.get("page")
+                if location is None:
+                    formatted.append(f"[{idx}] {citation.get('file', 'неизвестный источник')}")
+                else:
+                    formatted.append(
+                        f"[{idx}] {citation.get('file', 'неизвестный источник')} — страница {location}"
+                    )
+            answer_text = "\n\n".join([answer.strip(), "Источники:", "\n".join(formatted)])
+
+        latency_seconds = time.perf_counter() - start
+        response = {
+            "answer": answer_text,
+            "citations": citations,
+            "conversation_id": conversation_id,
+            "citations_insufficient": not has_minimum_citations,
+            "latency_ms": latency_seconds * 1000,
+            "max_context_tokens": getattr(settings, "llm_ctx", None),
+            "max_generation_tokens": getattr(settings, "llm_max_tokens", None),
+        }
+    except HTTPException:
+        chat_status = "error"
+        raise
+    except Exception:
+        chat_status = "error"
+        raise
+    finally:
+        duration = time.perf_counter() - start
+        record_chat_completion(
+            chat_status,
+            duration,
+            hits=len(hits),
+            citations=len(citations_payload),
+        )
+
+    return response
 
 
 __all__ = ["router"]

@@ -39,6 +39,13 @@ jobs:
           if [ -f pyproject.toml ]; then pip install -e .; fi
           pip install pytest ruff black mypy coverage
 
+      - name: Run database migrations
+        env:
+          DB_URL: sqlite+aiosqlite:///./var/data/ci.sqlite
+        run: |
+          mkdir -p var/data
+          alembic upgrade head
+
       - name: Ruff (lint)
         run: ruff check .
 
