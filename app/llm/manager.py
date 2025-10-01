@@ -1,0 +1,160 @@
+"""Concurrency-safe helpers for managing llama.cpp LoRA adapters."""
+
+from __future__ import annotations
+
+import asyncio
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Callable
+
+from app.core.config import Settings
+
+
+@dataclass(slots=True)
+class LoraStatus:
+    """Snapshot describing the currently active adapter."""
+
+    loaded: bool
+    path: Path | None = None
+    scaling: float | None = None
+    adapter_name: str | None = None
+
+
+@dataclass(slots=True)
+class _AdapterState:
+    """Internal representation of the loaded adapter."""
+
+    path: Path
+    scaling: float
+    adapter_name: str
+
+
+class LoraManagerError(RuntimeError):
+    """Base exception raised for LoRA manager errors."""
+
+
+class AdapterAlreadyLoadedError(LoraManagerError):
+    """Raised when attempting to load an adapter that is already active."""
+
+
+class AdapterNotLoadedError(LoraManagerError):
+    """Raised when attempting to operate on a missing adapter."""
+
+
+class LlamaLoraManager:
+    """Manage LoRA adapters for a ``llama_cpp.Llama`` instance."""
+
+    def __init__(
+        self,
+        settings: Settings,
+        llama_factory: Callable[[], object] | None = None,
+    ) -> None:
+        self._settings = settings
+        self._llama_factory = llama_factory or self._build_default_factory(settings)
+        self._lock = asyncio.Lock()
+        self._llama: object | None = None
+        self._adapter: _AdapterState | None = None
+
+    @staticmethod
+    def _build_default_factory(settings: Settings) -> Callable[[], object]:
+        """Return a callable constructing a new ``llama_cpp.Llama`` instance."""
+
+        model_reference = getattr(settings, "llama_cpp_model_path", None) or settings.llm_model_name
+
+        def factory() -> object:
+            from llama_cpp import Llama  # imported lazily to keep dependency optional
+
+            return Llama(model_path=str(model_reference))
+
+        return factory
+
+    @staticmethod
+    def _normalise_path(path: Path) -> Path:
+        candidate = Path(path).expanduser()
+        try:
+            return candidate.resolve()
+        except FileNotFoundError:
+            return candidate
+
+    @staticmethod
+    def _adapter_name_from_path(path: Path) -> str:
+        stem = path.stem or "adapter"
+        sanitized = stem.replace(" ", "_")
+        return f"lora::{sanitized}"
+
+    def _current_status(self) -> LoraStatus:
+        if self._adapter is None:
+            return LoraStatus(loaded=False)
+        return LoraStatus(
+            loaded=True,
+            path=self._adapter.path,
+            scaling=self._adapter.scaling,
+            adapter_name=self._adapter.adapter_name,
+        )
+
+    async def _rebuild_llama(self) -> object:
+        llama = await asyncio.to_thread(self._llama_factory)
+        self._llama = llama
+        self._adapter = None
+        return llama
+
+    async def load_adapter(self, path: Path, scaling: float) -> LoraStatus:
+        """Load a LoRA adapter with *scaling* and make it active."""
+
+        candidate = self._normalise_path(path)
+        if not candidate.is_file():
+            raise FileNotFoundError(str(candidate))
+
+        async with self._lock:
+            if self._adapter and candidate == self._adapter.path:
+                raise AdapterAlreadyLoadedError(str(candidate))
+
+            llama = await self._rebuild_llama()
+            adapter_name = self._adapter_name_from_path(candidate)
+
+            if hasattr(llama, "load_adapter"):
+                llama.load_adapter(str(candidate), adapter_name=adapter_name, scale=scaling)
+            if hasattr(llama, "set_adapter"):
+                llama.set_adapter(adapter_name)
+
+            self._adapter = _AdapterState(
+                path=candidate,
+                scaling=scaling,
+                adapter_name=adapter_name,
+            )
+            return self._current_status()
+
+    async def unload_adapter(self, expected_path: Path | None = None) -> LoraStatus:
+        """Unload the currently active adapter, optionally verifying *expected_path*."""
+
+        async with self._lock:
+            if self._adapter is None:
+                raise AdapterNotLoadedError("No adapter is currently loaded")
+
+            if expected_path is not None:
+                candidate = self._normalise_path(expected_path)
+                if candidate != self._adapter.path:
+                    raise AdapterNotLoadedError("A different adapter is active")
+
+            adapter_name = self._adapter.adapter_name
+            llama = self._llama
+            try:
+                if llama is not None and hasattr(llama, "unload_adapter"):
+                    llama.unload_adapter(adapter_name)
+            finally:
+                await self._rebuild_llama()
+            return self._current_status()
+
+    async def get_status(self) -> LoraStatus:
+        """Return the current adapter status."""
+
+        async with self._lock:
+            return self._current_status()
+
+
+__all__ = [
+    "AdapterAlreadyLoadedError",
+    "AdapterNotLoadedError",
+    "LlamaLoraManager",
+    "LoraStatus",
+]

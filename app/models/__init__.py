@@ -7,6 +7,7 @@ from typing import List, Optional
 
 from pydantic import BaseModel, Field
 
+from .lora import LoraLoadRequest, LoraStatusResponse, LoraUnloadRequest
 
 class Document(BaseModel):
     """Representation of a stored document chunk used across the service."""
@@ -140,4 +141,7 @@ __all__ = [
     "SearchHit",
     "SearchResponse",
     "UploadResponse",
+    "LoraLoadRequest",
+    "LoraStatusResponse",
+    "LoraUnloadRequest",
 ]
