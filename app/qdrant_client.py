@@ -13,6 +13,7 @@ _vector_store = get_vector_store(_settings)
 QDRANT_URL = _settings.qdrant_url
 QDRANT_API_KEY = _settings.qdrant_api_key
 QDRANT_COLLECTION = _settings.qdrant_collection
+QDRANT_PATH = _settings.qdrant_path_resolved
 EMBED_MODEL = _settings.vector_embed_model
 EMBED_DIMENSION = _settings.vector_embed_dimension
 
@@ -51,6 +52,7 @@ def import_payloads(payloads: Iterable[dict[str, object]]) -> None:
 
 __all__ = [
     "QDRANT_URL",
+    "QDRANT_PATH",
     "QDRANT_API_KEY",
     "QDRANT_COLLECTION",
     "EMBED_MODEL",

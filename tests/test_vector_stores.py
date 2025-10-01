@@ -122,14 +122,16 @@ class _StubEmbedder:
         return np.ones((len(texts), 3), dtype=np.float32)
 
 
-def _make_settings(tmp_path: Path, backend: str) -> Settings:
-    return Settings(
-        data_dir=tmp_path,
-        vector_backend=backend,
-        vector_embed_model="stub",
-        vector_embed_dimension=3,
-        embed_batch_size=2,
-    )
+def _make_settings(tmp_path: Path, backend: str, **overrides: object) -> Settings:
+    params: dict[str, object] = {
+        "data_dir": tmp_path,
+        "vector_backend": backend,
+        "vector_embed_model": "stub",
+        "vector_embed_dimension": 3,
+        "embed_batch_size": 2,
+    }
+    params.update(overrides)
+    return Settings(**params)
 
 
 def test_get_vector_store_selects_backend(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -207,6 +209,33 @@ def test_qdrant_upsert_batches_embeddings(tmp_path: Path, monkeypatch: pytest.Mo
 
     # Two batches: [a, b] and [c]
     assert [list(call) for call in embedder.calls] == [["a", "b"], ["c"]]
+
+
+def test_qdrant_initialises_embedded_client_when_url_missing(tmp_path: Path) -> None:
+    storage_dir = tmp_path / "embedded"
+    settings = _make_settings(
+        tmp_path,
+        backend="qdrant",
+        qdrant_url="",
+        qdrant_path=storage_dir,
+    )
+
+    called: dict[str, object] = {}
+
+    def _client_factory(**kwargs: object) -> _StubClient:
+        called.update(kwargs)
+        return _StubClient()
+
+    store = QdrantVectorStore(
+        settings=settings,
+        embedder_factory=lambda _: _StubEmbedder("stub"),
+        client_factory=_client_factory,
+    )
+
+    store._client_instance()
+
+    assert called == {"path": str(settings.qdrant_path_resolved)}
+    assert settings.qdrant_path_resolved.exists()
 
 
 def test_faiss_search_returns_payload(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

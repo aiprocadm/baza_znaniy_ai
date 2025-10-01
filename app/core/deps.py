@@ -2,21 +2,17 @@
 
 from __future__ import annotations
 
+import math
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Iterable, Iterator, Optional
+from typing import Iterable, Iterator
 
 from fastapi import Request
-
-        codex/refactor-upload-and-ingest-apis-to-use-ingestservice
 from sqlmodel import Session
 
-from app.ingest.service import IngestService
-
 from app.core.config import get_settings
-from app.services.files import FileStore, IngestQueue
-        main
+from app.ingest.service import IngestService
 
 
 DEFAULT_ALLOWED_EXTENSIONS = frozenset({"pdf", "docx", "pptx", "xlsx", "txt", "md"})
@@ -39,12 +35,22 @@ class UploadLimits:
     @staticmethod
     def _normalise_max_mb(value: object) -> int:
         try:
-            size = int(value)
+            size = int(float(value))
         except (TypeError, ValueError) as exc:  # pragma: no cover - defensive branch
-            raise ValueError("max_upload_mb must be an integer") from exc
+            raise ValueError("max_upload_mb must be a number") from exc
         if size <= 0:
             raise ValueError("max_upload_mb must be greater than zero")
         return size
+
+    @staticmethod
+    def _bytes_to_mb(value: object) -> int:
+        try:
+            bytes_value = int(float(value))
+        except (TypeError, ValueError) as exc:  # pragma: no cover - defensive branch
+            raise ValueError("max_upload_bytes must be a number") from exc
+        if bytes_value <= 0:
+            raise ValueError("max_upload_bytes must be greater than zero")
+        return max(1, math.ceil(bytes_value / (1024 * 1024)))
 
     @property
     def max_size(self) -> int:
@@ -73,32 +79,23 @@ def get_data_dir() -> Path:
 def get_upload_limits() -> UploadLimits:
     """Provide upload limit configuration from environment variables."""
 
-        codex/expand-env.example-and-update-configuration
     settings = get_settings()
-
-    def _mb_to_bytes(value: float | int) -> int:
-        return int(float(value) * 1024 * 1024)
 
     raw_max_mb = os.getenv("MAX_UPLOAD_MB")
     if raw_max_mb not in {None, ""}:
-        try:
-            max_size = _mb_to_bytes(float(raw_max_mb))
-        except ValueError as exc:  # pragma: no cover - defensive conversion
-            raise ValueError("MAX_UPLOAD_MB must be a number") from exc
+        max_upload_mb = UploadLimits._normalise_max_mb(raw_max_mb)
     else:
         legacy = os.getenv("UPLOAD_MAX_SIZE")
         if legacy not in {None, ""}:
-            max_size = UploadLimits._normalise_max_size(legacy)
+            max_upload_mb = UploadLimits._bytes_to_mb(legacy)
         else:
-            max_size = _mb_to_bytes(settings.max_upload_mb)
+            max_upload_mb = settings.max_upload_mb
 
-    extensions = os.getenv("UPLOAD_ALLOWED_EXTS", "pdf,docx,txt")
-    return UploadLimits(max_size=max_size, allowed_extensions=extensions)
+    default_extensions = ",".join(sorted(DEFAULT_ALLOWED_EXTENSIONS))
+    raw_extensions = os.getenv("UPLOAD_ALLOWED_EXTS")
+    extensions = raw_extensions if raw_extensions not in {None, ""} else default_extensions
 
-    defaults = UploadLimits()
-    max_upload_mb = os.getenv("MAX_UPLOAD_MB", defaults.max_upload_mb)
-    return UploadLimits(max_upload_mb=max_upload_mb)
-        main
+    return UploadLimits(max_upload_mb=max_upload_mb, allowed_extensions=extensions)
 
 
 def get_tenant(request: Request = None) -> str:

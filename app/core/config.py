@@ -8,27 +8,10 @@ from typing import Iterable, Sequence
 
 from pydantic import AliasChoices, Field
 
-        codex/clean-up-retriever-module-exports
-try:  # pragma: no cover - compatibility shims for optional imports
+try:  # pragma: no cover - optional features may be unavailable in tests
     from pydantic import BaseModel, computed_field, field_validator
-except ImportError:  # pragma: no cover - minimal fallbacks
+except ImportError:  # pragma: no cover - provide light-weight fallbacks
     from pydantic import BaseModel  # type: ignore[assignment]
-
-        codex/clean-app.py-and-routes.py-implementations
-try:  # pragma: no cover - support optional pydantic features
-    from pydantic import computed_field, field_validator
-except ImportError:  # pragma: no cover - fallback for older versions
-
-        codex/refactor-rerank.py-to-remove-placeholders
-try:  # pragma: no cover - optional in slim environments
-    from pydantic import computed_field, field_validator
-except ImportError:  # pragma: no cover - fallback for older Pydantic
-
-try:  # pragma: no cover - support for environments without computed_field
-    from pydantic import computed_field, field_validator
-except ImportError:  # pragma: no cover - fallback for test stubs
-        main
-        main
 
     def computed_field(*args, **kwargs):  # type: ignore[misc]
         def decorator(func):
@@ -44,53 +27,21 @@ except ImportError:  # pragma: no cover - fallback for test stubs
 
         return decorator
 
-        codex/clean-up-retriever-module-exports
-        codex/clean-up-retriever-module-exports
-try:  # pragma: no cover - optional dependency
+try:  # pragma: no cover - ``pydantic-settings`` is optional
     from pydantic_settings import BaseSettings, SettingsConfigDict
-except ImportError:  # pragma: no cover - lightweight fallback for tests
-    class SettingsConfigDict(dict):
-        def __init__(self, **kwargs: object) -> None:
-            super().__init__(**kwargs)
-
-        codex/clean-app.py-and-routes.py-implementations
-try:  # pragma: no cover - pydantic-settings is optional in tests
-    from pydantic_settings import BaseSettings, SettingsConfigDict
-except ImportError:  # pragma: no cover - lightweight fallback
-
-    class SettingsConfigDict(dict):  # type: ignore[override]
-        def __init__(self, **kwargs):
-            super().__init__()
-            for key, value in kwargs.items():
-                setattr(self, key, value)
-        main
-
-        codex/refactor-rerank.py-to-remove-placeholders
-try:  # pragma: no cover - prefer the real pydantic-settings integration
-
-try:  # pragma: no cover - support for environments without pydantic-settings
-        main
-    from pydantic_settings import BaseSettings, SettingsConfigDict
-except ImportError:  # pragma: no cover - lightweight shim for tests
+except ImportError:  # pragma: no cover - minimal shim for tests
     import os
 
     class SettingsConfigDict(dict):  # type: ignore[override]
-        env_file: tuple[str, ...] | None = None
-        env_file_encoding: str | None = None
-        extra: str | None = None
-        populate_by_name: bool | None = None
-        main
+        def __init__(self, **kwargs: object) -> None:
+            super().__init__(**kwargs)
+            for key, value in kwargs.items():
+                setattr(self, key, value)
 
     class BaseSettings(BaseModel):  # type: ignore[misc]
         model_config = SettingsConfigDict()
 
-        codex/clean-up-retriever-module-exports
-
         def __init__(self, **data: object) -> None:
-        codex/clean-app.py-and-routes.py-implementations
-            super().__init__(**data)
-
-            # Minimal environment loading to emulate BaseSettings.
             values: dict[str, object] = {}
             for name in getattr(self, "__annotations__", {}):
                 env_name = name.upper()
@@ -99,9 +50,7 @@ except ImportError:  # pragma: no cover - lightweight shim for tests
                     values[name] = env_value
             values.update(data)
             super().__init__(**values)
-        main
 
-        main
 
 class Settings(BaseSettings):
     """Configuration loaded from environment variables and ``.env`` files."""
@@ -113,7 +62,7 @@ class Settings(BaseSettings):
         populate_by_name=True,
     )
 
-        codex/expand-env.example-and-update-configuration
+    # Core application ---------------------------------------------------
     app_env: str = Field(
         default="development",
         validation_alias=AliasChoices("APP_ENV", "ENV", "ENVIRONMENT"),
@@ -126,25 +75,16 @@ class Settings(BaseSettings):
         default=8000,
         validation_alias=AliasChoices("APP_PORT", "PORT"),
     )
+    log_level: str = Field(default="INFO", validation_alias=AliasChoices("LOG_LEVEL"))
+    rate_limit: str | None = Field(default=None, validation_alias=AliasChoices("RATE_LIMIT"))
+    rate_burst: int = Field(default=0, validation_alias=AliasChoices("RATE_BURST"))
 
     # Core paths ---------------------------------------------------------
-        main
     data_dir: Path = Field(
         default=Path("./var/data"),
         validation_alias=AliasChoices("DATA_DIR", "FILES_ROOT"),
     )
-        codex/clean-up-retriever-module-exports
-        codex/clean-up-retriever-module-exports
-
-        codex/clean-app.py-and-routes.py-implementations
-        main
-
-        codex/refactor-rerank.py-to-remove-placeholders
     files_subdir: str = Field(default="files", validation_alias=AliasChoices("FILES_SUBDIR"))
-
-        codex/clean-up-config.py-and-consolidate-fields
-
-        codex/expand-env.example-and-update-configuration
     db_url: str = Field(
         default="sqlite+aiosqlite:///./var/data/kb.sqlite",
         validation_alias=AliasChoices("DB_URL", "INGEST_DB_URL"),
@@ -153,11 +93,6 @@ class Settings(BaseSettings):
         default=25,
         validation_alias=AliasChoices("MAX_UPLOAD_MB", "UPLOAD_MAX_MB"),
     )
-
-        codex/create-file-upload-progress-ui-with-fastapi
-        main
-        main
-        main
     cors_allow_origins: list[str] = Field(
         default_factory=lambda: ["*"],
         validation_alias=AliasChoices(
@@ -166,40 +101,10 @@ class Settings(BaseSettings):
             "ALLOWED_ORIGINS",
         ),
     )
-        codex/clean-up-retriever-module-exports
-        codex/clean-up-retriever-module-exports
-    files_subdir: str = Field(default="files", validation_alias=AliasChoices("FILES_SUBDIR"))
 
     # Chat storage -------------------------------------------------------
     chat_db_backend: str = Field(default="sqlite", validation_alias=AliasChoices("CHAT_DB_BACKEND"))
     chat_db_path: Path | None = Field(default=None, validation_alias=AliasChoices("CHAT_DB_PATH"))
-
-        codex/clean-app.py-and-routes.py-implementations
-    files_subdir: str = Field(default="files", validation_alias=AliasChoices("FILES_SUBDIR"))
-
-    # Chat storage -------------------------------------------------------
-        main
-
-
-    # Chat storage -------------------------------------------------------
-        codex/refactor-rerank.py-to-remove-placeholders
-
-        codex/clean-up-config.py-and-consolidate-fields
-
-        main
-        main
-        main
-        main
-        main
-    chat_db_backend: str = Field(
-        default="sqlite",
-        validation_alias=AliasChoices("CHAT_DB_BACKEND"),
-    )
-    chat_db_path: Path | None = Field(
-        default=None,
-        validation_alias=AliasChoices("CHAT_DB_PATH"),
-    )
-        main
     chat_db_dsn: str | None = Field(
         default=None,
         validation_alias=AliasChoices("CHAT_DB_DSN", "CHAT_DB_URL", "DATABASE_URL"),
@@ -213,42 +118,50 @@ class Settings(BaseSettings):
     chat_min_citations: int = Field(default=3, validation_alias=AliasChoices("CHAT_MIN_CITATIONS"))
     chat_max_citations: int = Field(default=5, validation_alias=AliasChoices("CHAT_MAX_CITATIONS"))
 
-    # Retrieval settings -------------------------------------------------
-        codex/clean-up-retriever-module-exports
+    # Retrieval ----------------------------------------------------------
     retrieve_topk: int = Field(default=10, validation_alias=AliasChoices("RETRIEVE_TOPK"))
     rerank_enabled: bool = Field(default=False, validation_alias=AliasChoices("RERANK_ENABLED"))
-
-    retrieve_topk: int = Field(
-        default=10,
-        validation_alias=AliasChoices("RETRIEVE_TOPK"),
-    )
-    rerank_enabled: bool = Field(
-        default=False,
-        validation_alias=AliasChoices("RERANK_ENABLED"),
-    )
-        codex/refactor-upload-and-ingest-apis-to-use-ingestservice
-    rerank_topk: int = Field(
-        default=10,
-        validation_alias=AliasChoices("RERANK_TOP_K", "RERANK_TOPK"),
-
-        codex/expand-env.example-and-update-configuration
-    rerank_topk: int = Field(
-        default=10,
-        validation_alias=AliasChoices("RERANK_TOP_K", "RERANK_TOPK"),
-
-        main
     rerank_topk: int | None = Field(
-        default=None,
-        codex/clean-up-code-and-run-tests
-        validation_alias=AliasChoices("RERANK_TOP_K", "RERANK_TOPK"),
-
+        default=10,
         validation_alias=AliasChoices("RERANK_TOPK", "RERANK_TOP_K"),
-        main
-        main
-        main
+    )
+    rag_tokenizer_name: str = Field(default="cl100k_base", validation_alias=AliasChoices("RAG_TOKENIZER_NAME"))
+    rag_chunk: int = Field(default=900, validation_alias=AliasChoices("RAG_CHUNK"))
+    rag_overlap: int = Field(default=140, validation_alias=AliasChoices("RAG_OVERLAP"))
+    ingest_max_retries: int = Field(default=3, validation_alias=AliasChoices("INGEST_MAX_RETRIES"))
+    ingest_backoff_seconds: float = Field(
+        default=1.0,
+        validation_alias=AliasChoices("INGEST_BACKOFF_SECONDS", "INGEST_BACKOFF_BASE"),
     )
 
-    # Memory store -------------------------------------------------------
+    # Vector store -------------------------------------------------------
+    vector_backend: str = Field(default="qdrant", validation_alias=AliasChoices("VECTOR_BACKEND"))
+    vector_embed_model: str = Field(
+        default="intfloat/multilingual-e5-small",
+        validation_alias=AliasChoices("VECTOR_EMBED_MODEL", "EMBED_MODEL"),
+    )
+    vector_embed_dimension: int = Field(
+        default=384,
+        validation_alias=AliasChoices("VECTOR_EMBED_DIMENSION", "EMBED_DIMENSION"),
+    )
+    embed_batch_size: int = Field(
+        default=32,
+        validation_alias=AliasChoices("EMBED_BATCH_SIZE", "VECTOR_EMBED_BATCH_SIZE"),
+    )
+    qdrant_url: str = Field(
+        default="",
+        validation_alias=AliasChoices("QDRANT_URL"),
+        description="HTTP endpoint for an external Qdrant instance. Leave blank to use the embedded store.",
+    )
+    qdrant_path: Path | None = Field(
+        default=None,
+        validation_alias=AliasChoices("QDRANT_PATH", "QDRANT_STORAGE_PATH"),
+        description="Filesystem directory used for embedded Qdrant storage.",
+    )
+    qdrant_api_key: str | None = Field(default=None, validation_alias=AliasChoices("QDRANT_API_KEY"))
+    qdrant_collection: str = Field(default="kb_chunks", validation_alias=AliasChoices("QDRANT_COLLECTION"))
+
+    # Memory -------------------------------------------------------------
     chat_memory_enabled: bool = Field(
         default=False,
         validation_alias=AliasChoices("CHAT_MEMORY_ENABLED", "MEMORY_ENABLED"),
@@ -263,111 +176,8 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("CHAT_MEMORY_MAXTOK", "MEMORY_MAX_TOKENS"),
     )
 
-    # Ingestion ----------------------------------------------------------
-        codex/clean-up-retriever-module-exports
-    rag_tokenizer_name: str = Field(default="cl100k_base", validation_alias=AliasChoices("RAG_TOKENIZER_NAME"))
-    rag_chunk: int = Field(default=900, validation_alias=AliasChoices("RAG_CHUNK"))
-    rag_overlap: int = Field(default=140, validation_alias=AliasChoices("RAG_OVERLAP"))
-
-    # Vector store -------------------------------------------------------
-    vector_backend: str = Field(default="qdrant", validation_alias=AliasChoices("VECTOR_BACKEND"))
-
-    rag_tokenizer_name: str = Field(
-        default="cl100k_base",
-        validation_alias=AliasChoices("RAG_TOKENIZER_NAME"),
-    )
-        codex/refactor-rerank.py-to-remove-placeholders
-    rag_chunk: int = Field(default=900, validation_alias=AliasChoices("RAG_CHUNK"))
-    rag_overlap: int = Field(default=140, validation_alias=AliasChoices("RAG_OVERLAP"))
-
-    rag_chunk: int = Field(
-        default=900,
-        validation_alias=AliasChoices("RAG_CHUNK"),
-    )
-    rag_overlap: int = Field(
-        default=140,
-        validation_alias=AliasChoices("RAG_OVERLAP"),
-    )
-        codex/refactor-upload-and-ingest-apis-to-use-ingestservice
-    ingest_max_retries: int = Field(
-        default=3,
-        validation_alias=AliasChoices("INGEST_MAX_RETRIES"),
-    )
-    ingest_backoff_seconds: float = Field(
-        default=1.0,
-        validation_alias=AliasChoices("INGEST_BACKOFF_SECONDS", "INGEST_BACKOFF_BASE"),
-    )
-
-        main
-
-    # Vector store -------------------------------------------------------
-        main
-    vector_backend: str = Field(
-        default="qdrant",
-        validation_alias=AliasChoices("VECTOR_BACKEND"),
-    )
-        main
-    embed_batch_size: int = Field(
-        default=32,
-        validation_alias=AliasChoices("EMBED_BATCH_SIZE", "VECTOR_EMBED_BATCH_SIZE"),
-    )
-    qdrant_url: str = Field(default="http://qdrant:6333", validation_alias=AliasChoices("QDRANT_URL"))
-        codex/clean-up-retriever-module-exports
-    qdrant_api_key: str | None = Field(default=None, validation_alias=AliasChoices("QDRANT_API_KEY"))
-    qdrant_collection: str = Field(default="kb_chunks", validation_alias=AliasChoices("QDRANT_COLLECTION"))
-
-    qdrant_api_key: str | None = Field(
-        default=None,
-        validation_alias=AliasChoices("QDRANT_API_KEY"),
-    )
-    qdrant_collection: str = Field(
-        default="kb_chunks",
-        validation_alias=AliasChoices("QDRANT_COLLECTION"),
-    )
-        main
-    vector_embed_model: str = Field(
-        default="intfloat/multilingual-e5-small",
-        validation_alias=AliasChoices("VECTOR_EMBED_MODEL", "EMBED_MODEL"),
-    )
-    vector_embed_dimension: int = Field(
-        default=384,
-        validation_alias=AliasChoices("VECTOR_EMBED_DIMENSION", "EMBED_DIMENSION"),
-    )
-        codex/clean-up-retriever-module-exports
-        codex/clean-up-retriever-module-exports
-
-    # LLM provider -------------------------------------------------------
+    # LLM ----------------------------------------------------------------
     llm_provider: str = Field(default="ollama", validation_alias=AliasChoices("LLM_PROVIDER"))
-
-        codex/clean-app.py-and-routes.py-implementations
-
-    # LLM provider -------------------------------------------------------
-        main
-
-        codex/refactor-rerank.py-to-remove-placeholders
-
-    # LLM provider -------------------------------------------------------
-
-        codex/clean-up-config.py-and-consolidate-fields
-
-    # LLM provider -------------------------------------------------------
-
-        codex/expand-env.example-and-update-configuration
-
-        codex/create-file-upload-progress-ui-with-fastapi
-
-
-    # LLM provider -------------------------------------------------------
-        main
-        main
-        main
-        main
-        main
-    llm_provider: str = Field(
-        default="ollama",
-        validation_alias=AliasChoices("LLM_PROVIDER"),
-    )
-        main
     llm_model_name: str = Field(
         default="llama3.1:8b",
         validation_alias=AliasChoices("LLM_MODEL_NAME", "GEN_MODEL", "OLLAMA_MODEL"),
@@ -376,233 +186,18 @@ class Settings(BaseSettings):
         default="http://ollama:11434",
         validation_alias=AliasChoices("OLLAMA_BASE_URL", "OLLAMA_HOST"),
     )
-        codex/clean-up-retriever-module-exports
     max_context_tokens: int = Field(default=6000, validation_alias=AliasChoices("MAX_CONTEXT_TOKENS"))
-
-    max_context_tokens: int = Field(
-        default=6000,
-        validation_alias=AliasChoices("MAX_CONTEXT_TOKENS"),
-    )
-        codex/clean-app.py-and-routes.py-implementations
-
-        codex/refactor-rerank.py-to-remove-placeholders
-
-        codex/clean-up-config.py-and-consolidate-fields
-
-        codex/update-default-model-and-settings
-    max_generation_tokens: int = Field(
-        default=0,
-        validation_alias=AliasChoices("MAX_GENERATION_TOKENS"),
-    )
-
-        codex/expand-env.example-and-update-configuration
-    max_generation_tokens: int = Field(
-        default=512,
-        validation_alias=AliasChoices("MAX_GENERATION_TOKENS"),
-    )
-
-        codex/update-default-model-and-settings-5pychu
-        main
-        main
-        main
-    max_generation_tokens: int = Field(
-        default=1024,
-        validation_alias=AliasChoices("MAX_GENERATION_TOKENS"),
-    )
+    max_generation_tokens: int = Field(default=1024, validation_alias=AliasChoices("MAX_GENERATION_TOKENS"))
 
     # Security -----------------------------------------------------------
-        codex/clean-up-retriever-module-exports
-        codex/clean-up-retriever-module-exports
     secret_key: str = Field(default="change-me", validation_alias=AliasChoices("SECRET_KEY"))
     jwt_algorithm: str = Field(default="HS256", validation_alias=AliasChoices("JWT_ALGORITHM"))
-
-        codex/clean-app.py-and-routes.py-implementations
-        main
-
-        codex/refactor-rerank.py-to-remove-placeholders
-    secret_key: str = Field(default="change-me", validation_alias=AliasChoices("SECRET_KEY"))
-    jwt_algorithm: str = Field(default="HS256", validation_alias=AliasChoices("JWT_ALGORITHM"))
-
-        codex/clean-up-config.py-and-consolidate-fields
-
-        main
-        main
-        main
-        main
-        main
-    secret_key: str = Field(
-        default="change-me",
-        validation_alias=AliasChoices("SECRET_KEY"),
-    )
-    jwt_algorithm: str = Field(
-        default="HS256",
-        validation_alias=AliasChoices("JWT_ALGORITHM"),
-    )
-        main
-        main
     access_token_expire_minutes: int = Field(
         default=30,
         validation_alias=AliasChoices("ACCESS_TOKEN_EXPIRE_MINUTES"),
     )
 
-    # Misc ---------------------------------------------------------------
-    log_level: str = Field(default="INFO", validation_alias=AliasChoices("LOG_LEVEL"))
-    rate_limit: str | None = Field(default=None, validation_alias=AliasChoices("RATE_LIMIT"))
-    rate_burst: int = Field(default=0, validation_alias=AliasChoices("RATE_BURST"))
-    app_host: str | None = Field(default=None, validation_alias=AliasChoices("APP_HOST"))
-
-        codex/refactor-rerank.py-to-remove-placeholders
-    @field_validator("cors_allow_origins", mode="before")
-
-    @field_validator(
-        "chat_history_limit",
-        "chat_summary_trigger",
-        "chat_min_citations",
-        "chat_max_citations",
-        "retrieve_topk",
-        "rag_chunk",
-        "rag_overlap",
-        "vector_embed_dimension",
-        "embed_batch_size",
-        "chat_memory_ttl_days",
-        "chat_memory_max_tokens",
-        codex/clean-up-retriever-module-exports
-        codex/clean-up-retriever-module-exports
-
-        codex/clean-app.py-and-routes.py-implementations
-        main
-        "access_token_expire_minutes",
-        "max_context_tokens",
-        "max_generation_tokens",
-        "rate_burst",
-
-        codex/clean-up-config.py-and-consolidate-fields
-
-        codex/update-default-model-and-settings
-        "max_generation_tokens",
-
-        codex/expand-env.example-and-update-configuration
-        "access_token_expire_minutes",
-        "app_port",
-        "max_upload_mb",
-        "max_context_tokens",
-        "max_generation_tokens",
-
-        codex/create-file-upload-progress-ui-with-fastapi
-        main
-        "access_token_expire_minutes",
-        "max_context_tokens",
-        "max_generation_tokens",
-        main
-        mode="before",
-    )
-        main
-    @classmethod
-        codex/clean-app.py-and-routes.py-implementations
-    def _parse_int(cls, value: object) -> object:
-
-    def _normalise_origins(cls, value: object) -> list[str] | object:
-        main
-        if value in {None, "", Ellipsis}:
-        codex/refactor-rerank.py-to-remove-placeholders
-            return ["*"]
-        if isinstance(value, str):
-            return [item.strip() for item in value.split(",") if item.strip()]
-        if isinstance(value, Iterable):
-            items = [str(item).strip() for item in value if str(item).strip()]
-            return items or ["*"]
-        return value
-
-    @field_validator("cors_allow_origins", mode="after")
-    @classmethod
-    def _ensure_origins(cls, value: list[str]) -> list[str]:
-        return value or ["*"]
-
-            return value
-        return int(value)
-
-        codex/clean-up-retriever-module-exports
-        codex/clean-up-retriever-module-exports
-
-        codex/clean-app.py-and-routes.py-implementations
-    @field_validator("chat_memory_enabled", "rerank_enabled", mode="before")
-    @classmethod
-    def _parse_bool(cls, value: object) -> bool:
-        main
-
-        codex/clean-up-config.py-and-consolidate-fields
-    @field_validator("rate_burst", mode="before")
-
-        codex/update-default-model-and-settings-5pychu
-        main
-        "embed_batch_size",
-        "max_context_tokens",
-        "max_generation_tokens",
-
-        main
-        "access_token_expire_minutes",
-        "rate_burst",
-        main
-        mode="before",
-    )
-        main
-    @classmethod
-    def _ensure_rate_burst(cls, value: object) -> int:
-        if value in {None, "", Ellipsis}:
-            return 0
-        return int(value)
-        main
-
-    @field_validator("ollama_base_url", mode="after")
-    @classmethod
-        codex/refactor-rerank.py-to-remove-placeholders
-    def _strip_trailing_slash(cls, value: str) -> str:
-        return value.rstrip("/")
-
-    @field_validator("rerank_topk", mode="before")
-    @classmethod
-    def _empty_to_none(cls, value: object) -> int | None:
-=
-    def _normalise_bool(cls, value: object) -> bool:
-        main
-        if isinstance(value, str):
-            return value.strip().lower() in {"1", "true", "yes", "on"}
-        return bool(value)
-
-        main
-    @field_validator("rerank_topk", mode="before")
-    @classmethod
-        codex/expand-env.example-and-update-configuration
-    def _optional_int(cls, value: object) -> int:
-        if value in {None, ""}:
-            default = cls.model_fields["rerank_topk"].default  # type: ignore[index]
-            return int(default) if default is not None else 0
-
-    def _optional_int(cls, value: object) -> int | None:
-        main
-        if value in {None, "", Ellipsis}:
-            return None
-        main
-        return int(value)
-
-    @field_validator("rerank_topk", mode="after")
-    @classmethod
-    def _validate_rerank_topk(cls, value: int) -> int:
-        if value < 1:
-            raise ValueError("RERANK_TOPK must be at least 1")
-        return value
-
-        codex/clean-app.py-and-routes.py-implementations
-
-        codex/refactor-rerank.py-to-remove-placeholders
-    @field_validator("chat_db_backend", "vector_backend", "llm_provider", mode="after")
-
-        main
-    @field_validator("ollama_base_url", mode="after")
-    @classmethod
-    def _strip_trailing_slash(cls, value: str) -> str:
-        return value.rstrip("/")
-
+    # Validators ---------------------------------------------------------
     @field_validator("cors_allow_origins", mode="before")
     @classmethod
     def _normalise_origins(cls, value: object) -> list[str]:
@@ -617,40 +212,60 @@ class Settings(BaseSettings):
         raise ValueError("CORS origins must be a string or iterable")
 
     @field_validator("cors_allow_origins", mode="after")
-        main
     @classmethod
-    def _lowercase(cls, value: str) -> str:
-        return (value or "").strip().lower()
+    def _ensure_origins(cls, value: list[str]) -> list[str]:
+        return value or ["*"]
 
-    @field_validator("data_dir", "chat_db_path", "memory_db_path", mode="before")
+    @field_validator(
+        "chat_memory_enabled",
+        "rerank_enabled",
+        mode="before",
+    )
+    @classmethod
+    def _parse_bool(cls, value: object) -> bool:
+        if isinstance(value, str):
+            return value.strip().lower() in {"1", "true", "yes", "on"}
+        return bool(value)
+
+    @field_validator("rate_burst", mode="before")
+    @classmethod
+    def _ensure_rate_burst(cls, value: object) -> int:
+        if value in {None, "", Ellipsis}:
+            return 0
+        return int(value)
+
+    @field_validator("ollama_base_url", mode="after")
+    @classmethod
+    def _strip_trailing_slash(cls, value: str) -> str:
+        return value.rstrip("/")
+
+    @field_validator("data_dir", "chat_db_path", "memory_db_path", "qdrant_path", mode="before")
     @classmethod
     def _expand_paths(cls, value: object) -> object:
         if isinstance(value, str) and value:
             return Path(value).expanduser()
         return value
 
-        codex/clean-up-retriever-module-exports
-        codex/clean-up-retriever-module-exports
-
-        codex/clean-app.py-and-routes.py-implementations
-        main
     @field_validator("data_dir", mode="after")
     @classmethod
-    def _ensure_dir(cls, value: Path) -> Path:
+    def _ensure_data_dir(cls, value: Path) -> Path:
+        return value.expanduser()
 
-    @field_validator("chat_db_path", "memory_db_path", mode="after")
+    @field_validator("chat_db_path", "memory_db_path", "qdrant_path", mode="after")
     @classmethod
     def _resolve_optional_path(cls, value: Path | None) -> Path | None:
         if value is None:
             return None
-        return value.expanduser().resolve()
-
-    @field_validator("data_dir", mode="after")
-    @classmethod
-    def _ensure_directory(cls, value: Path) -> Path:
-        main
         return value.expanduser()
 
+    @field_validator("rerank_topk", mode="before")
+    @classmethod
+    def _coerce_optional_int(cls, value: object) -> int | None:
+        if value in {None, "", Ellipsis}:
+            return None
+        return int(value)
+
+    # Computed helpers ---------------------------------------------------
     @computed_field
     @property
     def files_dir(self) -> Path:
@@ -670,9 +285,15 @@ class Settings(BaseSettings):
 
     @computed_field
     @property
+    def qdrant_path_resolved(self) -> Path:
+        base = self.qdrant_path or (self.data_dir / "qdrant")
+        return Path(base)
+
+    @computed_field
+    @property
     def rerank_limit(self) -> int:
         candidate = self.rerank_topk or self.retrieve_topk
-        candidate = max(1, candidate)
+        candidate = max(1, int(candidate))
         return min(self.retrieve_topk, candidate)
 
     @computed_field
@@ -681,6 +302,11 @@ class Settings(BaseSettings):
         minimum = max(1, int(self.chat_min_citations))
         maximum = max(minimum, int(self.chat_max_citations))
         return minimum, maximum
+
+    @computed_field
+    @property
+    def gen_model(self) -> str:
+        return self.llm_model_name
 
     def iter_secret_fields(self) -> Iterable[str]:
         """Return names of settings that contain sensitive values."""
@@ -696,4 +322,3 @@ def get_settings() -> Settings:
 
 
 __all__ = ["Settings", "get_settings"]
-

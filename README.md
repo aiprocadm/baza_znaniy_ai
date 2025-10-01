@@ -64,6 +64,192 @@ pip install -r requirements.txt
 
 ## Локальный запуск через Uvicorn
 
+        codex/update-readme-with-project-specifics
+
+2. Убедитесь, что контейнер отвечает на health-check:
+   ```bash
+   docker compose exec kb_web curl -s http://localhost:8000/health
+   ```
+
+3. Откройте веб-интерфейс `http://<сервер>:8000` и авторизуйтесь с учётными данными из `.env`.
+
+## Веб-интерфейс
+
+По адресу `/` доступна статическая страница «KnowLab Operations Console». Она не
+требует сборки и работает поверх REST API.
+
+- Блок «Загрузка документа» отправляет файлы на `/api/v1/upload`, показывает
+  прогресс загрузки и автоматически инициирует индексацию через `/api/v1/ingest`.
+  Статусы обновляются по API `/api/v1/files` с периодическим опросом.
+- Поисковая форма выполняет запросы к `/api/v1/search` и показывает
+  предпросмотр чанков.
+- Чат общается с `/api/v1/chat`, отображает ответы ассистента и ссылки на
+  цитаты. При клике по цитате выполняется поиск по связанному документу.
+- В выпадающем поле можно указать значение заголовка `X-Tenant`; если оно не
+  задано, используется стандартный tenant.
+
+Страница корректно обрабатывает «stub mode» — если API возвращает частично
+заполненные объекты или сервис временно недоступен, сообщения об ошибках
+показываются прямо в интерфейсе.
+
+### Пайплайн ассетов
+
+Front-end состоит из одного HTML-файла с нативным JavaScript и встроенными
+стилями. Дополнительные сборщики (Webpack, Vite, Parcel и т.д.) не используются
+и не требуются.
+
+## Переменные окружения
+
+Переменная `MAX_UPLOAD_MB` задаёт максимальный размер загружаемых файлов в мегабайтах (по умолчанию 40 МБ).
+
+| Переменная | Значение по умолчанию | Назначение |
+|------------|-----------------------|------------|
+        codex/update-default-model-and-settings
+        codex/replace-compose.yml-with-docker-compose.yml
+| `DATA_DIR` | `/app/var/data` | Базовый каталог данных, монтируемый в контейнер. |
+| `FILES_ROOT` | `DATA_DIR/files` | Каталог для загружаемых документов и памяти чата. |
+| `GEN_MODEL` | `llama3.1:8b` | Модель для генерации ответов. |
+| `EMBED_MODEL` | `intfloat/multilingual-e5-small` | Модель эмбеддингов. |
+
+        codex/expand-env.example-and-update-configuration
+| `APP_ENV` | `development` | Рабочий профиль приложения (`development`, `production`, и т.д.). |
+| `APP_HOST` | `0.0.0.0` | Хост, на котором поднимается HTTP-сервер. |
+| `APP_PORT` | `8000` | Порт веб-приложения. |
+| `DATA_DIR` | `./var/data` | Базовый каталог данных, создаётся автоматически при старте. |
+| `DB_URL` | `sqlite+aiosqlite:///./var/data/kb.sqlite` | Хранилище метаданных загрузок и чанков. |
+| `MAX_UPLOAD_MB` | `25` | Максимальный размер загружаемого файла в мегабайтах. |
+| `UPLOAD_ALLOWED_EXTS` | `pdf,docx,txt` | Допустимые расширения файлов. |
+        main
+
+| `DATA_DIR` | `/opt/knowlab/data/files` | Каталог для загружаемых документов и базы чатов. |
+        main
+| `VECTOR_BACKEND` | `qdrant` | Тип векторного движка (поддерживаются `qdrant` и `faiss`). |
+| `QDRANT_URL` | пусто | Эндпоинт Qdrant (оставьте пустым для встроенного режима). |
+| `QDRANT_PATH` | `DATA_DIR/qdrant` | Каталог для встроенного хранилища Qdrant. |
+| `QDRANT_COLLECTION` | `kb_chunks` | Коллекция для документов. |
+| `QDRANT_API_KEY` | пусто | Ключ доступа к Qdrant при необходимости. |
+| `VECTOR_EMBED_MODEL` | `intfloat/multilingual-e5-small` | Модель эмбеддингов. |
+        codex/expand-env.example-and-update-configuration
+| `VECTOR_EMBED_DIMENSION` | `384` | Размерность эмбеддингов. |
+| `EMBED_BATCH_SIZE` | `32` | Размер батча при расчёте эмбеддингов. |
+| `LLM_PROVIDER` | `ollama` | Провайдер LLM (`ollama` или `stub`). |
+| `LLM_MODEL_NAME` / `OLLAMA_MODEL` | `qwen2.5:3b-instruct` | Модель генерации ответов. |
+| `OLLAMA_BASE_URL` | `http://ollama:11434` | Базовый URL Ollama. |
+| `MAX_CONTEXT_TOKENS` | `6000` | Максимальное количество токенов контекста для LLM. |
+| `MAX_GENERATION_TOKENS` | `512` | Лимит токенов на ответ модели. |
+
+| `VECTOR_EMBED_DIMENSION` | `384` | Размерность эмбеддингов (для контроля совместимости). |
+| `EMBED_BATCH_SIZE` | `32` | Размер батча при расчёте эмбеддингов. |
+| `LLM_PROVIDER` | `ollama` | Провайдер LLM. |
+| `LLM_MODEL_NAME` | `llama3.1:8b` | Модель генерации ответов. |
+
+        codex/update-default-model-and-settings-5pychu
+| `LLM_PROVIDER` | `ollama` | Провайдер LLM (`ollama` или `stub`). |
+| `LLM_MODEL_NAME` / `OLLAMA_MODEL` | `llama3.1:8b` | Модель генерации ответов. |
+        codex/update-default-model-and-settings
+        main
+| `OLLAMA_BASE_URL` | `http://ollama:11434` | Базовый URL Ollama. |
+| `MAX_CONTEXT_TOKENS` | `6000` | Максимальное количество токенов контекста для Ollama. |
+| `MAX_GENERATION_TOKENS` | пусто | Ограничение на количество токенов генерации (по умолчанию без ограничения). |
+| `RAG_TOKENIZER_NAME` | `cl100k_base` | Название токенизатора для разбиения. |
+
+        main
+
+        main
+| `OLLAMA_BASE_URL` | `http://ollama:11434` | Базовый URL Ollama. |
+| `MAX_CONTEXT_TOKENS` | `6000` | Максимальное количество токенов контекста для Ollama. |
+| `MAX_GENERATION_TOKENS` | `1024` | Ограничение на количество токенов при генерации. |
+        main
+        main
+| `RAG_TOKENIZER_NAME` | `cl100k_base` | Название токенизатора для разбиения. |
+| `RAG_CHUNK` | `900` | Размер чанка в токенах. |
+| `RAG_OVERLAP` | `140` | Перекрытие чанков. |
+| `RETRIEVE_TOPK` | `10` | Количество кандидатов из векторного поиска. |
+| `RERANK_ENABLED` | `false` | Включить этап повторного ранжирования. |
+| `RERANK_TOPK` | `10` | Сколько документов оставлять после повторного ранжирования. |
+| `CHAT_HISTORY_LIMIT` | `12` | Количество последних сообщений в краткосрочном контексте. |
+| `CHAT_SUMMARY_TRIGGER` | `10` | Порог сообщений для запуска саммаризации. |
+| `CHAT_MIN_CITATIONS` | `3` | Минимальное число источников в ответе. |
+| `CHAT_MAX_CITATIONS` | `5` | Максимальное число источников в ответе. |
+| `CHAT_DB_BACKEND` | `sqlite` | Тип хранилища истории чатов: `sqlite` или `postgres`. |
+| `CHAT_DB_PATH` | пусто | Путь к SQLite (по умолчанию `DATA_DIR/db/chat_history.sqlite`). |
+| `CHAT_DB_DSN` | пусто | Строка подключения к PostgreSQL при `CHAT_DB_BACKEND=postgres`. |
+| `CHAT_DB_SCHEMA` | пусто | Необязательная схема PostgreSQL. |
+        codex/expand-env.example-and-update-configuration
+| `CHAT_MEMORY_ENABLED` | `false` | Включить долговременную память чата. |
+| `MEMORY_DB_PATH` | пусто | Путь к базе памяти (по умолчанию `DATA_DIR/db/memory.sqlite`). |
+| `CHAT_MEMORY_TTL_DAYS` | `90` | Сколько дней хранить сообщения в памяти. |
+| `CHAT_MEMORY_MAXTOK` | `2000` | Максимальный объём памяти в условных «токенах». |
+
+| `CHAT_MIN_CITATIONS` | `3` | Минимальное число источников в ответе. |
+| `CHAT_MAX_CITATIONS` | `5` | Максимальное число источников в ответе. |
+| `QDRANT_URL` | пусто | Эндпоинт Qdrant (оставьте пустым для встроенного режима). |
+| `QDRANT_PATH` | `DATA_DIR/qdrant` | Каталог для встроенного хранилища Qdrant. |
+| `QDRANT_COLLECTION` | `kb_chunks` | Коллекция для документов. |
+| `QDRANT_API_KEY` | пусто | Ключ доступа к Qdrant при необходимости. |
+| `OLLAMA_HOST` | `http://ollama:11434` | Эндпоинт Ollama. |
+
+        main
+| `SECRET_KEY` | `change-me` | Ключ подписи JWT. |
+| `JWT_ALGORITHM` | `HS256` | Алгоритм подписи JWT. |
+| `ACCESS_TOKEN_EXPIRE_MINUTES` | `30` | Время жизни токена в минутах. |
+
+> Примечание: если размер окна разбиения (`RAG_CHUNK`) нормализуется до 1, система
+> автоматически переключается на символьный токенизатор и генерирует окна по
+> символам с учётом заданного перекрытия.
+
+        codex/update-default-model-and-settings
+### Переключение провайдера и моделей
+
+По умолчанию сервис использует Ollama с моделью `llama3.1:8b`. Поменять провайдера
+или модель можно в `.env`:
+
+- `LLM_PROVIDER=ollama` — стандартный режим, запросы уходят в Ollama по адресу
+  `OLLAMA_BASE_URL`. Укажите нужную модель через `LLM_MODEL_NAME`.
+- `LLM_PROVIDER=stub` — заглушка для локальной отладки и сред без Ollama. Она
+  возвращает детерминированные ответы и не требует загрузки моделей.
+
+Дополнительно можно ограничить размер вводного контекста (`MAX_CONTEXT_TOKENS`) и
+объём генерации (`MAX_GENERATION_TOKENS`). Если лимит генерации не задан, Ollama
+использует свои настройки по умолчанию.
+
+## Логирование и память
+
+### Переключение провайдера и модели LLM
+
+        codex/expand-env.example-and-update-configuration
+История диалогов по умолчанию сохраняется в SQLite-файле по пути `DATA_DIR/db/chat_history.sqlite`. При необходимости можно переключить приложение на PostgreSQL, задав `CHAT_DB_BACKEND=postgres` и передав строку подключения через `CHAT_DB_DSN`. Для каждого сообщения хранится пользователь, идентификатор диалога, роли (`user`/`assistant`) и содержание. Эти данные используются для восстановления контекста между запросами.
+
+Логи приложения пишутся как в stdout, так и в файл `DATA_DIR/logs/app.log`. Каталоги `DATA_DIR` и вложенные директории создаются автоматически при старте сервиса.
+        main
+
+Метаданные загрузок и чанков по умолчанию сохраняются в SQLite-базе `./var/data/kb.sqlite` (см. `DB_URL`). Путь можно поменять, указав собственный DSN в переменной окружения.
+
+Приложение по умолчанию использует Ollama с моделью `llama3.1:8b`. Поведение
+можно изменить переменными окружения:
+
+- `LLM_PROVIDER` — поддерживаются значения `ollama` и `stub`.
+- `LLM_MODEL_NAME` / `OLLAMA_MODEL` — конкретная модель в Ollama.
+- `MAX_CONTEXT_TOKENS` и `MAX_GENERATION_TOKENS` — ограничения на окно
+  контекста и длину ответа, которые проксируются в Ollama через опции
+  `num_ctx` и `num_predict` соответственно.
+
+Если Ollama недоступна (например, в окружениях CI), установите
+`LLM_PROVIDER=stub`. Заглушка возвращает предсказуемые ответы и имитирует
+наличие цитат, что позволяет тестировать остальную часть стека без внешних
+зависимостей.
+
+## Логирование и память
+
+История диалогов по умолчанию сохраняется в SQLite-файле по пути `DATA_DIR/db/chat_history.sqlite`. При необходимости можно переключить приложение на PostgreSQL, задав `CHAT_DB_BACKEND=postgres` и передав строку подключения через `CHAT_DB_DSN`. Для каждого сообщения хранится пользователь, идентификатор диалога, роли (`user`/`assistant`) и содержание. Эти данные используются для восстановления контекста между запросами.
+
+Логи приложения пишутся как в stdout, так и в файл `DATA_DIR/logs/app.log`. Каталоги `DATA_DIR` и подкаталоги `logs` создаются автоматически при старте сервиса.
+        main
+
+## Тестирование
+
+Локально можно запустить unit-тесты (без Docker):
+        main
 ```bash
 source .venv/bin/activate
 uvicorn app.api.main:app --host 0.0.0.0 --port 8000 --reload
