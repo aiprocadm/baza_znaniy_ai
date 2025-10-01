@@ -4,9 +4,14 @@ from __future__ import annotations
 
 from functools import lru_cache
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, Sequence
 
 from pydantic import AliasChoices, BaseModel, Field
+
+        codex/clean-app.py-and-routes.py-implementations
+try:  # pragma: no cover - support optional pydantic features
+    from pydantic import computed_field, field_validator
+except ImportError:  # pragma: no cover - fallback for older versions
 
         codex/refactor-rerank.py-to-remove-placeholders
 try:  # pragma: no cover - optional in slim environments
@@ -16,6 +21,7 @@ except ImportError:  # pragma: no cover - fallback for older Pydantic
 try:  # pragma: no cover - support for environments without computed_field
     from pydantic import computed_field, field_validator
 except ImportError:  # pragma: no cover - fallback for test stubs
+        main
         main
 
     def computed_field(*args, **kwargs):  # type: ignore[misc]
@@ -34,6 +40,17 @@ except ImportError:  # pragma: no cover - fallback for test stubs
             return decorator(args[0])
         return decorator
 
+        codex/clean-app.py-and-routes.py-implementations
+try:  # pragma: no cover - pydantic-settings is optional in tests
+    from pydantic_settings import BaseSettings, SettingsConfigDict
+except ImportError:  # pragma: no cover - lightweight fallback
+
+    class SettingsConfigDict(dict):  # type: ignore[override]
+        def __init__(self, **kwargs):
+            super().__init__()
+            for key, value in kwargs.items():
+                setattr(self, key, value)
+
         codex/refactor-rerank.py-to-remove-placeholders
 try:  # pragma: no cover - prefer the real pydantic-settings integration
 
@@ -48,11 +65,15 @@ except ImportError:  # pragma: no cover - lightweight shim for tests
         env_file_encoding: str | None = None
         extra: str | None = None
         populate_by_name: bool | None = None
+        main
 
     class BaseSettings(BaseModel):  # type: ignore[misc]
         model_config = SettingsConfigDict()
 
         def __init__(self, **data: object) -> None:
+        codex/clean-app.py-and-routes.py-implementations
+            super().__init__(**data)
+
             # Minimal environment loading to emulate BaseSettings.
             values: dict[str, object] = {}
             for name in getattr(self, "__annotations__", {}):
@@ -62,6 +83,7 @@ except ImportError:  # pragma: no cover - lightweight shim for tests
                     values[name] = env_value
             values.update(data)
             super().__init__(**values)
+        main
 
 
 class Settings(BaseSettings):
@@ -94,6 +116,8 @@ class Settings(BaseSettings):
         default=Path("./var/data"),
         validation_alias=AliasChoices("DATA_DIR", "FILES_ROOT"),
     )
+        codex/clean-app.py-and-routes.py-implementations
+
         codex/refactor-rerank.py-to-remove-placeholders
     files_subdir: str = Field(default="files", validation_alias=AliasChoices("FILES_SUBDIR"))
 
@@ -112,6 +136,7 @@ class Settings(BaseSettings):
         codex/create-file-upload-progress-ui-with-fastapi
         main
         main
+        main
     cors_allow_origins: list[str] = Field(
         default_factory=lambda: ["*"],
         validation_alias=AliasChoices(
@@ -120,12 +145,18 @@ class Settings(BaseSettings):
             "ALLOWED_ORIGINS",
         ),
     )
+        codex/clean-app.py-and-routes.py-implementations
+    files_subdir: str = Field(default="files", validation_alias=AliasChoices("FILES_SUBDIR"))
+
+    # Chat storage -------------------------------------------------------
+
 
     # Chat storage -------------------------------------------------------
         codex/refactor-rerank.py-to-remove-placeholders
 
         codex/clean-up-config.py-and-consolidate-fields
 
+        main
         main
         main
         main
@@ -267,6 +298,10 @@ class Settings(BaseSettings):
         default=384,
         validation_alias=AliasChoices("VECTOR_EMBED_DIMENSION", "EMBED_DIMENSION"),
     )
+        codex/clean-app.py-and-routes.py-implementations
+
+    # LLM provider -------------------------------------------------------
+
         codex/refactor-rerank.py-to-remove-placeholders
 
     # LLM provider -------------------------------------------------------
@@ -281,6 +316,7 @@ class Settings(BaseSettings):
 
 
     # LLM provider -------------------------------------------------------
+        main
         main
         main
         main
@@ -301,6 +337,8 @@ class Settings(BaseSettings):
         default=6000,
         validation_alias=AliasChoices("MAX_CONTEXT_TOKENS"),
     )
+        codex/clean-app.py-and-routes.py-implementations
+
         codex/refactor-rerank.py-to-remove-placeholders
 
         codex/clean-up-config.py-and-consolidate-fields
@@ -320,18 +358,22 @@ class Settings(BaseSettings):
         codex/update-default-model-and-settings-5pychu
         main
         main
+        main
     max_generation_tokens: int = Field(
         default=1024,
         validation_alias=AliasChoices("MAX_GENERATION_TOKENS"),
     )
 
     # Security -----------------------------------------------------------
+        codex/clean-app.py-and-routes.py-implementations
+
         codex/refactor-rerank.py-to-remove-placeholders
     secret_key: str = Field(default="change-me", validation_alias=AliasChoices("SECRET_KEY"))
     jwt_algorithm: str = Field(default="HS256", validation_alias=AliasChoices("JWT_ALGORITHM"))
 
         codex/clean-up-config.py-and-consolidate-fields
 
+        main
         main
         main
         main
@@ -371,6 +413,12 @@ class Settings(BaseSettings):
         "embed_batch_size",
         "chat_memory_ttl_days",
         "chat_memory_max_tokens",
+        codex/clean-app.py-and-routes.py-implementations
+        "access_token_expire_minutes",
+        "max_context_tokens",
+        "max_generation_tokens",
+        "rate_burst",
+
         codex/clean-up-config.py-and-consolidate-fields
 
         codex/update-default-model-and-settings
@@ -388,11 +436,16 @@ class Settings(BaseSettings):
         "access_token_expire_minutes",
         "max_context_tokens",
         "max_generation_tokens",
+        main
         mode="before",
     )
         main
     @classmethod
+        codex/clean-app.py-and-routes.py-implementations
+    def _parse_int(cls, value: object) -> object:
+=======
     def _normalise_origins(cls, value: object) -> list[str] | object:
+        main
         if value in {None, "", Ellipsis}:
         codex/refactor-rerank.py-to-remove-placeholders
             return ["*"]
@@ -410,6 +463,11 @@ class Settings(BaseSettings):
 
             return value
         return int(value)
+
+        codex/clean-app.py-and-routes.py-implementations
+    @field_validator("chat_memory_enabled", "rerank_enabled", mode="before")
+    @classmethod
+    def _parse_bool(cls, value: object) -> bool:
 
         codex/clean-up-config.py-and-consolidate-fields
     @field_validator("rate_burst", mode="before")
@@ -445,8 +503,9 @@ class Settings(BaseSettings):
     def _empty_to_none(cls, value: object) -> int | None:
 =
     def _normalise_bool(cls, value: object) -> bool:
+        main
         if isinstance(value, str):
-            return value.lower() in {"1", "true", "yes", "on"}
+            return value.strip().lower() in {"1", "true", "yes", "on"}
         return bool(value)
 
     @field_validator("rerank_topk", mode="before")
@@ -471,9 +530,12 @@ class Settings(BaseSettings):
             raise ValueError("RERANK_TOPK must be at least 1")
         return value
 
+        codex/clean-app.py-and-routes.py-implementations
+
         codex/refactor-rerank.py-to-remove-placeholders
     @field_validator("chat_db_backend", "vector_backend", "llm_provider", mode="after")
 
+        main
     @field_validator("ollama_base_url", mode="after")
     @classmethod
     def _strip_trailing_slash(cls, value: str) -> str:
@@ -485,9 +547,9 @@ class Settings(BaseSettings):
         if value in {None, "", Ellipsis}:
             return ["*"]
         if isinstance(value, str):
-            items = [piece.strip() for piece in value.split(",") if piece.strip()]
+            items = [item.strip() for item in value.split(",") if item.strip()]
             return items or ["*"]
-        if isinstance(value, Iterable):
+        if isinstance(value, Sequence):
             items = [str(item).strip() for item in value if str(item).strip()]
             return items or ["*"]
         raise ValueError("CORS origins must be a string or iterable")
@@ -505,6 +567,11 @@ class Settings(BaseSettings):
             return Path(value).expanduser()
         return value
 
+        codex/clean-app.py-and-routes.py-implementations
+    @field_validator("data_dir", mode="after")
+    @classmethod
+    def _ensure_dir(cls, value: Path) -> Path:
+
     @field_validator("chat_db_path", "memory_db_path", mode="after")
     @classmethod
     def _resolve_optional_path(cls, value: Path | None) -> Path | None:
@@ -515,6 +582,7 @@ class Settings(BaseSettings):
     @field_validator("data_dir", mode="after")
     @classmethod
     def _ensure_directory(cls, value: Path) -> Path:
+        main
         return value.expanduser()
 
     @computed_field
@@ -549,7 +617,7 @@ class Settings(BaseSettings):
         return minimum, maximum
 
     def iter_secret_fields(self) -> Iterable[str]:
-        """Return names of settings that contain secrets."""
+        """Return names of settings that contain sensitive values."""
 
         return ("secret_key", "qdrant_api_key", "chat_db_dsn")
 

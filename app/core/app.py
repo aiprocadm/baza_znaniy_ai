@@ -13,6 +13,8 @@ from app.api.main import api_router
 from app.chat.summarizer import ConversationSummarizer
 from app.core.config import get_settings
 from app.core.services import init_chat_store, init_memory_store
+        codex/clean-app.py-and-routes.py-implementations
+
         codex/refactor-rerank.py-to-remove-placeholders
 from app.ingest import parse_and_chunk  # noqa: F401  # ensure package initialised
 
@@ -36,12 +38,17 @@ from app.ui import router as ui_router
         codex/refactor-rerank.py-to-remove-placeholders
 
         codex/update-app.py-and-ingestion-workflow
+        main
 from app.ingest import parse_and_chunk  # ensure package initialised for scripts
 from app.llm import LLMProvider, get_cached_provider
 from app.retriever import CrossEncoderReranker, get_reranker, get_vector_store
 from app.services.files import FileStore, IngestQueue
+        codex/clean-app.py-and-routes.py-implementations
+from app.ui import router as ui_router
+
         main
 
+        main
         main
 
         main
@@ -65,6 +72,8 @@ def _prepare_cors_origins(origins: Sequence[str] | None) -> list[str]:
             cleaned.append(value)
     return cleaned or ["*"]
 
+        codex/clean-app.py-and-routes.py-implementations
+
         codex/refactor-rerank.py-to-remove-placeholders
 
 from app.llm import LLMProvider, get_cached_provider
@@ -73,6 +82,7 @@ from app.retriever import CrossEncoderReranker, get_reranker, get_vector_store
 
 logger = logging.getLogger(__name__)
 
+        main
         main
 
 def _initialise_reranker(settings) -> CrossEncoderReranker | None:
@@ -107,6 +117,8 @@ def create_app(provider: LLMProvider | None = None) -> FastAPI:
     memory_store = init_memory_store(settings)
     llm_provider = provider or get_cached_provider(settings)
     vector_store = get_vector_store(settings)
+        codex/clean-app.py-and-routes.py-implementations
+
         codex/refactor-rerank.py-to-remove-placeholders
 
         codex/refactor-upload-and-ingest-apis-to-use-ingestservice
@@ -153,6 +165,7 @@ def create_app(provider: LLMProvider | None = None) -> FastAPI:
             logger.exception("Failed to initialise cross-encoder reranker")
             reranker = None
         main
+        main
 
     reranker = _initialise_reranker(settings)
     summarizer = ConversationSummarizer(chat_store, llm_provider.generate)
@@ -160,6 +173,8 @@ def create_app(provider: LLMProvider | None = None) -> FastAPI:
     file_store = FileStore()
     ingest_queue = IngestQueue()
     min_citations, max_citations = settings.citations_bounds
+
+        codex/clean-app.py-and-routes.py-implementations
 
         codex/refactor-rerank.py-to-remove-placeholders
 
@@ -171,12 +186,15 @@ def create_app(provider: LLMProvider | None = None) -> FastAPI:
         main
         main
         main
+        main
     application.state.settings = settings
     application.state.chat_store = chat_store
     application.state.llm_provider = llm_provider
     application.state.llm_client = llm_provider
     application.state.vector_store = vector_store
     application.state.memory_store = memory_store
+        codex/clean-app.py-and-routes.py-implementations
+
         codex/refactor-rerank.py-to-remove-placeholders
     application.state.file_store = file_store
     application.state.ingest_queue = ingest_queue
@@ -204,9 +222,14 @@ def create_app(provider: LLMProvider | None = None) -> FastAPI:
         codex/update-app.py-and-ingestion-workflow
     application.state.summarizer = summarizer
     application.state.reranker = reranker
+        main
     application.state.file_store = file_store
     application.state.ingest_queue = ingest_queue
+    application.state.summarizer = summarizer
+    application.state.reranker = reranker
     application.state.fallback_index: list[dict[str, object]] = []
+        codex/clean-app.py-and-routes.py-implementations
+
 
         codex/refactor-upload-and-ingest-apis-to-use-ingestservice
     @application.on_event("startup")
@@ -227,15 +250,19 @@ def create_app(provider: LLMProvider | None = None) -> FastAPI:
 
 
         main
+        main
     application.state.chat_history_limit = settings.chat_history_limit
     application.state.retrieve_topk = settings.retrieve_topk
-    application.state.rerank_topk = settings.rerank_limit
+    application.state.rerank_topk = settings.rerank_topk
     application.state.min_citations = min_citations
     application.state.max_citations = max_citations
     application.state.rerank_enabled = settings.rerank_enabled
     application.state.chat_summary_trigger = settings.chat_summary_trigger
+        codex/clean-app.py-and-routes.py-implementations
+
     application.state.summarizer = summarizer
     application.state.reranker = reranker
+        main
     application.state.ingest_worker = getattr(application.state, "ingest_worker", None)
     application.state.ingest_worker_task = None
 
@@ -273,11 +300,15 @@ def create_app(provider: LLMProvider | None = None) -> FastAPI:
             finally:
                 application.state.ingest_worker_task = None
 
+        codex/clean-app.py-and-routes.py-implementations
+    application.include_router(ui_router)
+
         codex/refactor-rerank.py-to-remove-placeholders
 
     application.state.fallback_index: list[dict[str, object]] = []
         main
 
+        main
         main
         main
     application.include_router(api_router)
