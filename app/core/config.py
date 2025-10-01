@@ -6,7 +6,13 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Iterable, Sequence
 
-from pydantic import AliasChoices, BaseModel, Field
+from pydantic import AliasChoices, Field
+
+        codex/clean-up-retriever-module-exports
+try:  # pragma: no cover - compatibility shims for optional imports
+    from pydantic import BaseModel, computed_field, field_validator
+except ImportError:  # pragma: no cover - minimal fallbacks
+    from pydantic import BaseModel  # type: ignore[assignment]
 
         codex/clean-app.py-and-routes.py-implementations
 try:  # pragma: no cover - support optional pydantic features
@@ -36,9 +42,16 @@ except ImportError:  # pragma: no cover - fallback for test stubs
         def decorator(func):
             return func
 
-        if args and callable(args[0]):
-            return decorator(args[0])
         return decorator
+
+        codex/clean-up-retriever-module-exports
+        codex/clean-up-retriever-module-exports
+try:  # pragma: no cover - optional dependency
+    from pydantic_settings import BaseSettings, SettingsConfigDict
+except ImportError:  # pragma: no cover - lightweight fallback for tests
+    class SettingsConfigDict(dict):
+        def __init__(self, **kwargs: object) -> None:
+            super().__init__(**kwargs)
 
         codex/clean-app.py-and-routes.py-implementations
 try:  # pragma: no cover - pydantic-settings is optional in tests
@@ -50,6 +63,7 @@ except ImportError:  # pragma: no cover - lightweight fallback
             super().__init__()
             for key, value in kwargs.items():
                 setattr(self, key, value)
+        main
 
         codex/refactor-rerank.py-to-remove-placeholders
 try:  # pragma: no cover - prefer the real pydantic-settings integration
@@ -70,6 +84,8 @@ except ImportError:  # pragma: no cover - lightweight shim for tests
     class BaseSettings(BaseModel):  # type: ignore[misc]
         model_config = SettingsConfigDict()
 
+        codex/clean-up-retriever-module-exports
+
         def __init__(self, **data: object) -> None:
         codex/clean-app.py-and-routes.py-implementations
             super().__init__(**data)
@@ -85,6 +101,7 @@ except ImportError:  # pragma: no cover - lightweight shim for tests
             super().__init__(**values)
         main
 
+        main
 
 class Settings(BaseSettings):
     """Configuration loaded from environment variables and ``.env`` files."""
@@ -116,7 +133,11 @@ class Settings(BaseSettings):
         default=Path("./var/data"),
         validation_alias=AliasChoices("DATA_DIR", "FILES_ROOT"),
     )
+        codex/clean-up-retriever-module-exports
+        codex/clean-up-retriever-module-exports
+
         codex/clean-app.py-and-routes.py-implementations
+        main
 
         codex/refactor-rerank.py-to-remove-placeholders
     files_subdir: str = Field(default="files", validation_alias=AliasChoices("FILES_SUBDIR"))
@@ -145,10 +166,19 @@ class Settings(BaseSettings):
             "ALLOWED_ORIGINS",
         ),
     )
+        codex/clean-up-retriever-module-exports
+        codex/clean-up-retriever-module-exports
+    files_subdir: str = Field(default="files", validation_alias=AliasChoices("FILES_SUBDIR"))
+
+    # Chat storage -------------------------------------------------------
+    chat_db_backend: str = Field(default="sqlite", validation_alias=AliasChoices("CHAT_DB_BACKEND"))
+    chat_db_path: Path | None = Field(default=None, validation_alias=AliasChoices("CHAT_DB_PATH"))
+
         codex/clean-app.py-and-routes.py-implementations
     files_subdir: str = Field(default="files", validation_alias=AliasChoices("FILES_SUBDIR"))
 
     # Chat storage -------------------------------------------------------
+        main
 
 
     # Chat storage -------------------------------------------------------
@@ -169,32 +199,25 @@ class Settings(BaseSettings):
         default=None,
         validation_alias=AliasChoices("CHAT_DB_PATH"),
     )
+        main
     chat_db_dsn: str | None = Field(
         default=None,
         validation_alias=AliasChoices("CHAT_DB_DSN", "CHAT_DB_URL", "DATABASE_URL"),
     )
-    chat_db_schema: str | None = Field(
-        default=None,
-        validation_alias=AliasChoices("CHAT_DB_SCHEMA"),
-    )
-    chat_history_limit: int = Field(
-        default=12,
-        validation_alias=AliasChoices("CHAT_HISTORY_LIMIT"),
-    )
+    chat_db_schema: str | None = Field(default=None, validation_alias=AliasChoices("CHAT_DB_SCHEMA"))
+    chat_history_limit: int = Field(default=12, validation_alias=AliasChoices("CHAT_HISTORY_LIMIT"))
     chat_summary_trigger: int = Field(
         default=10,
         validation_alias=AliasChoices("CHAT_SUMMARY_TRIGGER", "MEMORY_SUMMARY_TRIGGER"),
     )
-    chat_min_citations: int = Field(
-        default=3,
-        validation_alias=AliasChoices("CHAT_MIN_CITATIONS"),
-    )
-    chat_max_citations: int = Field(
-        default=5,
-        validation_alias=AliasChoices("CHAT_MAX_CITATIONS"),
-    )
+    chat_min_citations: int = Field(default=3, validation_alias=AliasChoices("CHAT_MIN_CITATIONS"))
+    chat_max_citations: int = Field(default=5, validation_alias=AliasChoices("CHAT_MAX_CITATIONS"))
 
     # Retrieval settings -------------------------------------------------
+        codex/clean-up-retriever-module-exports
+    retrieve_topk: int = Field(default=10, validation_alias=AliasChoices("RETRIEVE_TOPK"))
+    rerank_enabled: bool = Field(default=False, validation_alias=AliasChoices("RERANK_ENABLED"))
+
     retrieve_topk: int = Field(
         default=10,
         validation_alias=AliasChoices("RETRIEVE_TOPK"),
@@ -213,6 +236,7 @@ class Settings(BaseSettings):
         default=10,
         validation_alias=AliasChoices("RERANK_TOP_K", "RERANK_TOPK"),
 
+        main
     rerank_topk: int | None = Field(
         default=None,
         codex/clean-up-code-and-run-tests
@@ -229,10 +253,7 @@ class Settings(BaseSettings):
         default=False,
         validation_alias=AliasChoices("CHAT_MEMORY_ENABLED", "MEMORY_ENABLED"),
     )
-    memory_db_path: Path | None = Field(
-        default=None,
-        validation_alias=AliasChoices("MEMORY_DB_PATH"),
-    )
+    memory_db_path: Path | None = Field(default=None, validation_alias=AliasChoices("MEMORY_DB_PATH"))
     chat_memory_ttl_days: int = Field(
         default=90,
         validation_alias=AliasChoices("CHAT_MEMORY_TTL_DAYS", "MEMORY_TTL_DAYS"),
@@ -243,6 +264,14 @@ class Settings(BaseSettings):
     )
 
     # Ingestion ----------------------------------------------------------
+        codex/clean-up-retriever-module-exports
+    rag_tokenizer_name: str = Field(default="cl100k_base", validation_alias=AliasChoices("RAG_TOKENIZER_NAME"))
+    rag_chunk: int = Field(default=900, validation_alias=AliasChoices("RAG_CHUNK"))
+    rag_overlap: int = Field(default=140, validation_alias=AliasChoices("RAG_OVERLAP"))
+
+    # Vector store -------------------------------------------------------
+    vector_backend: str = Field(default="qdrant", validation_alias=AliasChoices("VECTOR_BACKEND"))
+
     rag_tokenizer_name: str = Field(
         default="cl100k_base",
         validation_alias=AliasChoices("RAG_TOKENIZER_NAME"),
@@ -277,11 +306,16 @@ class Settings(BaseSettings):
         default="qdrant",
         validation_alias=AliasChoices("VECTOR_BACKEND"),
     )
+        main
     embed_batch_size: int = Field(
         default=32,
         validation_alias=AliasChoices("EMBED_BATCH_SIZE", "VECTOR_EMBED_BATCH_SIZE"),
     )
     qdrant_url: str = Field(default="http://qdrant:6333", validation_alias=AliasChoices("QDRANT_URL"))
+        codex/clean-up-retriever-module-exports
+    qdrant_api_key: str | None = Field(default=None, validation_alias=AliasChoices("QDRANT_API_KEY"))
+    qdrant_collection: str = Field(default="kb_chunks", validation_alias=AliasChoices("QDRANT_COLLECTION"))
+
     qdrant_api_key: str | None = Field(
         default=None,
         validation_alias=AliasChoices("QDRANT_API_KEY"),
@@ -290,6 +324,7 @@ class Settings(BaseSettings):
         default="kb_chunks",
         validation_alias=AliasChoices("QDRANT_COLLECTION"),
     )
+        main
     vector_embed_model: str = Field(
         default="intfloat/multilingual-e5-small",
         validation_alias=AliasChoices("VECTOR_EMBED_MODEL", "EMBED_MODEL"),
@@ -298,9 +333,16 @@ class Settings(BaseSettings):
         default=384,
         validation_alias=AliasChoices("VECTOR_EMBED_DIMENSION", "EMBED_DIMENSION"),
     )
+        codex/clean-up-retriever-module-exports
+        codex/clean-up-retriever-module-exports
+
+    # LLM provider -------------------------------------------------------
+    llm_provider: str = Field(default="ollama", validation_alias=AliasChoices("LLM_PROVIDER"))
+
         codex/clean-app.py-and-routes.py-implementations
 
     # LLM provider -------------------------------------------------------
+        main
 
         codex/refactor-rerank.py-to-remove-placeholders
 
@@ -325,6 +367,7 @@ class Settings(BaseSettings):
         default="ollama",
         validation_alias=AliasChoices("LLM_PROVIDER"),
     )
+        main
     llm_model_name: str = Field(
         default="llama3.1:8b",
         validation_alias=AliasChoices("LLM_MODEL_NAME", "GEN_MODEL", "OLLAMA_MODEL"),
@@ -333,6 +376,9 @@ class Settings(BaseSettings):
         default="http://ollama:11434",
         validation_alias=AliasChoices("OLLAMA_BASE_URL", "OLLAMA_HOST"),
     )
+        codex/clean-up-retriever-module-exports
+    max_context_tokens: int = Field(default=6000, validation_alias=AliasChoices("MAX_CONTEXT_TOKENS"))
+
     max_context_tokens: int = Field(
         default=6000,
         validation_alias=AliasChoices("MAX_CONTEXT_TOKENS"),
@@ -365,7 +411,13 @@ class Settings(BaseSettings):
     )
 
     # Security -----------------------------------------------------------
+        codex/clean-up-retriever-module-exports
+        codex/clean-up-retriever-module-exports
+    secret_key: str = Field(default="change-me", validation_alias=AliasChoices("SECRET_KEY"))
+    jwt_algorithm: str = Field(default="HS256", validation_alias=AliasChoices("JWT_ALGORITHM"))
+
         codex/clean-app.py-and-routes.py-implementations
+        main
 
         codex/refactor-rerank.py-to-remove-placeholders
     secret_key: str = Field(default="change-me", validation_alias=AliasChoices("SECRET_KEY"))
@@ -386,6 +438,7 @@ class Settings(BaseSettings):
         default="HS256",
         validation_alias=AliasChoices("JWT_ALGORITHM"),
     )
+        main
         main
     access_token_expire_minutes: int = Field(
         default=30,
@@ -413,7 +466,11 @@ class Settings(BaseSettings):
         "embed_batch_size",
         "chat_memory_ttl_days",
         "chat_memory_max_tokens",
+        codex/clean-up-retriever-module-exports
+        codex/clean-up-retriever-module-exports
+
         codex/clean-app.py-and-routes.py-implementations
+        main
         "access_token_expire_minutes",
         "max_context_tokens",
         "max_generation_tokens",
@@ -443,7 +500,7 @@ class Settings(BaseSettings):
     @classmethod
         codex/clean-app.py-and-routes.py-implementations
     def _parse_int(cls, value: object) -> object:
-=======
+
     def _normalise_origins(cls, value: object) -> list[str] | object:
         main
         if value in {None, "", Ellipsis}:
@@ -464,10 +521,14 @@ class Settings(BaseSettings):
             return value
         return int(value)
 
+        codex/clean-up-retriever-module-exports
+        codex/clean-up-retriever-module-exports
+
         codex/clean-app.py-and-routes.py-implementations
     @field_validator("chat_memory_enabled", "rerank_enabled", mode="before")
     @classmethod
     def _parse_bool(cls, value: object) -> bool:
+        main
 
         codex/clean-up-config.py-and-consolidate-fields
     @field_validator("rate_burst", mode="before")
@@ -508,6 +569,7 @@ class Settings(BaseSettings):
             return value.strip().lower() in {"1", "true", "yes", "on"}
         return bool(value)
 
+        main
     @field_validator("rerank_topk", mode="before")
     @classmethod
         codex/expand-env.example-and-update-configuration
@@ -567,7 +629,11 @@ class Settings(BaseSettings):
             return Path(value).expanduser()
         return value
 
+        codex/clean-up-retriever-module-exports
+        codex/clean-up-retriever-module-exports
+
         codex/clean-app.py-and-routes.py-implementations
+        main
     @field_validator("data_dir", mode="after")
     @classmethod
     def _ensure_dir(cls, value: Path) -> Path:
