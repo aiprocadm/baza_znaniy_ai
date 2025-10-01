@@ -19,6 +19,7 @@ from app.core.deps import (
 from app.models.user import UserRecord
 from app.models import UploadResponse
 from app.ingest.service import IngestService
+from app.api.upload_utils import create_upload_file
 
 router = APIRouter(tags=["upload"])
 
@@ -65,14 +66,18 @@ async def upload_file(
         if isinstance(item, UploadFile):
             return item
         if isinstance(item, dict):  # pragma: no cover - compatibility for test stubs
-            return UploadFile(filename=item.get("filename"), content=item.get("content", b""))
+            filename = item.get("filename")
+            content = item.get("content", b"")
+            content_type = item.get("content_type")
+            return create_upload_file(filename, content, content_type)
         if isinstance(item, (list, tuple)):
             filename = item[0] if item else "uploaded"
             content = item[1] if len(item) > 1 else b""
-            return UploadFile(filename=filename, content=content)
+            content_type = item[2] if len(item) > 2 else None
+            return create_upload_file(filename, content, content_type)
         if isinstance(item, str):
-            return UploadFile(filename=item, content=b"")
-        return UploadFile(filename="uploaded", content=b"")
+            return create_upload_file(item, b"")
+        return create_upload_file("uploaded", b"")
 
     coerced = [_coerce(item) for item in uploads]
     upload = next(
