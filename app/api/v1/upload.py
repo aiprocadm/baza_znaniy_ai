@@ -6,7 +6,6 @@ import io
 import mimetypes
 import secrets
 from pathlib import Path
-from tempfile import SpooledTemporaryFile
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
@@ -63,6 +62,21 @@ async def upload_file(
     if not uploads:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="UPLOAD_EMPTY")
 
+
+    coerced = [_coerce_upload_argument(item) for item in uploads]
+    upload = next(
+        (
+            item
+            for item in coerced
+            if _normalise_extension((item.filename or "")) in limits.allowed_extensions
+        ),
+        coerced[0],
+    )
+    extension = _normalise_extension(upload.filename or "")
+    if extension not in limits.allowed_extensions:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="UPLOAD_INVALID_EXT")
+
+
     def _as_bytes(value: object) -> bytes:
         if isinstance(value, bytes):
             return value
@@ -82,21 +96,28 @@ async def upload_file(
         stream.seek(0)
         return stream
 
+
     def _coerce(item: object) -> UploadFile:
         if isinstance(item, UploadFile):
             return item
 
         filename: Optional[str] = None
-        file_obj = None
+        content: object = b""
         content_type: Optional[str] = None
+
 
         if isinstance(item, dict):  # pragma: no cover - compatibility for test stubs
             filename = (item.get("filename") or "uploaded").strip() or "uploaded"
+
+        if isinstance(item, dict):  # pragma: no cover - compatibility for legacy clients
+            filename = item.get("filename")
+
             content_type = item.get("content_type")
-            file_obj = item.get("file")
-            if file_obj is None:
-                file_obj = _spooled_file(item.get("content", b""))
+            content = item.get("file")
+            if content is None:
+                content = item.get("content", b"")
         elif isinstance(item, (list, tuple)):
+
             filename = str(item[0]).strip() if item else "uploaded"
             filename = filename or "uploaded"
             if len(item) > 1:
@@ -117,14 +138,24 @@ async def upload_file(
         elif isinstance(item, str):
             filename = item.strip() or "uploaded"
             file_obj = _spooled_file(b"")
+
+            filename = str(item[0]) if item else "uploaded"
+            content = item[1] if len(item) > 1 else b""
+            third = item[2] if len(item) > 2 else None
+            content_type = third if isinstance(third, str) else None
+        elif isinstance(item, str):
+            filename = item
+            content = b""
+
         else:
             filename = "uploaded"
-            file_obj = _spooled_file(b"")
+            content = b""
 
-        if file_obj is None:
-            file_obj = _spooled_file(b"")
+
+        return create_upload_file(filename, content, content_type)
 
         return UploadFile(filename=filename, file=file_obj, content_type=content_type)
+
     coerced = [_coerce(item) for item in uploads]
 
     selected_extension = ""

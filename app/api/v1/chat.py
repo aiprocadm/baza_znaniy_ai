@@ -46,7 +46,7 @@ def _format_answer(answer: str, citations: Iterable[Citation]) -> str:
 @router.post("/chat", response_model=ChatResponse)
 def chat(
     payload: ChatRequest,
-    request: Request | None = None,
+    request: Request = None,
     user: UserRecord = Depends(get_current_active_user),
     tenant: str = Depends(ensure_tenant_access),
 ) -> ChatResponse:
