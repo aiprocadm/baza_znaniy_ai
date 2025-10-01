@@ -69,7 +69,6 @@ def chat(
 
     min_citations = getattr(app_state, "min_citations", 3)
     max_citations = getattr(app_state, "max_citations", max(min_citations, 5))
-        codex/update-app.py-and-ingestion-workflow
     rerank_enabled = getattr(app_state, "rerank_enabled", False)
     reranker = getattr(app_state, "reranker", None)
 
@@ -79,7 +78,6 @@ def chat(
     max_generation_tokens = (
         getattr(settings, "max_generation_tokens", None) if settings else None
     )
-        main
 
     start = time.perf_counter()
 
