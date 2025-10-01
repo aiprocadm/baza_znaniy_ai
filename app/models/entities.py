@@ -67,6 +67,7 @@ class JobRecord(SQLModel, table=True):
 
     id: Optional[int] = Field(default=None, primary_key=True)
     tenant_id: str = Field(foreign_key="tenants.tenant_id", index=True)
+    tenant_slug: Optional[str] = Field(default=None, index=True)
     job_type: str = Field(default="generic", index=True)
     status: str = Field(default=JobStatus.QUEUED, index=True)
     priority: int = Field(default=0)

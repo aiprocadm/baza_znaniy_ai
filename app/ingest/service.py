@@ -169,6 +169,7 @@ class IngestService:
 
         with Session(self.engine) as session:
             record = JobRecord(
+                tenant_id=job.tenant_id,
                 tenant_slug=job.tenant_id,
                 job_type="ingest",
                 status=JobStatus.QUEUED,
@@ -191,10 +192,6 @@ class IngestService:
             self._spawn_job_thread(job)
         else:
             await self.queue.put(job)
-        codex/clean-up-models-and-validate-tables
-
-
-        main
         worker = getattr(self, "worker", None)
         if worker is not None:
             worker.ensure_started()
@@ -217,21 +214,15 @@ class IngestService:
         with Session(self.engine) as session:
             document = session.exec(
                 select(DocumentRecord).where(
-        codex/clean-up-models-and-validate-tables
                     DocumentRecord.tenant_id == tenant_id,
-
                     DocumentRecord.tenant_slug == tenant_id,
-        main
                     DocumentRecord.sha256 == sha,
                 )
             ).first()
             if document is None:
                 document = DocumentRecord(
-        codex/clean-up-models-and-validate-tables
                     tenant_id=tenant_id,
-
                     tenant_slug=tenant_id,
-        main
                     sha256=sha,
                     mime_type=detected_mime,
                     status=DocumentStatus.QUEUED,

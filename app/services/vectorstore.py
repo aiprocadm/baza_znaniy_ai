@@ -7,13 +7,22 @@ import time
 from typing import Iterable, List
 
 from app.core.config import get_settings
-from app.retriever import get_vector_store
+from app.retriever.vector_store import get_vector_store
 from app.observability.metrics import record_index_operation, record_search_operation
 
 LOGGER = logging.getLogger(__name__)
 
 _FALLBACK_INDEX: List[dict[str, object]] = []
-_VECTOR_STORE = get_vector_store(get_settings())
+_VECTOR_STORE: object | None = None
+
+
+def _resolve_vector_store():
+    """Lazily instantiate and cache the primary vector store."""
+
+    global _VECTOR_STORE
+    if _VECTOR_STORE is None:
+        _VECTOR_STORE = get_vector_store(get_settings())
+    return _VECTOR_STORE
 
 
 def index_chunks(chunks: Iterable[dict[str, object]]) -> int:
@@ -26,8 +35,21 @@ def index_chunks(chunks: Iterable[dict[str, object]]) -> int:
     start = time.perf_counter()
 
     try:
-        _VECTOR_STORE.ensure_ready()
-        _VECTOR_STORE.upsert(items)
+        store = _resolve_vector_store()
+    except Exception:  # pragma: no cover - backend unavailable or optional deps missing
+        duration = time.perf_counter() - start
+        record_index_operation("error", "vector", len(items), duration)
+        LOGGER.exception("Falling back to in-memory index")
+        fallback_start = time.perf_counter()
+        _FALLBACK_INDEX.extend(items)
+        record_index_operation(
+            "success", "fallback", len(items), time.perf_counter() - fallback_start
+        )
+        return len(items)
+
+    try:
+        store.ensure_ready()
+        store.upsert(items)
     except Exception:  # pragma: no cover - gracefully degrade when Qdrant is unavailable
         duration = time.perf_counter() - start
         record_index_operation("error", "vector", len(items), duration)
@@ -68,8 +90,9 @@ def search(query: str, top_k: int = 10) -> List[dict[str, object]]:
     start = time.perf_counter()
 
     try:
-        _VECTOR_STORE.ensure_ready()
-        hits = _VECTOR_STORE.search(query, top_k=top_k)
+        store = _resolve_vector_store()
+        store.ensure_ready()
+        hits = store.search(query, top_k=top_k)
     except Exception:  # pragma: no cover - fallback path used in tests
         duration = time.perf_counter() - start
         record_search_operation("vector", "error", duration, 0)
