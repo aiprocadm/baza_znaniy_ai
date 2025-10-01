@@ -1,6 +1,45 @@
-"""Lightweight Prometheus client stub used for unit testing."""
+"""Minimal stub of :mod:`prometheus_client` for tests."""
 
 from __future__ import annotations
+
+from typing import Any
+
+
+CONTENT_TYPE_LATEST = "text/plain; version=0.0.4"
+
+
+def generate_latest() -> bytes:
+    return b""
+
+
+class _Metric:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        self._args = args
+        self._kwargs = kwargs
+
+    def labels(self, *args: Any, **kwargs: Any) -> "_Metric":  # pragma: no cover - stub
+        return self
+
+    def inc(self, amount: float = 1.0) -> None:  # pragma: no cover - stub
+        return None
+
+    def observe(self, value: float) -> None:  # pragma: no cover - stub
+        return None
+
+
+class Counter(_Metric):
+    """Test double for :class:`prometheus_client.Counter`."""
+
+
+class Histogram(_Metric):
+    """Test double for :class:`prometheus_client.Histogram`."""
+
+
+"""Lightweight Prometheus client stub used for unit testing."""
+
+
+__all__ = ["Counter", "Histogram", "CONTENT_TYPE_LATEST", "generate_latest"]
+
 
 from collections import defaultdict
 from typing import Iterable
@@ -152,4 +191,5 @@ class _HistogramChild(_MetricChild):
         # Histograms expose both ``_count`` and ``_sum`` samples.  The base sample tracks
         # the observation count to keep the registry data consistent.
         self._metric._samples[self._label_values] = self._metric._counts[self._label_values]
+
 

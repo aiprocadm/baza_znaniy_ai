@@ -162,6 +162,44 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("INGEST_BACKOFF_SECONDS", "INGEST_BACKOFF_BASE"),
     )
 
+
+    # OCR configuration --------------------------------------------------
+    ocr_tesseract_cmd: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("OCR_TESSERACT_CMD", "TESSERACT_CMD"),
+    )
+    ocr_dpi: int = Field(default=300, validation_alias=AliasChoices("OCR_DPI"))
+    ocr_page_limit: int | None = Field(
+        default=None,
+        validation_alias=AliasChoices("OCR_PAGE_LIMIT"),
+    )
+    ocr_timeout_seconds: float | None = Field(
+        default=None,
+        validation_alias=AliasChoices("OCR_TIMEOUT_SECONDS"),
+    )
+
+    @field_validator("ocr_dpi", mode="before")
+    @classmethod
+    def _validate_ocr_dpi(cls, value: object) -> int:
+        candidate = int(value)
+        return 72 if candidate < 72 else candidate
+
+    @field_validator("ocr_page_limit", mode="before")
+    @classmethod
+    def _validate_ocr_page_limit(cls, value: object | None) -> int | None:
+        if value in (None, "", 0, "0"):
+            return None
+        candidate = int(value)
+        return candidate if candidate > 0 else None
+
+    @field_validator("ocr_timeout_seconds", mode="before")
+    @classmethod
+    def _validate_ocr_timeout(cls, value: object | None) -> float | None:
+        if value in (None, "", 0, 0.0, "0", "0.0"):
+            return None
+        candidate = float(value)
+        return candidate if candidate > 0 else None
+
     # HTML conversion --------------------------------------------------
     html2text_bodywidth: int = Field(
         default=0,
@@ -203,6 +241,7 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("HTML2TEXT_UNICODE_SNOB"),
         description="Prefer unicode characters for typographical symbols when converting HTML.",
     )
+
 
     # Vector store -------------------------------------------------------
     vector_backend: str = Field(default="qdrant", validation_alias=AliasChoices("VECTOR_BACKEND"))
