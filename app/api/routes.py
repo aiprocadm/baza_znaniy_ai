@@ -5,13 +5,9 @@ from __future__ import annotations
 import logging
 import sqlite3
 import time
-        codex/add-dependencies-to-requirements.txt
-from typing import Any, Iterable, Mapping
-
 from contextlib import closing
 from http import HTTPStatus
-from typing import Any, Iterable
-        main
+from typing import Any, Iterable, Mapping
 
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile, status
 from fastapi.responses import JSONResponse

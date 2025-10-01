@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any, Mapping, Protocol, runtime_checkable
 
+import httpx
 from app.core.config import Settings, get_settings
 
 from .llama_cpp_provider import LlamaCppProvider
@@ -17,20 +19,13 @@ class LLMProvider(Protocol):
 
     def ensure_model(self) -> None:
         """Ensure the underlying model (if any) is ready for use."""
-
-        codex/add-dependencies-to-requirements.txt
-    def generate(self, prompt: str, *, context: Mapping[str, Any] | None = None) -> str:
-        """Generate a completion for *prompt*."""
-
-
-
     def ensure_ready(self) -> None:
         """Perform provider specific readiness checks."""
 
     def ensure_adapter(self) -> None:
         """Ensure optional adapters (such as LoRA) are available."""
 
-    def generate(self, prompt: str, *, context: dict[str, Any] | None = None) -> str:
+    def generate(self, prompt: str, *, context: Mapping[str, Any] | None = None) -> str:
         """Generate a completion for *prompt*."""
 
 
@@ -55,11 +50,11 @@ class OllamaProvider:
 
     @property
     def max_context_tokens(self) -> int:
-        return self.settings.max_context_tokens
+        return getattr(self.settings, "llm_ctx", 0)
 
     @property
     def max_generation_tokens(self) -> int:
-        return self.settings.max_generation_tokens
+        return getattr(self.settings, "llm_max_tokens", 0)
 
     @property
     def adapter_name(self) -> str | None:
@@ -88,7 +83,7 @@ class OllamaProvider:
         except Exception:  # pragma: no cover - service may be offline
             return
 
-    def generate(self, prompt: str, *, context: dict[str, Any] | None = None) -> str:
+    def generate(self, prompt: str, *, context: Mapping[str, Any] | None = None) -> str:
         payload: dict[str, Any] = {
             "model": self.model_name,
             "prompt": prompt,
@@ -151,9 +146,6 @@ class OllamaProvider:
                 f"Не удалось проверить адаптер {adapter!r}: {exc}"
             ) from exc
         self._adapter_verified = True
-
-
-        main
 class StubProvider:
     """Deterministic provider used in tests and offline environments."""
 

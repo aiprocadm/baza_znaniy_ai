@@ -78,6 +78,15 @@ def _load_tiktoken(name: str) -> Optional[_Tokenizer]:
 
 @lru_cache(maxsize=1)
 def _default_tokenizer() -> _Tokenizer:
+    use_tiktoken = os.getenv("RAG_USE_TIKTOKEN", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+    if not use_tiktoken:
+        return _CharTokenizer()
+
     name = os.getenv("RAG_TOKENIZER_NAME", "cl100k_base")
     tokenizer = _load_tiktoken(name)
     if tokenizer is None and name != "text-embedding-3-small":
