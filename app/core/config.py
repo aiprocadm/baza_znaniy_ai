@@ -182,6 +182,10 @@ class Settings(BaseSettings):
         default="llama3.1:8b",
         validation_alias=AliasChoices("LLM_MODEL_NAME", "GEN_MODEL", "OLLAMA_MODEL"),
     )
+    llm_lora_adapter: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("LLM_LORA_ADAPTER", "LLM_ADAPTER", "OLLAMA_ADAPTER"),
+    )
     ollama_base_url: str = Field(
         default="http://ollama:11434",
         validation_alias=AliasChoices("OLLAMA_BASE_URL", "OLLAMA_HOST"),
