@@ -1,5 +1,5 @@
 import sys
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass, is_dataclass
 from pathlib import Path
 from tempfile import SpooledTemporaryFile
 from types import ModuleType, SimpleNamespace
@@ -8,6 +8,80 @@ import pytest
 import asyncio
 import importlib.util
 import pydantic
+import sysconfig
+
+
+if "fastapi" not in sys.modules:
+    fastapi_root = Path(sysconfig.get_paths()["purelib"]) / "fastapi" / "__init__.py"
+    if fastapi_root.exists():  # pragma: no cover - guard for optional dependency
+        spec = importlib.util.spec_from_file_location(
+            "fastapi",
+            fastapi_root,
+            submodule_search_locations=[str(fastapi_root.parent)],
+        )
+        assert spec and spec.loader
+        module = importlib.util.module_from_spec(spec)
+        sys.modules["fastapi"] = module
+        spec.loader.exec_module(module)
+
+from fastapi import FastAPI
+
+
+def _coerce_form_entry(entry: object):
+    from fastapi import UploadFile as FastAPIUploadFile  # type: ignore
+
+    if isinstance(entry, FastAPIUploadFile):
+        return entry
+    if isinstance(entry, (list, tuple)):
+        filename = entry[0] if entry else "uploaded"
+        content = entry[1] if len(entry) > 1 else b""
+        content_type = entry[2] if len(entry) > 2 else None
+        return upload_utils.create_upload_file(filename, content, content_type)
+    if isinstance(entry, dict):
+        return upload_utils.create_upload_file(
+            entry.get("filename"),
+            entry.get("content", b""),
+            entry.get("content_type"),
+        )
+    if isinstance(entry, str):
+        return upload_utils.create_upload_file(entry, b"")
+    return upload_utils.create_upload_file("uploaded", b"")
+
+
+class _StubResponse:
+    def __init__(self, status_code: int, payload: object) -> None:
+        self.status_code = status_code
+        self._payload = payload
+
+    def json(self) -> object:
+        return self._payload
+
+
+def _invoke_post(app: FastAPI, path: str, *, files: list[tuple[str, object]]) -> _StubResponse:
+    fastapi_module = sys.modules["fastapi"]
+    route, params = app._find_route("POST", path)  # type: ignore[attr-defined]
+    assert route is not None and params is not None, "route must exist"
+
+    grouped: dict[str, list[object]] = {}
+    for key, value in files:
+        grouped.setdefault(key, []).append(value)
+
+    body: dict[str, object] = {}
+    for key, values in grouped.items():
+        uploads = [_coerce_form_entry(item) for item in values]
+        body[key] = uploads
+
+    kwargs = fastapi_module._build_call_arguments(route.handler, body, params, app)  # type: ignore[attr-defined]
+    limits_override = getattr(app, "dependency_overrides", {}).get(getattr(upload_module, "get_upload_limits", None))
+    if isinstance(kwargs.get("limits"), dict) and callable(limits_override):
+        kwargs["limits"] = limits_override()
+    result = route.handler(**kwargs)
+    if asyncio.iscoroutine(result):
+        result = asyncio.run(result)
+    content = fastapi_module._serialise(result)  # type: ignore[attr-defined]
+    if is_dataclass(content):
+        content = asdict(content)
+    return _StubResponse(route.status_code, content)
 
 
 class _PrometheusMetric:
@@ -104,6 +178,16 @@ if "app.core.deps" not in sys.modules:
 else:
     from app.core.deps import UploadLimits  # type: ignore
 
+
+
+upload_utils_path = Path(__file__).resolve().parents[1] / "app" / "api" / "upload_utils.py"
+upload_utils_spec = importlib.util.spec_from_file_location(
+    "app.api.upload_utils", upload_utils_path
+)
+assert upload_utils_spec and upload_utils_spec.loader
+upload_utils = importlib.util.module_from_spec(upload_utils_spec)
+sys.modules["app.api.upload_utils"] = upload_utils
+upload_utils_spec.loader.exec_module(upload_utils)
 
 models_module = sys.modules.setdefault("app.models", ModuleType("app.models"))
 if not hasattr(models_module, "UploadResponse"):
@@ -249,7 +333,7 @@ def test_upload_file_coerces_tuple_and_list_payloads(tmp_path: Path, monkeypatch
             if hasattr(self.file, "close") and not getattr(self.file, "closed", False):
                 self.file.close()
 
-    monkeypatch.setattr(upload_module, "UploadFile", TrackingUploadFile)
+    monkeypatch.setattr(upload_utils, "UploadFile", TrackingUploadFile)
 
     response = asyncio.run(
         upload_module.upload_file(
@@ -267,3 +351,40 @@ def test_upload_file_coerces_tuple_and_list_payloads(tmp_path: Path, monkeypatch
     assert service.calls[0]["mime_type"] == "text/plain"
     assert all(getattr(file, "closed", False) for file in created_files)
     assert closed_files and all(file in closed_files for file in created_files)
+
+
+def test_upload_endpoint_handles_multiple_formats(tmp_path: Path) -> None:
+    limits = UploadLimits(max_upload_mb=2, allowed_extensions={"pdf", "md", "txt"})
+    service = _StubIngestService()
+
+    app = FastAPI()
+    app.include_router(upload_module.router)
+
+    app.dependency_overrides[upload_module.get_upload_limits] = lambda: limits
+    app.dependency_overrides[upload_module.get_data_dir] = lambda: tmp_path
+    app.dependency_overrides[upload_module.get_current_active_user] = lambda: object()
+    app.dependency_overrides[upload_module.ensure_tenant_access] = lambda: "tenant-x"
+    app.dependency_overrides[upload_module.get_ingest_service] = lambda: service
+
+    pdf_payload = b"%PDF-1.7\n"
+    markdown_payload = b"# Heading\n"
+
+    files = [
+        ("file", ("ignored.exe", b"MZ" * 10, "application/octet-stream")),
+        ("files", ("manual.pdf", pdf_payload, "application/pdf")),
+        ("files", ("notes.md", markdown_payload, "text/markdown")),
+    ]
+
+    response = _invoke_post(app, "/upload", files=files)
+
+    assert response.status_code == 201
+    body = response.json()
+    assert body["filename"] == "manual.pdf"
+    assert body["tenant"] == "tenant-x"
+
+    assert service.calls, "register_file should be invoked"
+    recorded = service.calls[0]
+    assert recorded["mime_type"] == "application/pdf"
+    stored_path = Path(recorded["path"])
+    assert stored_path.exists()
+    assert stored_path.read_bytes() == pdf_payload

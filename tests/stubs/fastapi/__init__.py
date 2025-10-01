@@ -5,7 +5,6 @@ from __future__ import annotations
 import inspect
 from dataclasses import dataclass
 from datetime import date, datetime
-        codex/update-upload-handling-in-upload.py
 from tempfile import SpooledTemporaryFile
 from typing import (
     Annotated,
@@ -20,8 +19,6 @@ from typing import (
 )
 
 from io import BytesIO
-from typing import Annotated, Any, Callable, Dict, List, Optional, get_args, get_origin, get_type_hints
-        main
 from types import SimpleNamespace
 
 from pydantic import BaseModel
@@ -64,52 +61,37 @@ class UploadFile:
         filename: str | None = None,
         file: Any | None = None,
         *,
-        codex/update-upload-handling-in-upload.py
-        content: bytes | None = None,
-        content_type: str | None = None,
-    ) -> None:
-        if file is None:
-            stream = SpooledTemporaryFile(mode="w+b")
-            if content:
-                stream.write(content)
-                stream.seek(0)
-            file = stream
-            self._owns_file = True
-        else:
-            self._owns_file = False
-        self.filename = filename
-        self.file = file
-        self.content_type = content_type
-
+        content: bytes | str | None = None,
         content_type: str | None = None,
         headers: Any | None = None,
     ) -> None:
         self.filename = filename
         self.content_type = content_type
         self.headers = headers
+
         if file is None:
-            file = BytesIO()
-        self.file = file
+            stream = SpooledTemporaryFile(mode="w+b")
+            if content:
+                data = content.encode() if isinstance(content, str) else bytes(content)
+                stream.write(data)
+            stream.seek(0)
+            file = stream
+
+        self.file = file if file is not None else BytesIO()
         if hasattr(self.file, "seek"):
             self.file.seek(0)
-        main
 
     async def read(self) -> bytes:
         if hasattr(self.file, "seek"):
             self.file.seek(0)
         data = self.file.read()
         if isinstance(data, str):
-        codex/update-upload-handling-in-upload.py
-            return data.encode()
+            data = data.encode()
         return data or b""
 
     async def close(self) -> None:
         if hasattr(self.file, "close") and not getattr(self.file, "closed", False):
             self.file.close()
-
-            data = data.encode()
-        return data or b""
-        main
 
 
 def Depends(dependency: Callable[..., Any] | None = None) -> Callable[..., Any] | None:
