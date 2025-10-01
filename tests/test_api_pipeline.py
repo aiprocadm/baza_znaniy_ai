@@ -66,8 +66,15 @@ def api_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Test
     monkeypatch.setattr(vectorstore_module, "index_chunks", fake_index)
     monkeypatch.setattr(search_module, "search", lambda query, top_k=5: chunks[:top_k])
     monkeypatch.setattr(chat_module, "search", lambda query, top_k=10: chunks[:top_k])
-    monkeypatch.setattr(chat_module, "ensure_model", lambda: None)
-    monkeypatch.setattr(chat_module, "generate", lambda prompt: "Ответ")
+
+    class StubProvider:
+        def ensure_model(self) -> None:
+            return None
+
+        def generate(self, prompt: str, *, context: dict[str, object] | None = None) -> str:
+            return "Ответ"
+
+    app.state.llm_provider = StubProvider()
 
     client = TestClient(app)
     try:

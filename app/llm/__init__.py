@@ -6,15 +6,26 @@ from typing import Optional
 
 from app.core.config import Settings, get_settings
 
-from .providers import LLMProvider, OllamaProvider, StubProvider, get_llm_provider
+from .exceptions import (
+    LLMProviderError,
+    LoRAAdapterNotFoundError,
+    ModelNotFoundError,
+    ModelNotReadyError,
+)
+from .llama_cpp_provider import LlamaCppProvider
+from .providers import LLMProvider, StubProvider, get_llm_provider
 
 __all__ = [
     "LLMProvider",
-    "OllamaProvider",
+    "LlamaCppProvider",
     "StubProvider",
     "get_llm_provider",
     "get_cached_provider",
     "reset_provider_cache",
+    "LLMProviderError",
+    "ModelNotFoundError",
+    "ModelNotReadyError",
+    "LoRAAdapterNotFoundError",
 ]
 
 _cached_provider: Optional[LLMProvider] = None

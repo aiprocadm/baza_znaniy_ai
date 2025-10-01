@@ -3,14 +3,27 @@
 from __future__ import annotations
 
 import logging
+import sqlite3
 import time
+        codex/add-dependencies-to-requirements.txt
+from typing import Any, Iterable, Mapping
+
+from contextlib import closing
+from http import HTTPStatus
 from typing import Any, Iterable
+        main
 
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile, status
 from fastapi.responses import JSONResponse
 
-from app.chat.store import ConversationAccessError
+from app.chat.store import ChatStore, ConversationAccessError
 from app.ingest import parse_and_chunk
+from app.llm import (
+    LoRAAdapterNotFoundError,
+    ModelNotFoundError,
+    ModelNotReadyError,
+    get_cached_provider,
+)
 from app.memory.store import MemoryStore
 from app.models.chat import ChatIn
 from app.rag.context import build_context
@@ -18,6 +31,8 @@ from app.retriever.rerank import apply_rerank
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+_SERVICE_UNAVAILABLE = getattr(status, "HTTP_503_SERVICE_UNAVAILABLE", 503)
 
 
 @router.get("/health", response_class=JSONResponse)
@@ -28,6 +43,139 @@ def health() -> JSONResponse:
 @router.head("/health")
 def health_head() -> JSONResponse:
     return health()
+
+
+def _resolve_app_state(request: Request | None):
+    if request is not None:
+        return request.app.state
+    try:  # pragma: no cover - fallback for test stubs without Request injection
+        from app.main import app as main_app
+
+        return main_app.state
+    except Exception:  # pragma: no cover - defensive guard
+        raise RuntimeError("Не удалось определить состояние приложения")
+
+
+def _check_sqlite_ready(state) -> dict[str, Any]:
+    status_info: dict[str, Any] = {"status": "ok"}
+    chat_store = getattr(state, "chat_store", None)
+    settings = getattr(state, "settings", None)
+
+    if isinstance(chat_store, ChatStore):
+        connect = getattr(chat_store, "_connect", None)
+        if callable(connect):
+            try:
+                with closing(connect()) as connection:
+                    connection.execute("SELECT 1")
+            except sqlite3.Error as exc:
+                message = f"SQLite недоступна: {exc}"
+                status_info.update(status="error", detail=message)
+            except Exception as exc:  # pragma: no cover - defensive guard
+                message = f"Ошибка проверки SQLite: {exc}"
+                status_info.update(status="error", detail=message)
+        else:  # pragma: no cover - unexpected backend implementation
+            status_info.update(status="error", detail="Неподдерживаемый backend чата")
+    else:
+        backend = getattr(settings, "chat_db_backend", None)
+        if backend and backend.lower() != "sqlite":
+            status_info.update(status="skipped", detail=f"backend {backend}")
+        else:
+            status_info.update(status="error", detail="Хранилище чата не инициализировано")
+
+    return status_info
+
+
+def _check_vector_store_ready(state) -> dict[str, Any]:
+    status_info: dict[str, Any] = {"status": "ok"}
+    vector_store = getattr(state, "vector_store", None)
+
+    if vector_store is None:
+        status_info.update(status="error", detail="Векторное хранилище не инициализировано")
+        return status_info
+
+    ensure_ready = getattr(vector_store, "ensure_ready", None)
+    if not callable(ensure_ready):  # pragma: no cover - unexpected implementation
+        status_info.update(status="error", detail="Векторное хранилище не поддерживает проверку готовности")
+        return status_info
+
+    try:
+        ensure_ready()
+    except Exception as exc:
+        status_info.update(status="error", detail=f"Векторное хранилище недоступно: {exc}")
+
+    return status_info
+
+
+def _check_llm_ready(state) -> dict[str, Any]:
+    llm_provider = getattr(state, "llm_provider", None)
+    status_info: dict[str, Any] = {
+        "status": "ok" if llm_provider is not None else "error",
+        "provider": getattr(llm_provider, "name", "unknown"),
+    }
+
+    if llm_provider is None:
+        status_info["detail"] = "LLM провайдер не настроен"
+        return status_info
+
+    try:
+        ensure_ready = getattr(llm_provider, "ensure_ready", None)
+        if callable(ensure_ready):
+            ensure_ready()
+            status_info["model"] = "ok"
+        else:
+            llm_provider.ensure_model()
+            status_info["model"] = "ok"
+
+        ensure_adapter = getattr(llm_provider, "ensure_adapter", None)
+        adapter_name = getattr(llm_provider, "adapter_name", None)
+        if callable(ensure_adapter):
+            ensure_adapter()
+            if adapter_name:
+                status_info["adapter"] = "ok"
+        elif adapter_name:
+            status_info["adapter"] = "unknown"
+    except Exception as exc:
+        status_info.update(status="error", detail=f"LLM недоступна: {exc}")
+
+    return status_info
+
+
+@router.get("/ready", response_class=JSONResponse)
+def ready(request: Request | None = None) -> JSONResponse:
+    """Return an extended readiness status for orchestrators and health checks."""
+
+    state = _resolve_app_state(request)
+
+    sqlite_status = _check_sqlite_ready(state)
+    vector_status = _check_vector_store_ready(state)
+    llm_status = _check_llm_ready(state)
+
+    problems: list[str] = []
+    for component, result in (
+        ("sqlite", sqlite_status),
+        ("vector_store", vector_status),
+        ("llm", llm_status),
+    ):
+        if result.get("status") == "error":
+            detail = result.get("detail")
+            problems.append(f"{component}: {detail}" if detail else component)
+
+    payload = {
+        "status": "ok" if not problems else "error",
+        "ts": int(time.time()),
+        "details": {
+            "sqlite": sqlite_status,
+            "vector_store": vector_status,
+            "llm": llm_status,
+        },
+    }
+
+    if problems:
+        payload["message"] = "; ".join(problems)
+        return JSONResponse(payload, status_code=int(HTTPStatus.SERVICE_UNAVAILABLE))
+
+    payload["message"] = "Service ready"
+    return JSONResponse(payload, status_code=int(HTTPStatus.OK))
 
 
 def _normalise_extension(filename: str) -> str:
@@ -129,12 +277,31 @@ async def upload(
 def chat(request: Request, inp: ChatIn) -> dict[str, Any]:
     settings = request.app.state.settings
     chat_store = request.app.state.chat_store
-    llm_provider = request.app.state.llm_provider
+    llm_provider = getattr(request.app.state, "llm_provider", None)
     vector_store = getattr(request.app.state, "vector_store", None)
     summarizer = request.app.state.summarizer
     memory_store = getattr(request.app.state, "memory_store", None)
     fallback_index = getattr(request.app.state, "fallback_index", [])
     reranker = getattr(request.app.state, "reranker", None)
+
+    if llm_provider is None and settings is not None:
+        llm_provider = get_cached_provider(settings)
+        request.app.state.llm_provider = llm_provider
+
+    if llm_provider is None:
+        raise HTTPException(_SERVICE_UNAVAILABLE, detail="LLM_NOT_CONFIGURED")
+
+    try:
+        llm_provider.ensure_model()
+    except ModelNotFoundError as exc:
+        logger.error("LLM model file is missing", extra={"path": str(exc.path)})
+        raise HTTPException(_SERVICE_UNAVAILABLE, detail="LLM_MODEL_MISSING") from exc
+    except LoRAAdapterNotFoundError as exc:
+        logger.error("Configured LoRA adapter is missing", extra={"path": str(exc.path)})
+        raise HTTPException(_SERVICE_UNAVAILABLE, detail="LORA_ADAPTER_MISSING") from exc
+    except ModelNotReadyError as exc:
+        logger.warning("LLM provider is not ready", exc_info=exc)
+        raise HTTPException(_SERVICE_UNAVAILABLE, detail="LLM_NOT_READY") from exc
 
     if vector_store is not None:
         try:  # pragma: no cover - defensive ensure call
@@ -181,30 +348,43 @@ def chat(request: Request, inp: ChatIn) -> dict[str, Any]:
     )
     context = build_context(hits, token_limit=3000)
 
-    prompt_parts = [
-        "You are a helpful assistant providing concise answers based on the provided documentation context.",
-        "Always answer in Russian.",
+    prompt_sections: list[str] = [
+        "### Система",
+        "Ты — корпоративный ассистент, отвечающий на вопросы по базе знаний.",
+        "Отвечай кратко и по-русски, опираясь на предоставленный контекст.",
     ]
     if summary_text:
-        prompt_parts.extend(["Conversation summary:", summary_text])
+        prompt_sections.extend(["\n### Краткое содержание диалога", summary_text])
     if history_text:
-        prompt_parts.extend(["Recent chat history:", history_text])
+        prompt_sections.extend(["\n### Недавняя история", history_text])
     if memory_text:
-        prompt_parts.extend(["Long-term memory:", memory_text])
-    prompt_parts.extend([
-        "Retrieved context:",
-        context or "(нет подходящего контекста)",
-        "",
-        f"User message: {inp.message}",
-        "Сформулируй точный ответ, используя контекст, если он релевантен. Если данных недостаточно, сообщи об этом.",
-    ])
+        prompt_sections.extend(["\n### Долгосрочная память", memory_text])
+    prompt_sections.extend(
+        [
+            "\n### Контекст",
+            context or "(релевантные фрагменты не найдены)",
+            "\n### Вопрос пользователя",
+            inp.message,
+            "\n### Инструкция",
+            "Если контекст не содержит ответа, честно сообщи об этом. Укажи важные детали кратко.",
+        ]
+    )
+
+    prompt = "\n".join(filter(None, prompt_sections))
+
     min_citations, max_citations = settings.citations_bounds
     citations, has_minimum_citations = _select_citations(hits, min_citations, max_citations)
 
-    prompt = "\n".join(part for part in prompt_parts if part is not None)
+    generation_context: dict[str, object] = {
+        "temperature": getattr(settings, "llm_temperature", 0.7),
+        "top_p": getattr(settings, "llm_top_p", 0.95),
+        "top_k": getattr(settings, "llm_top_k", 40),
+        "max_tokens": getattr(settings, "llm_max_tokens", 1024),
+    }
+    if citations:
+        generation_context["citations"] = citations
 
-    provider_context = {"citations": citations} if citations else None
-    answer = llm_provider.generate(prompt, context=provider_context).strip()
+    answer = llm_provider.generate(prompt, context=generation_context).strip()
 
     chat_store.record_exchange(conversation_id, inp.message, answer)
     if chat_store.messages_since_summary(conversation_id) >= settings.chat_summary_trigger:
@@ -235,8 +415,8 @@ def chat(request: Request, inp: ChatIn) -> dict[str, Any]:
         "conversation_id": conversation_id,
         "citations_insufficient": not has_minimum_citations,
         "latency_ms": (time.perf_counter() - start) * 1000,
-        "max_context_tokens": settings.max_context_tokens or None,
-        "max_generation_tokens": settings.max_generation_tokens or None,
+        "max_context_tokens": getattr(settings, "llm_ctx", None),
+        "max_generation_tokens": getattr(settings, "llm_max_tokens", None),
     }
 
 
