@@ -4,9 +4,21 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+
 from tempfile import SpooledTemporaryFile
 
 from io import BytesIO
+
+
+import io
+
+ 
+from tempfile import SpooledTemporaryFile
+
+from io import BytesIO
+        main
+        main
+
 from typing import TYPE_CHECKING, Any, Iterable
 
 from . import HTTPException, UploadFile, _build_call_arguments, _serialise
@@ -27,6 +39,26 @@ class _SimpleResponse:
     @property
     def text(self) -> str:
         return str(self._content)
+
+
+def _ensure_bytes(data: Any) -> bytes:
+    if isinstance(data, bytes):
+        return data
+    if isinstance(data, bytearray):
+        return bytes(data)
+    if isinstance(data, str):
+        return data.encode()
+    read = getattr(data, "read", None)
+    if callable(read):
+        result = read()
+        if isinstance(result, bytes):
+            return result
+        if isinstance(result, str):
+            return result.encode()
+    try:
+        return bytes(data)
+    except Exception:
+        return b""
 
 
 class TestClient:
@@ -101,11 +133,21 @@ class TestClient:
                             content_type = entry[2] if len(entry) > 2 else None
                         else:
                             filename = str(entry)
+        codex/update-upload-file-handling-and-tests
+                            content = b""
+                        upload_list.append(
+                            UploadFile(filename=filename, file=io.BytesIO(_ensure_bytes(content)))
+                        )
+
                             file_obj = SpooledTemporaryFile(mode="w+b")
                             content_type = None
                         upload_list.append(UploadFile(filename=filename, file=file_obj, content_type=content_type))
 
                         upload_list.append(_build_upload_file(entry))
+
+        main
+        main
+
 
                 if upload_list:
                     payload["files"] = upload_list
@@ -142,6 +184,18 @@ class TestClient:
                 uploads: list[UploadFile] = []
 
                 if isinstance(value, list):
+
+                    uploads = [
+                        UploadFile(filename=item[0], file=io.BytesIO(_ensure_bytes(item[1])))
+                        for item in value
+                    ]
+                else:
+                    filename, content, *_ = value
+                    uploads = [
+                        UploadFile(filename=filename, file=io.BytesIO(_ensure_bytes(content)))
+                    ]
+
+
                     entries = value
                 else:
                     entries = [value]
@@ -177,6 +231,10 @@ class TestClient:
                     uploads = [_build_upload_file(item) for item in value]
                 else:
                     uploads = [_build_upload_file(value)]
+
+        main
+        main
+
                 kwargs[key] = uploads
         try:
             result = route.handler(**kwargs)

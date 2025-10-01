@@ -2,41 +2,61 @@
 
 from __future__ import annotations
 
+import asyncio
 import io
 
 import pytest
 from fastapi import HTTPException, UploadFile, status
 
 from app.api.routes import _coerce_upload_file
+from app.api.v1.upload import _coerce_upload_argument
 
 
-@pytest.mark.anyio
-async def test_coerce_upload_file_from_dict_returns_original_instance() -> None:
+def _read(upload: UploadFile) -> bytes:
+    return asyncio.run(upload.read())
+
+
+def test_coerce_upload_file_from_dict_returns_original_instance() -> None:
     original = UploadFile(filename="sample.txt", file=io.BytesIO(b"payload"))
     wrapped = {"files": original}
 
     result = _coerce_upload_file(wrapped)
 
     assert result is original
-    assert await result.read() == b"payload"
+    assert _read(result) == b"payload"
 
 
-@pytest.mark.anyio
-async def test_coerce_upload_file_from_nested_list() -> None:
+def test_coerce_upload_file_from_uploadfile_instance_is_passthrough() -> None:
+    original = UploadFile(filename="passthrough.txt", file=io.BytesIO(b"data"))
+
+    result = _coerce_upload_file(original)
+
+    assert result is original
+    assert _read(result) == b"data"
+
+
+def test_coerce_upload_file_from_nested_list() -> None:
     result = _coerce_upload_file([["nested.txt", b"data"]])
 
     assert isinstance(result, UploadFile)
     assert result.filename == "nested.txt"
-    assert await result.read() == b"data"
+    assert _read(result) == b"data"
 
 
-@pytest.mark.anyio
-async def test_coerce_upload_file_from_tuple_pair() -> None:
+def test_coerce_upload_file_from_tuple_pair() -> None:
     result = _coerce_upload_file((("tuple.bin", b"binary"),))
 
     assert isinstance(result, UploadFile)
     assert result.filename == "tuple.bin"
-    assert await result.read() == b"binary"
+    assert _read(result) == b"binary"
+
+
+def test_coerce_upload_file_from_wrapped_dict_pair() -> None:
+    result = _coerce_upload_file({"file": ("wrapped.txt", b"wrapped")})
+
+    assert isinstance(result, UploadFile)
+    assert result.filename == "wrapped.txt"
+    assert _read(result) == b"wrapped"
 
 
 def test_coerce_upload_file_with_empty_input_raises_http_exception() -> None:
@@ -45,3 +65,28 @@ def test_coerce_upload_file_with_empty_input_raises_http_exception() -> None:
 
     assert excinfo.value.status_code == status.HTTP_400_BAD_REQUEST
     assert excinfo.value.detail == "UPLOAD_INVALID_FILE"
+
+
+def test_upload_v1_coerce_preserves_uploadfile() -> None:
+    original = UploadFile(filename="keep.txt", file=io.BytesIO(b"payload"))
+
+    result = _coerce_upload_argument(original)
+
+    assert result is original
+    assert _read(result) == b"payload"
+
+
+def test_upload_v1_coerce_from_dict_builds_uploadfile() -> None:
+    result = _coerce_upload_argument({"filename": "dict.txt", "content": b"bytes"})
+
+    assert isinstance(result, UploadFile)
+    assert result.filename == "dict.txt"
+    assert _read(result) == b"bytes"
+
+
+def test_upload_v1_coerce_from_tuple_builds_uploadfile() -> None:
+    result = _coerce_upload_argument(("tuple.txt", b"tuple-bytes"))
+
+    assert isinstance(result, UploadFile)
+    assert result.filename == "tuple.txt"
+    assert _read(result) == b"tuple-bytes"
