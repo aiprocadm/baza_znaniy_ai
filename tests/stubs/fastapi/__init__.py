@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 import inspect
+import io
 from dataclasses import dataclass
 from datetime import date, datetime
-        codex/update-upload-handling-in-upload.py
+
+from typing import Annotated, Any, Callable, Dict, IO, List, Optional, get_args, get_origin, get_type_hints
+
+
 from tempfile import SpooledTemporaryFile
 from typing import (
     Annotated,
@@ -21,7 +25,10 @@ from typing import (
 
 from io import BytesIO
 from typing import Annotated, Any, Callable, Dict, List, Optional, get_args, get_origin, get_type_hints
+
         main
+        main
+
 from types import SimpleNamespace
 
 from pydantic import BaseModel
@@ -62,9 +69,24 @@ class UploadFile:
     def __init__(
         self,
         filename: str | None = None,
+        codex/update-upload-file-handling-and-tests
+        file: IO[bytes] | None = None,
+        content_type: str | None = None,
+    ) -> None:
+        self.filename = filename
+        self.content_type = content_type
+        self.file: IO[bytes] = file or io.BytesIO()
+
+    async def read(self, size: int = -1) -> bytes:
+        data = self.file.read(size)
+        if isinstance(data, str):
+            return data.encode()
+        if data is None:
+            return b""
+        return data
+
         file: Any | None = None,
         *,
-        codex/update-upload-handling-in-upload.py
         content: bytes | None = None,
         content_type: str | None = None,
     ) -> None:
@@ -92,14 +114,12 @@ class UploadFile:
         self.file = file
         if hasattr(self.file, "seek"):
             self.file.seek(0)
-        main
 
     async def read(self) -> bytes:
         if hasattr(self.file, "seek"):
             self.file.seek(0)
         data = self.file.read()
         if isinstance(data, str):
-        codex/update-upload-handling-in-upload.py
             return data.encode()
         return data or b""
 
@@ -109,7 +129,11 @@ class UploadFile:
 
             data = data.encode()
         return data or b""
+
+
         main
+        main
+
 
 
 def Depends(dependency: Callable[..., Any] | None = None) -> Callable[..., Any] | None:
