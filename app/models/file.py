@@ -8,6 +8,8 @@ from functools import lru_cache
 from typing import Optional
 
 from sqlalchemy import UniqueConstraint
+from sqlalchemy.engine import Engine, make_url
+from sqlalchemy.ext.asyncio import create_async_engine
 from sqlmodel import Field, SQLModel, Session, create_engine
 
 
@@ -28,9 +30,12 @@ class FileRecord(SQLModel, table=True):
     tenant_id: str = Field(index=True)
     sha256: str = Field(index=True)
     path: str
+    filename: str
+    size: int = Field(default=0, ge=0)
     status: str = Field(default=FileStatus.QUEUED, index=True)
     retries: int = Field(default=0)
     error: Optional[str] = Field(default=None)
+    chunks: Optional[int] = Field(default=None)
     created_at: datetime = Field(default_factory=datetime.utcnow, nullable=False)
     updated_at: datetime = Field(default_factory=datetime.utcnow, nullable=False)
 
@@ -75,8 +80,16 @@ def _connect_args(url: str) -> dict:
 
 
 @lru_cache(maxsize=1)
-def get_engine(url: Optional[str] = None):
-    db_url = url or os.getenv("DB_URL", "sqlite:///data/ingest.db")
+def get_engine(url: Optional[str] = None) -> Engine:
+    db_url = url or os.getenv("DB_URL", "sqlite+aiosqlite:///./var/data/kb.sqlite")
+    dialect = make_url(db_url)
+
+    if dialect.drivername.endswith("+aiosqlite"):
+        async_engine = create_async_engine(db_url, echo=False)
+        sync_engine = async_engine.sync_engine
+        SQLModel.metadata.create_all(sync_engine)
+        return sync_engine
+
     engine = create_engine(db_url, echo=False, connect_args=_connect_args(db_url))
     SQLModel.metadata.create_all(engine)
     return engine
