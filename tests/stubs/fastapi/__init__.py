@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import inspect
-import io
 from dataclasses import dataclass
 from datetime import date, datetime
+
+from tempfile import SpooledTemporaryFile
+
 
 
 from typing import Annotated, Any, Callable, Dict, IO, List, Optional, get_args, get_origin, get_type_hints
@@ -33,6 +35,7 @@ from typing import Annotated, Any, Callable, Dict, List, Optional, get_args, get
 
 
 from types import SimpleNamespace
+from typing import Annotated, Any, Callable, Dict, IO, List, Optional, get_args, get_origin, get_type_hints
 
 from pydantic import BaseModel
 
@@ -72,21 +75,22 @@ class UploadFile:
     def __init__(
         self,
         filename: str | None = None,
-        codex/update-upload-file-handling-and-tests
         file: IO[bytes] | None = None,
+        *,
+        content: bytes | str | None = None,
         content_type: str | None = None,
+        headers: Any | None = None,
     ) -> None:
         self.filename = filename
         self.content_type = content_type
-        self.file: IO[bytes] = file or io.BytesIO()
+        self.headers = headers
 
-    async def read(self, size: int = -1) -> bytes:
-        data = self.file.read(size)
-        if isinstance(data, str):
-            return data.encode()
-        if data is None:
-            return b""
-        return data
+        payload: bytes | None
+        if isinstance(content, str):
+            payload = content.encode()
+        else:
+            payload = content
+
 
         file: Any | None = None,
         *,
@@ -96,18 +100,24 @@ class UploadFile:
         content: bytes | None = None,
         content_type: str | None = None,
     ) -> None:
+
         if file is None:
-            stream = SpooledTemporaryFile(mode="w+b")
-            if content:
-                stream.write(content)
+            stream: IO[bytes] = SpooledTemporaryFile(mode="w+b")
+            if payload:
+                stream.write(payload)
                 stream.seek(0)
-            file = stream
+            self.file = stream
             self._owns_file = True
         else:
+            self.file = file
             self._owns_file = False
-        self.filename = filename
-        self.file = file
-        self.content_type = content_type
+            if payload and hasattr(self.file, "write"):
+                if hasattr(self.file, "seek"):
+                    self.file.seek(0)
+                self.file.write(payload)
+                if hasattr(self.file, "seek"):
+                    self.file.seek(0)
+
 
 
         content_type: str | None = None,
@@ -126,20 +136,26 @@ class UploadFile:
             file = stream
 
         self.file = file if file is not None else BytesIO()
+
         if hasattr(self.file, "seek"):
             self.file.seek(0)
 
-    async def read(self) -> bytes:
-        if hasattr(self.file, "seek"):
-            self.file.seek(0)
-        data = self.file.read()
+    async def read(self, size: int = -1) -> bytes:
+        data = self.file.read(size)
         if isinstance(data, str):
+
+            return data.encode()
+        if data is None:
+            return b""
+        return data
+
 
             data = data.encode()
 
             return data.encode()
 
         return data or b""
+
 
     async def close(self) -> None:
         if hasattr(self.file, "close") and not getattr(self.file, "closed", False):
@@ -152,6 +168,7 @@ class UploadFile:
 
         main
         main
+
 
 
 
@@ -395,7 +412,3 @@ __all__ = [
     "UploadFile",
     "status",
 ]
-
-from .testclient import TestClient  # noqa: E402  # isort:skip
-
-__all__.append("TestClient")
