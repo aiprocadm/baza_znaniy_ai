@@ -5,12 +5,12 @@ from __future__ import annotations
 import os
 from datetime import datetime
 from functools import lru_cache
-from typing import Optional
+from typing import Any, Optional
 
-from sqlalchemy import UniqueConstraint
+from sqlalchemy import Column, JSON, UniqueConstraint
 from sqlalchemy.engine import Engine, make_url
 from sqlalchemy.ext.asyncio import create_async_engine
-from sqlmodel import Field, SQLModel, Session, create_engine
+from sqlmodel import Field, Relationship, SQLModel, Session, create_engine
 
 
 class FileStatus(str):
@@ -19,6 +19,28 @@ class FileStatus(str):
     COMPLETED = "completed"
     FAILED = "failed"
 
+
+class DocumentStatus(str):
+    QUEUED = "queued"
+    PROCESSING = "processing"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
+class DocumentRecord(SQLModel, table=True):
+    __tablename__ = "documents"
+    __table_args__ = (
+        UniqueConstraint("sha256", name="uq_documents_sha"),
+    )
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    sha256: str = Field(index=True)
+    mime_type: str = Field(default="application/octet-stream")
+    status: str = Field(default=DocumentStatus.QUEUED, index=True)
+    error: Optional[str] = Field(default=None)
+    chunks: Optional[int] = Field(default=None)
+    created_at: datetime = Field(default_factory=datetime.utcnow, nullable=False)
+    updated_at: datetime = Field(default_factory=datetime.utcnow, nullable=False)
 
 class FileRecord(SQLModel, table=True):
     __tablename__ = "files"
@@ -29,6 +51,9 @@ class FileRecord(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     tenant_id: str = Field(index=True)
     sha256: str = Field(index=True)
+    document_id: Optional[int] = Field(
+        default=None, foreign_key="documents.id", index=True
+    )
     path: str
     filename: str
     size: int = Field(default=0, ge=0)
@@ -38,8 +63,6 @@ class FileRecord(SQLModel, table=True):
     chunks: Optional[int] = Field(default=None)
     created_at: datetime = Field(default_factory=datetime.utcnow, nullable=False)
     updated_at: datetime = Field(default_factory=datetime.utcnow, nullable=False)
-
-
 
 class PageRecord(SQLModel, table=True):
     __tablename__ = "pages"
@@ -52,6 +75,10 @@ class PageRecord(SQLModel, table=True):
     number: int = Field(index=True)
     sha256: str = Field(index=True)
     text: str
+    tokens: int = Field(default=0, ge=0)
+    meta: Optional[dict[str, Any]] = Field(
+        default=None, sa_column=Column(JSON, nullable=True)
+    )
     created_at: datetime = Field(default_factory=datetime.utcnow, nullable=False)
 
 
@@ -69,6 +96,10 @@ class ChunkRecord(SQLModel, table=True):
     sha256: str = Field(index=True)
     text: str
     batch: Optional[int] = Field(default=None, index=True)
+    tokens: int = Field(default=0, ge=0)
+    meta: Optional[dict[str, Any]] = Field(
+        default=None, sa_column=Column(JSON, nullable=True)
+    )
     created_at: datetime = Field(default_factory=datetime.utcnow, nullable=False)
 
 
@@ -83,6 +114,9 @@ def _connect_args(url: str) -> dict:
 def get_engine(url: Optional[str] = None) -> Engine:
     db_url = url or os.getenv("DB_URL", "sqlite+aiosqlite:///./var/data/kb.sqlite")
     dialect = make_url(db_url)
+
+    # Ensure additional SQLModel definitions are imported before metadata creation
+    __import__("app.models.entities")
 
     if dialect.drivername.endswith("+aiosqlite"):
         async_engine = create_async_engine(db_url, echo=False)
@@ -104,6 +138,8 @@ def get_session(url: Optional[str] = None) -> Session:
 
 __all__ = [
     "ChunkRecord",
+    "DocumentRecord",
+    "DocumentStatus",
     "FileRecord",
     "FileStatus",
     "PageRecord",

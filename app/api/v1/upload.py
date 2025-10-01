@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import secrets
+import mimetypes
 from pathlib import Path
 from typing import List, Optional
 
@@ -93,11 +94,17 @@ async def upload_file(
     target = tenant_dir / f"{file_id}.{extension}"
     target.write_bytes(payload)
 
+    mime_type = getattr(upload, "content_type", None)
+    if not mime_type:
+        guessed, _ = mimetypes.guess_type(upload.filename or "")
+        mime_type = guessed or "application/octet-stream"
+
     record, queued = await ingest_service.register_file(
         tenant,
         str(target),
         filename=upload.filename or target.name,
         size=len(payload),
+        mime_type=mime_type,
     )
 
     if not queued and record.path != str(target):

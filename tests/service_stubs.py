@@ -101,11 +101,16 @@ def install_service_stubs() -> None:
                 self.args = args
                 self.kwargs = kwargs
 
+        class PayloadSchemaType:
+            KEYWORD = "keyword"
+            INTEGER = "integer"
+
         models_module.Distance = Distance
         models_module.VectorParams = VectorParams
         models_module.HnswConfigDiff = HnswConfigDiff
         models_module.PointStruct = PointStruct
         models_module.SearchParams = SearchParams
+        models_module.PayloadSchemaType = PayloadSchemaType
 
         http_module = types.ModuleType("qdrant_client.http")
         http_module.models = models_module
@@ -130,13 +135,13 @@ def install_service_stubs() -> None:
                 import numpy as np
 
                 length = len(texts) if texts else 0
-                vectors = np.zeros((length, 1), dtype=np.float32)
+                vectors = np.zeros((length, 384), dtype=np.float32)
                 if convert_to_numpy:
                     return vectors
                 return vectors.tolist()
 
             def get_sentence_embedding_dimension(self) -> int:
-                return 1
+                return 384
 
         st_module.SentenceTransformer = DummySentenceTransformer
         

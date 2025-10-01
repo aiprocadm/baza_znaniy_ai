@@ -128,6 +128,9 @@ def test_full_pipeline(api_client: TestClient) -> None:
     first_file = files_payload["files"][0]
     status = first_file["status"] if isinstance(first_file, dict) else first_file.status
     assert status == "completed"
+    if isinstance(first_file, dict):
+        assert first_file.get("mime_type") == "text/plain"
+        assert first_file.get("document_id")
 
     search_response = api_client.get("/api/v1/search", params={"query": "knowledge"})
     assert search_response.status_code == 200
@@ -147,6 +150,12 @@ def test_full_pipeline(api_client: TestClient) -> None:
     assert chat_payload["citations"]
     assert chat_payload["citations_insufficient"] is True
     assert "Источники" in chat_payload["answer"]
+
+    jobs_response = api_client.get("/api/v1/admin/jobs")
+    assert jobs_response.status_code == 200
+    jobs_payload = jobs_response.json()
+    assert jobs_payload["jobs"]
+    assert any(job.get("status") == "completed" for job in jobs_payload["jobs"])
 
 
 def test_ingest_endpoint_returns_quickly(api_client: TestClient) -> None:

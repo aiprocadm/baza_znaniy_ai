@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
+from datetime import datetime
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlmodel import Session
 
 from app.core.deps import get_ingest_service, get_ingest_session, get_tenant
 from app.ingest.service import IngestService
 from app.models import IngestRequest, IngestResponse
-from app.models.file import FileRecord, FileStatus
+from app.models.file import DocumentRecord, DocumentStatus, FileRecord, FileStatus
 
 router = APIRouter(tags=["ingest"])
 
@@ -49,6 +51,17 @@ async def ingest_file(
         record.error = None
         record.chunks = None
         session.add(record)
+        document = (
+            session.get(DocumentRecord, record.document_id)
+            if record.document_id is not None
+            else None
+        )
+        if document:
+            document.status = DocumentStatus.QUEUED
+            document.error = None
+            document.chunks = None
+            document.updated_at = datetime.utcnow()
+            session.add(document)
         session.commit()
 
     await ingest_service.enqueue_job(record)

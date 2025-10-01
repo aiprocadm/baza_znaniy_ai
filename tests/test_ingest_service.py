@@ -7,7 +7,14 @@ from sqlmodel import Session, select
 
 from app.ingest.service import IngestService, IngestWorker
 from app.models import file as file_models
-from app.models.file import ChunkRecord, FileRecord, PageRecord
+from app.models.entities import JobRecord, JobStatus
+from app.models.file import (
+    ChunkRecord,
+    DocumentRecord,
+    DocumentStatus,
+    FileRecord,
+    PageRecord,
+)
 
 
 @pytest.fixture
@@ -35,6 +42,7 @@ def test_register_creates_file_and_prevents_duplicates(sqlite_db: str, sample_fi
             str(sample_file),
             filename=sample_file.name,
             size=sample_file.stat().st_size,
+            mime_type="text/plain",
         )
         assert queued is True
         assert record.status == file_models.FileStatus.QUEUED
@@ -44,6 +52,7 @@ def test_register_creates_file_and_prevents_duplicates(sqlite_db: str, sample_fi
             str(sample_file),
             filename=sample_file.name,
             size=sample_file.stat().st_size,
+            mime_type="text/plain",
         )
         assert again is False
         assert duplicate.id == record.id
@@ -52,6 +61,14 @@ def test_register_creates_file_and_prevents_duplicates(sqlite_db: str, sample_fi
             files = session.exec(select(FileRecord)).all()
             assert len(files) == 1
             assert files[0].status == file_models.FileStatus.QUEUED
+            documents = session.exec(select(DocumentRecord)).all()
+            assert len(documents) == 1
+            assert documents[0].status == DocumentStatus.QUEUED
+            assert documents[0].mime_type == "text/plain"
+            jobs = session.exec(select(JobRecord)).all()
+            assert len(jobs) == 1
+            assert jobs[0].status == JobStatus.QUEUED
+            assert jobs[0].attempt == 0
 
     asyncio.run(scenario())
 
@@ -66,6 +83,7 @@ def test_worker_processes_file_and_creates_pages(sqlite_db: str, sample_file: Pa
             str(sample_file),
             filename=sample_file.name,
             size=sample_file.stat().st_size,
+            mime_type="text/plain",
         )
         assert queued is True
 
@@ -83,6 +101,19 @@ def test_worker_processes_file_and_creates_pages(sqlite_db: str, sample_file: Pa
                 select(ChunkRecord).where(ChunkRecord.page_id.in_([p.id for p in pages]))
             ).all()
             assert chunks
+            assert all(page.tokens > 0 for page in pages)
+            assert all(page.meta and page.meta.get("page") == page.number for page in pages)
+            assert all(chunk.tokens > 0 for chunk in chunks)
+            assert all(chunk.meta and "chunk" in chunk.meta for chunk in chunks)
+            document = session.exec(
+                select(DocumentRecord).where(DocumentRecord.id == file_obj.document_id)
+            ).one()
+            assert document.status == DocumentStatus.COMPLETED
+            assert document.chunks == file_obj.chunks
+            assert document.mime_type == "text/plain"
+            jobs = session.exec(select(JobRecord).order_by(JobRecord.created_at)).all()
+            assert jobs[-1].status == JobStatus.COMPLETED
+            assert jobs[-1].payload and jobs[-1].payload.get("chunks") == file_obj.chunks
 
         # Re-register should not enqueue once completed
         _, queued_again = await service.register_file(
@@ -90,6 +121,7 @@ def test_worker_processes_file_and_creates_pages(sqlite_db: str, sample_file: Pa
             str(sample_file),
             filename=sample_file.name,
             size=sample_file.stat().st_size,
+            mime_type="text/plain",
         )
         assert queued_again is False
 
@@ -108,6 +140,7 @@ def test_worker_retries_failed_jobs(
             str(sample_file),
             filename=sample_file.name,
             size=sample_file.stat().st_size,
+            mime_type="text/plain",
         )
         assert queued is True
 
@@ -130,6 +163,16 @@ def test_worker_retries_failed_jobs(
             assert file_obj.status == file_models.FileStatus.QUEUED
             assert file_obj.retries == 1
             assert file_obj.error == "boom"
+            document = session.exec(
+                select(DocumentRecord).where(DocumentRecord.id == file_obj.document_id)
+            ).one()
+            assert document.status == DocumentStatus.QUEUED
+            jobs = session.exec(select(JobRecord).order_by(JobRecord.created_at)).all()
+            assert len(jobs) == 2
+            assert jobs[0].status == JobStatus.FAILED
+            assert jobs[0].error == "boom"
+            assert jobs[1].status == JobStatus.QUEUED
+            assert jobs[1].attempt == 1
 
     asyncio.run(scenario())
 
@@ -148,12 +191,14 @@ def test_hash_is_based_on_contents(sqlite_db: str, tmp_path: Path) -> None:
             str(first),
             filename=first.name,
             size=first.stat().st_size,
+            mime_type="text/plain",
         )
         record_two, queued_two = await service.register_file(
             "tenant",
             str(second),
             filename=second.name,
             size=second.stat().st_size,
+            mime_type="text/plain",
         )
 
         assert queued_one is True

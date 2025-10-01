@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import logging
 import os
+import threading
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Optional, Tuple
@@ -13,8 +15,20 @@ from sqlmodel import Session, delete, select
 
 from app.core.config import get_settings
 from app.ingest.chunking import _chunk, _get_tokenizer, iter_document_pages
-from app.models.file import ChunkRecord, FileRecord, FileStatus, PageRecord, get_engine
-from app.services.vectorstore import index_chunks
+from app.models.entities import JobRecord, JobStatus
+from app.models.file import (
+    ChunkRecord,
+    DocumentRecord,
+    DocumentStatus,
+    FileRecord,
+    FileStatus,
+    PageRecord,
+    get_engine,
+)
+from app.services import vectorstore
+
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -25,6 +39,9 @@ class IngestJob:
     path: str
     sha256: str
     file_id: int
+    filename: str
+    document_id: Optional[int]
+    job_record_id: Optional[int] = None
     attempt: int = 0
 
 
@@ -38,6 +55,7 @@ class IngestService:
         max_retries: Optional[int] = None,
         backoff_seconds: Optional[float] = None,
         engine=None,
+        auto_process: bool = False,
     ) -> None:
         settings = get_settings()
         retries = settings.ingest_max_retries if max_retries is None else max_retries
@@ -48,6 +66,10 @@ class IngestService:
         self.max_retries = max(0, int(retries))
         self.backoff_seconds = max(0.0, float(backoff))
         self._engine = engine
+        self.auto_process = auto_process
+        self._thread_lock = threading.Lock()
+        self._worker_instance: Optional["IngestWorker"] = None
+        self._job_threads: set[threading.Thread] = set()
 
     @property
     def engine(self):
@@ -55,6 +77,61 @@ class IngestService:
             self._engine = get_engine()
         return self._engine
 
+    def set_worker(self, worker: "IngestWorker") -> None:
+        """Register the worker instance responsible for background processing."""
+
+        with self._thread_lock:
+            self._worker_instance = worker
+
+    def ensure_background_worker(self) -> None:
+        """Start a background worker thread when auto-processing is enabled."""
+
+        if not self.auto_process:
+            return
+        with self._thread_lock:
+            if self._worker_instance is None:
+                self._worker_instance = IngestWorker(self)
+            # Prune completed job threads to avoid unbounded growth.
+            self._job_threads = {thread for thread in self._job_threads if thread.is_alive()}
+
+    async def stop_background_worker(self) -> None:
+        """Signal the background worker thread to shut down."""
+
+        if not self.auto_process:
+            return
+        # Wait for active ingestion threads to finish gracefully.
+        while True:
+            with self._thread_lock:
+                threads = [thread for thread in self._job_threads if thread.is_alive()]
+                if not threads:
+                    self._job_threads.clear()
+                    break
+            for thread in threads:
+                thread.join(timeout=1)
+
+    def _spawn_job_thread(self, job: IngestJob) -> None:
+        """Execute a job asynchronously using a dedicated worker thread."""
+
+        self.ensure_background_worker()
+        worker = self._worker_instance or IngestWorker(self)
+
+        def _runner() -> None:
+            try:
+                asyncio.run(worker._process(job))
+            except Exception:  # pragma: no cover - defensive logging
+                logger.exception("Background ingest job failed for file %s", job.file_id)
+            finally:
+                with self._thread_lock:
+                    self._job_threads.discard(threading.current_thread())
+
+        thread = threading.Thread(
+            target=_runner,
+            name=f"ingest-job-{job.file_id}",
+            daemon=True,
+        )
+        with self._thread_lock:
+            self._job_threads.add(thread)
+        thread.start()
     @staticmethod
     def _hash_file(path: str) -> str:
         digest = hashlib.sha256()
@@ -71,12 +148,46 @@ class IngestService:
             path=file_obj.path,
             sha256=file_obj.sha256,
             file_id=file_obj.id,
+            filename=file_obj.filename,
+            document_id=file_obj.document_id,
             attempt=attempt,
         )
 
+    def _create_job_record(self, job: IngestJob) -> JobRecord:
+        payload = {
+            "file_id": job.file_id,
+            "sha256": job.sha256,
+            "path": job.path,
+            "filename": job.filename,
+            "attempt": job.attempt,
+        }
+        if job.document_id is not None:
+            payload["document_id"] = job.document_id
+
+        with Session(self.engine) as session:
+            record = JobRecord(
+                tenant_id=job.tenant_id,
+                job_type="ingest",
+                status=JobStatus.QUEUED,
+                priority=0,
+                error=None,
+                resource_id=str(job.file_id),
+                attempt=job.attempt,
+                payload=payload,
+            )
+            session.add(record)
+            session.commit()
+            session.refresh(record)
+            return record
+
     async def enqueue_job(self, file_obj: FileRecord, *, attempt: int = 0) -> IngestJob:
         job = self._make_job(file_obj, attempt=attempt)
-        await self.queue.put(job)
+        job_record = self._create_job_record(job)
+        job.job_record_id = job_record.id
+        if self.auto_process:
+            self._spawn_job_thread(job)
+        else:
+            await self.queue.put(job)
         return job
 
     async def register_file(
@@ -86,12 +197,36 @@ class IngestService:
         *,
         filename: str,
         size: int,
+        mime_type: Optional[str] = None,
     ) -> Tuple[FileRecord, bool]:
         """Register a file upload and enqueue ingestion when necessary."""
 
         sha = self._hash_file(path)
         queued = False
+        detected_mime = mime_type or "application/octet-stream"
         with Session(self.engine) as session:
+            document = session.exec(
+                select(DocumentRecord).where(DocumentRecord.sha256 == sha)
+            ).first()
+            if document is None:
+                document = DocumentRecord(
+                    sha256=sha,
+                    mime_type=detected_mime,
+                    status=DocumentStatus.QUEUED,
+                    error=None,
+                    chunks=None,
+                )
+            else:
+                document.updated_at = datetime.utcnow()
+                if mime_type and document.mime_type != mime_type:
+                    document.mime_type = mime_type
+                if document.status == DocumentStatus.FAILED:
+                    document.status = DocumentStatus.QUEUED
+                    document.error = None
+                document.chunks = None
+            session.add(document)
+            session.flush()
+
             statement = select(FileRecord).where(
                 FileRecord.tenant_id == tenant_id, FileRecord.sha256 == sha
             )
@@ -100,6 +235,7 @@ class IngestService:
                 file_obj = FileRecord(
                     tenant_id=tenant_id,
                     sha256=sha,
+                    document_id=document.id,
                     path=path,
                     filename=filename,
                     size=size,
@@ -109,11 +245,10 @@ class IngestService:
                     chunks=None,
                 )
                 session.add(file_obj)
-                session.commit()
-                session.refresh(file_obj)
                 queued = True
             else:
                 file_obj.updated_at = datetime.utcnow()
+                file_obj.document_id = document.id
                 if file_obj.status == FileStatus.FAILED:
                     file_obj.path = path
                     file_obj.filename = filename
@@ -124,8 +259,9 @@ class IngestService:
                     file_obj.chunks = None
                     queued = True
                 session.add(file_obj)
-                session.commit()
-                session.refresh(file_obj)
+            session.commit()
+            session.refresh(file_obj)
+            session.refresh(document)
 
         if queued:
             await self.enqueue_job(file_obj)
@@ -155,6 +291,7 @@ class IngestWorker:
         self._stop = False
 
     async def run(self) -> None:
+        logger.debug("ingest worker run loop entered")
         while True:
             if self._stop and self.service.queue.empty():
                 break
@@ -165,6 +302,7 @@ class IngestWorker:
             if job is None:
                 self.service.queue.task_done()
                 break
+            logger.debug("ingest worker processing job %s", job)
             try:
                 await self._process(job)
             except Exception:  # pragma: no cover - defensive
@@ -175,15 +313,50 @@ class IngestWorker:
     async def _process(self, job: IngestJob) -> None:
         with Session(self.service.engine) as session:
             file_obj = session.get(FileRecord, job.file_id)
+            job_record = (
+                session.get(JobRecord, job.job_record_id)
+                if job.job_record_id is not None
+                else None
+            )
             if not file_obj:
+                if job_record:
+                    job_record.status = JobStatus.FAILED
+                    job_record.error = "FILE_MISSING"
+                    job_record.finished_at = datetime.utcnow()
+                    job_record.updated_at = datetime.utcnow()
+                    session.add(job_record)
+                    session.commit()
                 return
+            document_id = job.document_id or file_obj.document_id
+            document = (
+                session.get(DocumentRecord, document_id)
+                if document_id is not None
+                else None
+            )
             if file_obj.status == FileStatus.COMPLETED:
+                if job_record and job_record.status == JobStatus.QUEUED:
+                    job_record.status = JobStatus.COMPLETED
+                    job_record.finished_at = datetime.utcnow()
+                    job_record.updated_at = datetime.utcnow()
+                    session.add(job_record)
+                    session.commit()
                 return
             file_obj.status = FileStatus.PROCESSING
             file_obj.error = None
             file_obj.chunks = None
             file_obj.updated_at = datetime.utcnow()
             session.add(file_obj)
+            if document:
+                document.status = DocumentStatus.PROCESSING
+                document.error = None
+                document.chunks = None
+                document.updated_at = datetime.utcnow()
+                session.add(document)
+            if job_record:
+                job_record.status = JobStatus.PROCESSING
+                job_record.started_at = datetime.utcnow()
+                job_record.updated_at = datetime.utcnow()
+                session.add(job_record)
             session.commit()
 
             page_ids = session.exec(
@@ -205,6 +378,17 @@ class IngestWorker:
         finally:
             with Session(self.service.engine) as session:
                 file_obj = session.get(FileRecord, job.file_id)
+                document_id = job.document_id or file_obj.document_id
+                document = (
+                    session.get(DocumentRecord, document_id)
+                    if document_id is not None
+                    else None
+                )
+                job_record = (
+                    session.get(JobRecord, job.job_record_id)
+                    if job.job_record_id is not None
+                    else None
+                )
                 if not file_obj:
                     return
                 if success:
@@ -212,12 +396,42 @@ class IngestWorker:
                     file_obj.updated_at = datetime.utcnow()
                     file_obj.error = None
                     file_obj.chunks = chunk_count
+                    if document:
+                        document.status = DocumentStatus.COMPLETED
+                        document.updated_at = datetime.utcnow()
+                        document.error = None
+                        document.chunks = chunk_count
+                        session.add(document)
+                    if job_record:
+                        job_record.status = JobStatus.COMPLETED
+                        job_record.finished_at = datetime.utcnow()
+                        job_record.updated_at = datetime.utcnow()
+                        payload = dict(job_record.payload or {})
+                        payload.update({"chunks": chunk_count, "attempt": job.attempt})
+                        job_record.payload = payload
+                        job_record.error = None
+                        session.add(job_record)
                 else:
                     file_obj.status = FileStatus.FAILED
                     file_obj.retries = job.attempt + 1
                     file_obj.updated_at = datetime.utcnow()
                     file_obj.error = error_message
                     file_obj.chunks = chunk_count or 0
+                    if document:
+                        document.status = DocumentStatus.FAILED
+                        document.updated_at = datetime.utcnow()
+                        document.error = error_message
+                        document.chunks = chunk_count or 0
+                        session.add(document)
+                    if job_record:
+                        job_record.status = JobStatus.FAILED
+                        job_record.finished_at = datetime.utcnow()
+                        job_record.updated_at = datetime.utcnow()
+                        payload = dict(job_record.payload or {})
+                        payload.update({"chunks": chunk_count or 0, "attempt": job.attempt})
+                        job_record.payload = payload
+                        job_record.error = error_message
+                        session.add(job_record)
                 session.add(file_obj)
                 session.commit()
 
@@ -242,11 +456,21 @@ class IngestWorker:
                 page_sha = hashlib.sha256(
                     f"{job.sha256}:{page_number}:{len(text)}".encode("utf-8")
                 ).hexdigest()
+                try:
+                    page_tokens = len(self._tokenizer.encode(text))
+                except Exception:
+                    page_tokens = len(text)
                 page = PageRecord(
                     file_id=job.file_id,
                     number=page_number,
                     sha256=page_sha,
                     text=text,
+                    tokens=page_tokens,
+                    meta={
+                        "document_sha": job.sha256,
+                        "page": page_number,
+                        "file_id": job.file_id,
+                    },
                 )
                 session.add(page)
                 session.commit()
@@ -262,12 +486,22 @@ class IngestWorker:
                     chunk_sha = hashlib.sha256(
                         f"{job.sha256}:{page.number}:{offset}:{chunk_text}".encode("utf-8")
                     ).hexdigest()
+                    try:
+                        chunk_tokens = len(self._tokenizer.encode(chunk_text))
+                    except Exception:
+                        chunk_tokens = len(chunk_text)
                     chunk = ChunkRecord(
                         page_id=page.id,
                         index=offset,
                         sha256=chunk_sha,
                         text=chunk_text,
                         batch=batch_index,
+                        tokens=chunk_tokens,
+                        meta={
+                            "document_sha": job.sha256,
+                            "page": page.number,
+                            "chunk": offset,
+                        },
                     )
                     session.add(chunk)
                     chunk_payloads.append(
@@ -276,6 +510,8 @@ class IngestWorker:
                             "page": page.number,
                             "sha256": chunk_sha,
                             "text": chunk_text,
+                            "tokens": chunk_tokens,
+                            "meta": chunk.meta or {},
                         }
                     )
                     chunk_counter += 1
@@ -284,13 +520,14 @@ class IngestWorker:
                         session.commit()
                 session.commit()
 
-        index_chunks(chunk_payloads)
+        vectorstore.index_chunks(chunk_payloads)
         return len(chunk_payloads)
 
     async def _handle_failure(self, job: IngestJob) -> None:
         job.attempt += 1
         if job.attempt > self.service.max_retries:
             return
+        file_obj: Optional[FileRecord] = None
         with Session(self.service.engine) as session:
             file_obj = session.get(FileRecord, job.file_id)
             if file_obj:
@@ -298,11 +535,24 @@ class IngestWorker:
                 file_obj.retries = job.attempt
                 file_obj.updated_at = datetime.utcnow()
                 session.add(file_obj)
+                document = (
+                    session.get(DocumentRecord, file_obj.document_id)
+                    if file_obj.document_id is not None
+                    else None
+                )
+                if document:
+                    document.status = DocumentStatus.QUEUED
+                    document.error = None
+                    document.chunks = None
+                    document.updated_at = datetime.utcnow()
+                    session.add(document)
                 session.commit()
+                session.refresh(file_obj)
         delay = self.service.backoff_seconds * (2 ** (job.attempt - 1))
         if delay:
             await asyncio.sleep(delay)
-        await self.service.queue.put(job)
+        if file_obj:
+            await self.service.enqueue_job(file_obj, attempt=job.attempt)
 
     def stop(self) -> None:
         self._stop = True

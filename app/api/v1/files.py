@@ -5,7 +5,7 @@ from sqlmodel import Session, select
 
 from app.core.deps import get_ingest_session, get_tenant
 from app.models import FileInfo, FilesResponse
-from app.models.file import FileRecord
+from app.models.file import DocumentRecord, FileRecord
 
 router = APIRouter(tags=["files"])
 
@@ -18,22 +18,26 @@ def list_files(
     """Return metadata of files uploaded by the current tenant."""
 
     statement = (
-        select(FileRecord)
+        select(FileRecord, DocumentRecord)
         .where(FileRecord.tenant_id == tenant)
+        .join(DocumentRecord, FileRecord.document_id == DocumentRecord.id, isouter=True)
         .order_by(FileRecord.created_at.desc())
     )
     records = session.exec(statement).all()
     items = [
         FileInfo(
-            id=str(record.id),
-            filename=record.filename,
-            tenant=record.tenant_id,
-            status=record.status,
-            uploaded_at=record.created_at,
-            size=record.size,
-            chunks=record.chunks,
-            error=record.error,
+            id=str(file_obj.id),
+            filename=file_obj.filename,
+            tenant=file_obj.tenant_id,
+            status=file_obj.status,
+            uploaded_at=file_obj.created_at,
+            size=file_obj.size,
+            chunks=file_obj.chunks,
+            error=file_obj.error,
+            document_id=(str(file_obj.document_id) if file_obj.document_id else None),
+            document_status=document.status if document is not None else None,
+            mime_type=document.mime_type if document is not None else None,
         )
-        for record in records
+        for file_obj, document in records
     ]
     return FilesResponse(files=items)
