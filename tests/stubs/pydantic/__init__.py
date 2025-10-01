@@ -20,6 +20,11 @@ def _load_real_module() -> object | None:
         except OSError:  # pragma: no cover - non-filesystem entries
             continue
         candidate = Path(entry) / "pydantic" / "__init__.py"
+        try:
+            if candidate.resolve() == Path(__file__).resolve():
+                continue
+        except OSError:  # pragma: no cover - non-resolvable paths
+            continue
         if candidate.exists():
             spec = importlib.util.spec_from_file_location("_real_pydantic", candidate)
             if spec and spec.loader:

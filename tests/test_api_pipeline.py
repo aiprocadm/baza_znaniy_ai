@@ -15,7 +15,13 @@ from fastapi.testclient import TestClient
 from sqlmodel import Session
 
 from tests.service_stubs import install_service_stubs
+
+install_service_stubs()
+
 from app.models import file as file_models
+from app.core import auth as core_auth, deps as core_deps
+from app.services import vectorstore as vectorstore_module
+from app.models.user import UserRole
 
 
 @pytest.fixture()
@@ -38,8 +44,6 @@ def api_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Test
 
     import app.api.v1.chat as chat_module
     import app.api.v1.search as search_module
-    from app.core import deps as core_deps
-    from app.services import vectorstore as vectorstore_module
 
     assert any(route.path == "/api/v1/upload" for route in app.routes)
 
@@ -50,10 +54,22 @@ def api_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Test
         with Session(service.engine) as session:
             yield session
 
+    class StubUser:
+        id = 1
+        email = "admin@example.com"
+        role = UserRole.ADMIN
+        is_active = True
+        tenant_slug = "default"
+
+    def user_override():
+        return StubUser()
+
     app.dependency_overrides = {
         core_deps.get_ingest_service: lambda: app.state.ingest_service,
         core_deps.get_ingest_session: session_override,
-        core_deps.get_tenant: lambda: "default",
+        core_auth.get_current_active_user: user_override,
+        core_auth.ensure_tenant_access: lambda: "default",
+        core_auth.require_admin_user: user_override,
     }
 
     chunks: List[dict[str, object]] = []

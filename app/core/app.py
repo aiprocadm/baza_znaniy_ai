@@ -11,6 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.router import api_router
 from app.chat.summarizer import ConversationSummarizer
+from app.core.auth import TokenRegistry
 from app.core.config import get_settings
 from app.core.services import init_chat_store, init_memory_store
 from app.ingest import IngestService, IngestWorker, parse_and_chunk  # noqa: F401
@@ -106,6 +107,7 @@ def create_app(provider: LLMProvider | None = None) -> FastAPI:
     application.state.chat_summary_trigger = settings.chat_summary_trigger
     application.state.min_citations = min_citations
     application.state.max_citations = max_citations
+    application.state.token_registry = TokenRegistry()
 
     application.include_router(ui_router)
     application.include_router(api_router)
@@ -125,7 +127,8 @@ def create_app(provider: LLMProvider | None = None) -> FastAPI:
         if worker is None or not hasattr(worker, "run"):
             return
         try:
-            application.state.ingest_worker_task = asyncio.create_task(worker.run())
+            worker.ensure_started()
+            application.state.ingest_worker_task = getattr(worker, "_task", None)
         except Exception:  # pragma: no cover - defensive
             logger.exception("Failed to start ingestion worker")
             application.state.ingest_worker_task = None

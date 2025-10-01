@@ -48,6 +48,7 @@ class IngestService:
         self.max_retries = max(0, int(retries))
         self.backoff_seconds = max(0.0, float(backoff))
         self._engine = engine
+        self.worker: "IngestWorker" | None = None
 
     @property
     def engine(self):
@@ -77,6 +78,9 @@ class IngestService:
     async def enqueue_job(self, file_obj: FileRecord, *, attempt: int = 0) -> IngestJob:
         job = self._make_job(file_obj, attempt=attempt)
         await self.queue.put(job)
+        worker = getattr(self, "worker", None)
+        if worker is not None:
+            worker.ensure_started()
         return job
 
     async def register_file(
@@ -153,6 +157,17 @@ class IngestWorker:
         if self.overlap >= self.chunk_size:
             self.overlap = max(0, self.chunk_size - 1)
         self._stop = False
+        self._task: asyncio.Task[None] | None = None
+        self.service.worker = self
+
+    def ensure_started(self) -> None:
+        if self._task is not None and not self._task.done():
+            return
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:  # pragma: no cover - synchronous fallback
+            return
+        self._task = loop.create_task(self.run())
 
     async def run(self) -> None:
         while True:
@@ -306,6 +321,9 @@ class IngestWorker:
 
     def stop(self) -> None:
         self._stop = True
+        task = self._task
+        if task is not None:
+            task.cancel()
 
 
 __all__ = ["IngestJob", "IngestService", "IngestWorker"]
