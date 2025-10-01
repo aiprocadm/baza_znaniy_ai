@@ -58,9 +58,7 @@ class IngestService:
         auto_process: bool = False,
     ) -> None:
         settings = get_settings()
-        retries = settings.ingest_ma
-    sha256: str
-    file_id: intx_retries if max_retries is None else max_retries
+        retries = settings.ingest_max_retries if max_retries is None else max_retries
         backoff = (
             settings.ingest_backoff_seconds if backoff_seconds is None else backoff_seconds
         )
@@ -68,14 +66,12 @@ class IngestService:
         self.max_retries = max(0, int(retries))
         self.backoff_seconds = max(0.0, float(backoff))
         self._engine = engine
-        codex/add-fields-to-pagerecord-and-chunkrecord
         self.auto_process = auto_process
         self._thread_lock = threading.Lock()
         self._worker_instance: Optional["IngestWorker"] = None
         self._job_threads: set[threading.Thread] = set()
 
         self.worker: "IngestWorker" | None = None
-        main
 
     @property
     def engine(self):
@@ -188,19 +184,15 @@ class IngestService:
 
     async def enqueue_job(self, file_obj: FileRecord, *, attempt: int = 0) -> IngestJob:
         job = self._make_job(file_obj, attempt=attempt)
-        codex/add-fields-to-pagerecord-and-chunkrecord
         job_record = self._create_job_record(job)
         job.job_record_id = job_record.id
         if self.auto_process:
             self._spawn_job_thread(job)
         else:
             await self.queue.put(job)
-
-        await self.queue.put(job)
         worker = getattr(self, "worker", None)
         if worker is not None:
             worker.ensure_started()
-        main
         return job
 
     async def register_file(
@@ -219,10 +211,14 @@ class IngestService:
         detected_mime = mime_type or "application/octet-stream"
         with Session(self.engine) as session:
             document = session.exec(
-                select(DocumentRecord).where(DocumentRecord.sha256 == sha)
+                select(DocumentRecord).where(
+                    DocumentRecord.tenant_id == tenant_id,
+                    DocumentRecord.sha256 == sha,
+                )
             ).first()
             if document is None:
                 document = DocumentRecord(
+                    tenant_id=tenant_id,
                     sha256=sha,
                     mime_type=detected_mime,
                     status=DocumentStatus.QUEUED,
@@ -485,6 +481,7 @@ class IngestWorker:
                 except Exception:
                     page_tokens = len(text)
                 page = PageRecord(
+                    tenant_id=job.tenant_id,
                     file_id=job.file_id,
                     number=page_number,
                     sha256=page_sha,
@@ -515,6 +512,7 @@ class IngestWorker:
                     except Exception:
                         chunk_tokens = len(chunk_text)
                     chunk = ChunkRecord(
+                        tenant_id=job.tenant_id,
                         page_id=page.id,
                         index=offset,
                         sha256=chunk_sha,

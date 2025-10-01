@@ -8,9 +8,20 @@ from typing import Any, List, Optional
 from pydantic import BaseModel, Field
 
 from .lora import LoraLoadRequest, LoraStatusResponse, LoraUnloadRequest
-from .tenant import TenantCreate, TenantRecord, TenantResponse, TenantUpdate
-from .user import UserCreate, UserRecord, UserResponse, UserRole, UserUpdate
 
+import importlib
+
+_LAZY_MODELS = {
+    "UserCreate": ("app.models.user", "UserCreate"),
+    "UserRecord": ("app.models.user", "UserRecord"),
+    "UserResponse": ("app.models.user", "UserResponse"),
+    "UserRole": ("app.models.user", "UserRole"),
+    "UserUpdate": ("app.models.user", "UserUpdate"),
+    "TenantCreate": ("app.models.tenant", "TenantCreate"),
+    "TenantRecord": ("app.models.tenant", "TenantRecord"),
+    "TenantResponse": ("app.models.tenant", "TenantResponse"),
+    "TenantUpdate": ("app.models.tenant", "TenantUpdate"),
+}
 class Document(BaseModel):
     """Representation of a stored document chunk used across the service."""
 
@@ -154,6 +165,18 @@ class DeleteResponse(BaseModel):
 
     ok: bool
     id: str
+
+
+def __getattr__(name: str) -> Any:  # pragma: no cover - import side effect helper
+    """Lazily import models that define additional SQLModel tables."""
+
+    module_info = _LAZY_MODELS.get(name)
+    if module_info is None:
+        raise AttributeError(f"module 'app.models' has no attribute {name!r}")
+    module = importlib.import_module(module_info[0])
+    value = getattr(module, module_info[1])
+    globals()[name] = value
+    return value
 
 
 __all__ = [
