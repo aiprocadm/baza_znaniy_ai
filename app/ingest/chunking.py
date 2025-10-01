@@ -231,10 +231,7 @@ def _chunk(
         except Exception:  # pragma: no cover - defensive fallback
             reencoded = []
         if reencoded:
-            use_char_tokenizer = len(reencoded) < len(working_token_ids) or len(
-                reencoded
-            ) >= window
-            if use_char_tokenizer:
+            if len(reencoded) < len(working_token_ids):
                 char_tokenizer = _CharTokenizer()
                 char_ids = char_tokenizer.encode(decoded_text)
                 if char_ids:
