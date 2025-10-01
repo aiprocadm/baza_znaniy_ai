@@ -211,6 +211,56 @@ def test_prepare_cors_origins_returns_cleaned_values(core_app):
     assert result == ["https://example.com", "https://foo.test"]
 
 
+def test_v1_router_registers_admin_routes(monkeypatch):
+    import importlib
+    import sys
+    import types
+
+    from fastapi import APIRouter
+    from pathlib import Path
+
+    for name in list(sys.modules):
+        if name == "app.api.v1" or name.startswith("app.api.v1."):
+            sys.modules.pop(name, None)
+
+    api_package = types.ModuleType("app.api")
+    api_package.__path__ = [str(Path("app/api"))]
+    api_package.__spec__ = ModuleSpec("app.api", loader=None, is_package=True)
+    monkeypatch.setitem(sys.modules, "app.api", api_package)
+
+    module_prefixes = {
+        "admin": "/admin",
+        "auth": "/auth",
+        "users": "/users",
+        "tenants": "/tenants",
+        "upload": "/upload",
+        "ingest": "/ingest",
+        "search": "/search",
+        "chat": "/chat",
+        "files": "/files",
+        "delete": "/delete",
+        "lora": "/lora",
+    }
+
+    for module_name, prefix in module_prefixes.items():
+        module = types.ModuleType(f"app.api.v1.{module_name}")
+        module.__spec__ = ModuleSpec(module.__name__, loader=None)
+        module.router = APIRouter(prefix=prefix)
+        module.router.get("/ping")(lambda module_name=module_name: module_name)
+        monkeypatch.setitem(sys.modules, module.__name__, module)
+
+    v1_module = importlib.import_module("app.api.v1")
+    router = v1_module.router
+    sys.modules.pop("app.api.v1", None)
+
+    routes = getattr(router, "routes", getattr(router, "_routes", []))
+    paths = {
+        getattr(route, "path", getattr(route, "path_format", None))
+        for route in routes
+    }
+    assert "/admin/ping" in paths
+
+
 def test_initialise_reranker_disabled(core_app, monkeypatch):
     monkeypatch.setattr(
         core_app,
