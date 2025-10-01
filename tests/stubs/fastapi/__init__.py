@@ -11,7 +11,11 @@ from types import SimpleNamespace
 from pydantic import BaseModel
 
 from . import status
-from types import SimpleNamespace
+
+try:  # pragma: no cover - optional dependency
+    from starlette.requests import Request as StarletteRequest
+except Exception:  # pragma: no cover - fallback when Starlette is unavailable
+    StarletteRequest = None
 
 from .responses import HTMLResponse, JSONResponse
 
@@ -30,6 +34,10 @@ class Request:
 
     def __init__(self, scope: Optional[dict[str, Any]] = None) -> None:
         self.scope = scope or {}
+
+    @property
+    def app(self):
+        return self.scope.get("app")
 
 
 class UploadFile:
@@ -246,6 +254,10 @@ def _build_call_arguments(
         dependency_callable = next((meta for meta in metadata if callable(meta)), None)
         if dependency_callable is not None:
             kwargs[name] = _resolve_dependency(dependency_callable, app)
+            continue
+
+        if annotation in {Request, StarletteRequest}:
+            kwargs[name] = Request({"app": app})
             continue
 
         if body is not None and isinstance(body, dict) and name in body:

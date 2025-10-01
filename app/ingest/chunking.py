@@ -7,6 +7,7 @@ import io
 import logging
 import os
 import re
+import time
 from functools import lru_cache
 from typing import BinaryIO, Iterable, Iterator, List, NamedTuple, Optional, Protocol, Union
 
@@ -25,6 +26,8 @@ try:  # pragma: no cover - tokenizer optional in some environments
     import tiktoken
 except ImportError:  # pragma: no cover - fallback used in tests
     tiktoken = None  # type: ignore[assignment]
+
+from app.observability.metrics import record_document_parse
 
 LOGGER = logging.getLogger(__name__)
 
@@ -443,27 +446,39 @@ def parse_and_chunk(filename: str, data: Union[bytes, bytearray, BinaryIO]) -> L
     """Parse ``data`` according to ``filename`` extension and chunk the text."""
 
     name = (filename or "").strip()
-    pages = list(iter_document_pages(name, data))
-    if not pages:
-        return []
+    extension = name.rsplit(".", 1)[-1].lower() if "." in name else ""
 
-    chunk_size = _normalise_window_size(int(os.getenv("RAG_CHUNK", "900")))
-    overlap = _normalise_overlap(chunk_size, int(os.getenv("RAG_OVERLAP", "140")))
-    tokenizer = _get_tokenizer()
-
+    start = time.perf_counter()
+    status = "success"
     chunks: List[dict[str, object]] = []
-    for page_number, page_text in pages:
-        for piece in _chunk(page_text, chunk=chunk_size, overlap=overlap, encoder=tokenizer):
-            sha = _hash_chunk(name, page_number, piece)
-            chunks.append(
-                {
-                    "file": name,
-                    "page": page_number,
-                    "sha256": sha,
-                    "text": piece,
-                }
-            )
-    return chunks
+
+    try:
+        pages = list(iter_document_pages(name, data))
+        if pages:
+            chunk_size = _normalise_window_size(int(os.getenv("RAG_CHUNK", "900")))
+            overlap = _normalise_overlap(chunk_size, int(os.getenv("RAG_OVERLAP", "140")))
+            tokenizer = _get_tokenizer()
+
+            for page_number, page_text in pages:
+                for piece in _chunk(
+                    page_text, chunk=chunk_size, overlap=overlap, encoder=tokenizer
+                ):
+                    sha = _hash_chunk(name, page_number, piece)
+                    chunks.append(
+                        {
+                            "file": name,
+                            "page": page_number,
+                            "sha256": sha,
+                            "text": piece,
+                        }
+                    )
+        return chunks
+    except Exception:
+        status = "error"
+        raise
+    finally:
+        duration = time.perf_counter() - start
+        record_document_parse(extension, status, len(chunks), duration)
 
 
 __all__ = [

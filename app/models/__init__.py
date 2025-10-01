@@ -8,6 +8,8 @@ from typing import Any, List, Optional
 from pydantic import BaseModel, Field
 
 from .lora import LoraLoadRequest, LoraStatusResponse, LoraUnloadRequest
+from .tenant import TenantCreate, TenantRecord, TenantResponse, TenantUpdate
+from .user import UserCreate, UserRecord, UserResponse, UserRole, UserUpdate
 
 class Document(BaseModel):
     """Representation of a stored document chunk used across the service."""
@@ -173,4 +175,13 @@ __all__ = [
     "LoraLoadRequest",
     "LoraStatusResponse",
     "LoraUnloadRequest",
+    "TenantCreate",
+    "TenantRecord",
+    "TenantResponse",
+    "TenantUpdate",
+    "UserCreate",
+    "UserRecord",
+    "UserResponse",
+    "UserRole",
+    "UserUpdate",
 ]

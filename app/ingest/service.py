@@ -58,7 +58,9 @@ class IngestService:
         auto_process: bool = False,
     ) -> None:
         settings = get_settings()
-        retries = settings.ingest_max_retries if max_retries is None else max_retries
+        retries = settings.ingest_ma
+    sha256: str
+    file_id: intx_retries if max_retries is None else max_retries
         backoff = (
             settings.ingest_backoff_seconds if backoff_seconds is None else backoff_seconds
         )
@@ -66,10 +68,14 @@ class IngestService:
         self.max_retries = max(0, int(retries))
         self.backoff_seconds = max(0.0, float(backoff))
         self._engine = engine
+        codex/add-fields-to-pagerecord-and-chunkrecord
         self.auto_process = auto_process
         self._thread_lock = threading.Lock()
         self._worker_instance: Optional["IngestWorker"] = None
         self._job_threads: set[threading.Thread] = set()
+
+        self.worker: "IngestWorker" | None = None
+        main
 
     @property
     def engine(self):
@@ -182,12 +188,19 @@ class IngestService:
 
     async def enqueue_job(self, file_obj: FileRecord, *, attempt: int = 0) -> IngestJob:
         job = self._make_job(file_obj, attempt=attempt)
+        codex/add-fields-to-pagerecord-and-chunkrecord
         job_record = self._create_job_record(job)
         job.job_record_id = job_record.id
         if self.auto_process:
             self._spawn_job_thread(job)
         else:
             await self.queue.put(job)
+
+        await self.queue.put(job)
+        worker = getattr(self, "worker", None)
+        if worker is not None:
+            worker.ensure_started()
+        main
         return job
 
     async def register_file(
@@ -289,6 +302,17 @@ class IngestWorker:
         if self.overlap >= self.chunk_size:
             self.overlap = max(0, self.chunk_size - 1)
         self._stop = False
+        self._task: asyncio.Task[None] | None = None
+        self.service.worker = self
+
+    def ensure_started(self) -> None:
+        if self._task is not None and not self._task.done():
+            return
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:  # pragma: no cover - synchronous fallback
+            return
+        self._task = loop.create_task(self.run())
 
     async def run(self) -> None:
         logger.debug("ingest worker run loop entered")
@@ -556,6 +580,9 @@ class IngestWorker:
 
     def stop(self) -> None:
         self._stop = True
+        task = self._task
+        if task is not None:
+            task.cancel()
 
 
 __all__ = ["IngestJob", "IngestService", "IngestWorker"]

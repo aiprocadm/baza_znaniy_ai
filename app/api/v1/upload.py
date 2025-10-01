@@ -9,13 +9,14 @@ from typing import List, Optional
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 
+from app.core.auth import ensure_tenant_access, get_current_active_user
 from app.core.deps import (
     UploadLimits,
     get_data_dir,
     get_ingest_service,
-    get_tenant,
     get_upload_limits,
 )
+from app.models.user import UserRecord
 from app.models import UploadResponse
 from app.ingest.service import IngestService
 
@@ -45,7 +46,8 @@ async def upload_file(
     files: Optional[List[UploadFile]] = File(None, alias="files"),
     limits: UploadLimits = Depends(get_upload_limits),
     data_dir: Path = Depends(get_data_dir),
-    tenant: str = Depends(get_tenant),
+    _: UserRecord = Depends(get_current_active_user),
+    tenant: str = Depends(ensure_tenant_access),
     ingest_service: IngestService = Depends(get_ingest_service),
 ) -> UploadResponse:
     """Store an uploaded file on disk and register it for ingestion."""
