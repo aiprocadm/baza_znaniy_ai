@@ -64,6 +64,8 @@ try:  # pragma: no cover - tokenizer optional in some environments
 except ImportError:  # pragma: no cover - fallback used in tests
     tiktoken = None  # type: ignore[assignment]
 
+from app.core.config import get_settings
+from app.ingest.ocr import OCRError, OCRConfig, iter_pdf_pages_with_ocr
 from app.observability.metrics import record_document_parse
 
 LOGGER = logging.getLogger(__name__)
@@ -90,6 +92,17 @@ class _CharTokenizer:
 _TOKENIZER: Optional[_Tokenizer] = None
 
 _OCR_AVAILABLE = pytesseract is not None and Image is not None
+
+
+@lru_cache(maxsize=1)
+def _ocr_config() -> OCRConfig:
+    settings = get_settings()
+    return OCRConfig(
+        tesseract_cmd=settings.ocr_tesseract_cmd,
+        dpi=int(settings.ocr_dpi),
+        page_limit=settings.ocr_page_limit,
+        timeout_seconds=settings.ocr_timeout_seconds,
+    )
 
 
 def _ensure_binary_stream(data: Union[bytes, bytearray, BinaryIO]) -> BinaryIO:
@@ -208,6 +221,7 @@ def _run_ocr_on_pixmap(pixmap: object) -> str:
     if not _OCR_AVAILABLE:
         return ""
 
+    config = _ocr_config()
     try:
         png_bytes = pixmap.tobytes("png")  # type: ignore[call-arg]
     except Exception:
@@ -218,7 +232,15 @@ def _run_ocr_on_pixmap(pixmap: object) -> str:
 
     try:
         with Image.open(io.BytesIO(png_bytes)) as image:  # type: ignore[call-arg]
-            text = pytesseract.image_to_string(image)
+            if config.tesseract_cmd:
+                pytesseract.pytesseract.tesseract_cmd = config.tesseract_cmd  # type: ignore[attr-defined]
+            options = []
+            if config.dpi:
+                options.append(f"--dpi {int(config.dpi)}")
+            kwargs: dict[str, object] = {}
+            if config.language:
+                kwargs["lang"] = config.language
+            text = pytesseract.image_to_string(image, config=" ".join(options), **kwargs)
     except Exception:  # pragma: no cover - OCR failures should not break ingest
         return ""
 
@@ -461,6 +483,47 @@ def _iter_pdf_text(data: bytes) -> Iterator[tuple[int, str]]:
     raise RuntimeError("No PDF parser backend available")
 
 
+def _iter_pdf_pages(data: bytes) -> Iterator[tuple[int, str]]:
+    config = _ocr_config()
+    buffered: List[tuple[int, str]] = []
+    any_text = False
+    last_page = 0
+
+    try:
+        for page_number, text in iter_pdf_pages_with_ocr(data, config=config):
+            last_page = max(last_page, page_number)
+            if text:
+                if not any_text and buffered:
+                    for buffered_page in buffered:
+                        yield buffered_page
+                    buffered.clear()
+                any_text = True
+                yield page_number, text
+            else:
+                if any_text:
+                    yield page_number, text
+                else:
+                    buffered.append((page_number, text))
+    except OCRError as exc:
+        LOGGER.info("OCR unavailable, falling back to text extraction: %s", exc)
+        yield from _iter_pdf_text(data)
+        return
+    except Exception:  # pragma: no cover - unexpected OCR failure
+        LOGGER.exception("Unexpected OCR failure, using text fallback")
+        for page_number, text in _iter_pdf_text(data):
+            if page_number > last_page:
+                yield page_number, text
+        return
+
+    if not any_text:
+        LOGGER.info("OCR produced no text, using text extraction fallback")
+        yield from _iter_pdf_text(data)
+        return
+
+    for item in buffered:
+        yield item
+
+
 def _iter_docx_text(handle: BinaryIO) -> Iterator[tuple[int, str]]:
     document = Document(handle)
     buffer = io.StringIO()
@@ -617,7 +680,7 @@ def iter_document_pages(
     raw_bytes = _read_stream_to_bytes(stream)
 
     if ext == "pdf":
-        return _iter_pdf_text(bytes(raw_bytes))
+        return _iter_pdf_pages(bytes(raw_bytes))
 
     def _buffer() -> BinaryIO:
         return io.BytesIO(raw_bytes)
@@ -648,25 +711,23 @@ def parse_and_chunk(filename: str, data: Union[bytes, bytearray, BinaryIO]) -> L
     chunks: List[dict[str, object]] = []
 
     try:
-        pages = list(iter_document_pages(name, data))
-        if pages:
-            chunk_size = _normalise_window_size(int(os.getenv("RAG_CHUNK", "900")))
-            overlap = _normalise_overlap(chunk_size, int(os.getenv("RAG_OVERLAP", "140")))
-            tokenizer = _get_tokenizer()
+        chunk_size = _normalise_window_size(int(os.getenv("RAG_CHUNK", "900")))
+        overlap = _normalise_overlap(chunk_size, int(os.getenv("RAG_OVERLAP", "140")))
+        tokenizer = _get_tokenizer()
 
-            for page_number, page_text in pages:
-                for piece in _chunk(
-                    page_text, chunk=chunk_size, overlap=overlap, encoder=tokenizer
-                ):
-                    sha = _hash_chunk(name, page_number, piece)
-                    chunks.append(
-                        {
-                            "file": name,
-                            "page": page_number,
-                            "sha256": sha,
-                            "text": piece,
-                        }
-                    )
+        for page_number, page_text in iter_document_pages(name, data):
+            if not page_text:
+                continue
+            for piece in _chunk(page_text, chunk=chunk_size, overlap=overlap, encoder=tokenizer):
+                sha = _hash_chunk(name, page_number, piece)
+                chunks.append(
+                    {
+                        "file": name,
+                        "page": page_number,
+                        "sha256": sha,
+                        "text": piece,
+                    }
+                )
         return chunks
     except Exception:
         status = "error"
