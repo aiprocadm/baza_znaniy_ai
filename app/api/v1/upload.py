@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-import secrets
 import mimetypes
+import secrets
 from pathlib import Path
+from tempfile import SpooledTemporaryFile
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
@@ -62,11 +63,69 @@ async def upload_file(
     if not uploads:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="UPLOAD_EMPTY")
 
+    def _as_bytes(value: object) -> bytes:
+        if isinstance(value, bytes):
+            return value
+        if isinstance(value, bytearray):
+            return bytes(value)
+        if isinstance(value, memoryview):  # pragma: no cover - defensive branch
+            return value.tobytes()
+        if value is None:
+            return b""
+        return str(value).encode()
+
+    def _spooled_file(data: object) -> SpooledTemporaryFile:
+        stream = SpooledTemporaryFile(max_size=max(1, limits.max_size), mode="w+b")
+        payload = _as_bytes(data)
+        if payload:
+            stream.write(payload)
+        stream.seek(0)
+        return stream
+
     def _coerce(item: object) -> UploadFile:
         if isinstance(item, UploadFile):
             return item
+
+        filename: Optional[str] = None
+        file_obj = None
+        content_type: Optional[str] = None
+
         if isinstance(item, dict):  # pragma: no cover - compatibility for test stubs
             filename = item.get("filename")
+        codex/update-upload-handling-in-upload.py
+            content_type = item.get("content_type")
+            file_obj = item.get("file")
+            if file_obj is None:
+                file_obj = _spooled_file(item.get("content", b""))
+        elif isinstance(item, (list, tuple)):
+            filename = str(item[0]) if item else "uploaded"
+            if len(item) > 1:
+                candidate = item[1]
+                if hasattr(candidate, "read"):
+                    file_obj = candidate
+                    if hasattr(file_obj, "seek"):
+                        try:
+                            file_obj.seek(0)
+                        except Exception:  # pragma: no cover - defensive
+                            pass
+                else:
+                    file_obj = _spooled_file(candidate)
+            else:
+                file_obj = _spooled_file(b"")
+            if len(item) > 2 and isinstance(item[2], str):
+                content_type = item[2]
+        elif isinstance(item, str):
+            filename = item
+            file_obj = _spooled_file(b"")
+        else:
+            filename = "uploaded"
+            file_obj = _spooled_file(b"")
+
+        if file_obj is None:
+            file_obj = _spooled_file(b"")
+
+        return UploadFile(filename=filename, file=file_obj, content_type=content_type)
+        
             content = item.get("content", b"")
             content_type = item.get("content_type")
             return create_upload_file(filename, content, content_type)
@@ -78,38 +137,60 @@ async def upload_file(
         if isinstance(item, str):
             return create_upload_file(item, b"")
         return create_upload_file("uploaded", b"")
+        main
 
     coerced = [_coerce(item) for item in uploads]
-    upload = next(
-        (
-            item
-            for item in coerced
-            if _normalise_extension((item.filename or "")) in limits.allowed_extensions
-        ),
-        coerced[0],
-    )
-    extension = _normalise_extension(upload.filename or "")
-    if extension not in limits.allowed_extensions:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="UPLOAD_INVALID_EXT")
 
-    payload = await _read_file(upload, limits)
+    selected_extension = ""
+    selected_filename: Optional[str] = None
+    selected_content_type: Optional[str] = None
+    payload: bytes
+
+    try:
+        upload = next(
+            (
+                item
+                for item in coerced
+                if _normalise_extension((item.filename or "")) in limits.allowed_extensions
+            ),
+            coerced[0],
+        )
+
+        selected_filename = upload.filename
+        selected_content_type = getattr(upload, "content_type", None)
+        selected_extension = _normalise_extension(selected_filename or "")
+        if selected_extension not in limits.allowed_extensions:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="UPLOAD_INVALID_EXT")
+
+        payload = await _read_file(upload, limits)
+    finally:
+        for item in coerced:
+            close = getattr(item, "close", None)
+            if close is None:
+                continue
+            try:
+                result = close()
+                if result is not None and hasattr(result, "__await__"):
+                    await result  # type: ignore[func-returns-value]
+            except Exception:  # pragma: no cover - defensive cleanup
+                pass
 
     tenant_dir = data_dir / tenant
     tenant_dir.mkdir(parents=True, exist_ok=True)
 
     file_id = secrets.token_hex(16)
-    target = tenant_dir / f"{file_id}.{extension}"
+    target = tenant_dir / f"{file_id}.{selected_extension}"
     target.write_bytes(payload)
 
-    mime_type = getattr(upload, "content_type", None)
+    mime_type = selected_content_type
     if not mime_type:
-        guessed, _ = mimetypes.guess_type(upload.filename or "")
+        guessed, _ = mimetypes.guess_type(selected_filename or "")
         mime_type = guessed or "application/octet-stream"
 
     record, queued = await ingest_service.register_file(
         tenant,
         str(target),
-        filename=upload.filename or target.name,
+        filename=selected_filename or target.name,
         size=len(payload),
         mime_type=mime_type,
     )
