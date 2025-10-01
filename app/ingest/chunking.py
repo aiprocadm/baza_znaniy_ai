@@ -212,49 +212,64 @@ def _chunk(
     if not text:
         return []
 
-    window = _normalise_window_size(chunk)
-
-    tokenizer = encoder or _get_tokenizer()
-    working_token_ids = list(token_ids) if token_ids is not None else tokenizer.encode(text)
-    if not working_token_ids:
-        return []
-
-    decoded_text: str = ""
+    chunk = max(int(chunk), 1)
     try:
-        decoded_text = tokenizer.decode(working_token_ids)
-    except Exception:  # pragma: no cover - defensive fallback
-        decoded_text = ""
+        overlap_value = int(overlap)
+    except Exception:
+        overlap_value = 0
+    if overlap_value < 0:
+        overlap_value = 0
+    if overlap_value >= chunk:
+        overlap_value = chunk - 1
+    overlap = overlap_value
+    step = chunk - overlap or 1
 
-    if decoded_text:
+    if encoder is None:
+        encoder = _get_tokenizer()
+
+    tokens: List[int] = []
+    if encoder is not None:
+        if token_ids is not None:
+            tokens = list(token_ids)
+        else:
+            try:
+                tokens = list(encoder.encode(text))
+            except Exception:  # pragma: no cover - defensive fallback
+                tokens = []
+
+    decoded_full = ""
+    if tokens:
         try:
-            reencoded = tokenizer.encode(decoded_text)
-        except Exception:  # pragma: no cover - defensive fallback
-            reencoded = []
-        if reencoded:
-            if len(reencoded) < len(working_token_ids):
-                char_tokenizer = _CharTokenizer()
-                char_ids = char_tokenizer.encode(decoded_text)
-                if char_ids:
-                    working_token_ids = char_ids
-                    tokenizer = char_tokenizer
-    token_ids = working_token_ids
+            decoded_full = encoder.decode(tokens)
+        except Exception:  # pragma: no cover - fallback to character chunking
+            decoded_full = ""
 
-    small_window_plan = _handle_small_token_window(
-        text,
-        token_ids,
-        window=window,
-        overlap=overlap,
-        tokenizer=tokenizer,
-    )
-    if small_window_plan is not None:
-        token_ids, tokenizer = small_window_plan
+        if not decoded_full or (len(tokens) > chunk or len(decoded_full) <= chunk):
+            try:
+                pieces: List[str] = []
+                index = 0
+                total = len(tokens)
+                while index < total:
+                    window_tokens = tokens[index : index + chunk]
+                    if not window_tokens:
+                        break
+                    pieces.append(encoder.decode(window_tokens))
+                    index += step
+                return pieces
+            except Exception:  # pragma: no cover - fallback to character chunking
+                pass
 
-    return _iterate_windows(
-        token_ids,
-        window=window,
-        overlap=overlap,
-        tokenizer=tokenizer,
-    )
+    source_text = decoded_full or text
+    pieces: List[str] = []
+    index = 0
+    total = len(source_text)
+    while index < total:
+        window_text = source_text[index : index + chunk]
+        if not window_text:
+            break
+        pieces.append(window_text)
+        index += step
+    return pieces
 
 
 def _iter_pdf_text(handle: BinaryIO) -> Iterator[tuple[int, str]]:
