@@ -5,6 +5,7 @@ from __future__ import annotations
 import inspect
 from dataclasses import dataclass
 from datetime import date, datetime
+from io import BytesIO
 from typing import Annotated, Any, Callable, Dict, List, Optional, get_args, get_origin, get_type_hints
 from types import SimpleNamespace
 
@@ -43,12 +44,30 @@ class Request:
 class UploadFile:
     """Very small subset of the real UploadFile implementation."""
 
-    def __init__(self, filename: str | None = None, content: bytes | None = None) -> None:
+    def __init__(
+        self,
+        filename: str | None = None,
+        file: Any | None = None,
+        *,
+        content_type: str | None = None,
+        headers: Any | None = None,
+    ) -> None:
         self.filename = filename
-        self._content = content or b""
+        self.content_type = content_type
+        self.headers = headers
+        if file is None:
+            file = BytesIO()
+        self.file = file
+        if hasattr(self.file, "seek"):
+            self.file.seek(0)
 
     async def read(self) -> bytes:
-        return self._content
+        if hasattr(self.file, "seek"):
+            self.file.seek(0)
+        data = self.file.read()
+        if isinstance(data, str):
+            data = data.encode()
+        return data or b""
 
 
 def Depends(dependency: Callable[..., Any] | None = None) -> Callable[..., Any] | None:
