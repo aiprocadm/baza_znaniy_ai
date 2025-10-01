@@ -64,7 +64,7 @@ try:  # pragma: no cover - tokenizer optional in some environments
 except ImportError:  # pragma: no cover - fallback used in tests
     tiktoken = None  # type: ignore[assignment]
 
-from app.observability.metrics import record_document_parse
+from app.observability.metrics import record_document_parse, record_document_ocr_pages
 
 LOGGER = logging.getLogger(__name__)
 
@@ -413,7 +413,10 @@ def _iter_pdf_text_pymupdf(data: bytes) -> Iterator[tuple[int, str]]:
                 text = ""
             cleaned = _clean(text)
             if not cleaned:
-                cleaned = _extract_text_via_ocr(page)
+                ocr_text = _extract_text_via_ocr(page)
+                status = "success" if ocr_text else "failure"
+                record_document_ocr_pages(pages=1, status=status, extension="pdf")
+                cleaned = ocr_text
             if cleaned:
                 yield index + 1, cleaned
     finally:

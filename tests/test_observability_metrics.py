@@ -72,6 +72,21 @@ def test_record_document_parse(isolated_metrics: CollectorRegistry) -> None:
     )
 
 
+def test_record_document_ocr_pages(isolated_metrics: CollectorRegistry) -> None:
+    metrics.record_document_ocr_pages(pages=3, status=" success ", extension="  pdf  ")
+    metrics.record_document_ocr_pages(pages=0, status=" failure ", extension=None)
+
+    success_total = isolated_metrics.get_sample_value(
+        "kb_document_ocr_pages_total", {"status": "success", "extension": "pdf"}
+    )
+    assert success_total == pytest.approx(3.0)
+
+    failure_total = isolated_metrics.get_sample_value(
+        "kb_document_ocr_pages_total", {"status": "failure", "extension": "unknown"}
+    )
+    assert failure_total == pytest.approx(1.0)
+
+
 def test_record_index_operation(isolated_metrics: CollectorRegistry) -> None:
     metrics.record_index_operation(" success ", "  weaviate  ", chunks=5, duration=2.25)
     metrics.record_index_operation("", None, chunks=0, duration=-3.0)
