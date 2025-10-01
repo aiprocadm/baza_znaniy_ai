@@ -9,11 +9,12 @@ from typing import Iterable, List, Mapping
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from app.chat.store import ChatStoreProtocol, ConversationAccessError
+from app.core.auth import ensure_tenant_access, get_current_active_user
 from app.core.config import get_settings
-from app.core.deps import get_tenant
 from app.memory.store import MemoryStore
 from app.observability.metrics import record_chat_completion
 from app.models import ChatRequest, ChatResponse, Citation
+from app.models.user import UserRecord
 from app.llm import (
     LoRAAdapterNotFoundError,
     ModelNotFoundError,
@@ -46,11 +47,12 @@ def _format_answer(answer: str, citations: Iterable[Citation]) -> str:
 def chat(
     payload: ChatRequest,
     request: Request | None = None,
-    tenant: str = Depends(get_tenant),
+    user: UserRecord = Depends(get_current_active_user),
+    tenant: str = Depends(ensure_tenant_access),
 ) -> ChatResponse:
     """Return an assistant answer generated via RAG pipeline."""
 
-    LOGGER.debug("Handling chat request", extra={"tenant": tenant})
+    LOGGER.debug("Handling chat request", extra={"tenant": tenant, "user": getattr(user, "email", user.id)})
 
     if request is None:
         from app.main import app as main_app  # lazy import to avoid cycles

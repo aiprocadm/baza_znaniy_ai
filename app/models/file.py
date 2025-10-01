@@ -12,6 +12,10 @@ from sqlalchemy.engine import Engine, make_url
 from sqlalchemy.ext.asyncio import create_async_engine
 from sqlmodel import Field, SQLModel, Session, create_engine
 
+# Ensure metadata is aware of tenant/user tables when engines are initialised
+from app.models.tenant import TenantRecord  # noqa: F401
+from app.models.user import UserRecord  # noqa: F401
+
 
 class FileStatus(str):
     QUEUED = "queued"

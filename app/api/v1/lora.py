@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
+from app.core.auth import require_admin_user
 from app.core.deps import get_lora_manager
 from app.llm.manager import (
     AdapterAlreadyLoadedError,
@@ -12,7 +13,7 @@ from app.llm.manager import (
 )
 from app.models.lora import LoraLoadRequest, LoraStatusResponse, LoraUnloadRequest
 
-router = APIRouter(prefix="/lora", tags=["lora"])
+router = APIRouter(prefix="/lora", tags=["lora"], dependencies=[Depends(require_admin_user)])
 
 HTTP_NOT_FOUND = getattr(status, "HTTP_404_NOT_FOUND", 404)
 HTTP_CONFLICT = getattr(status, "HTTP_409_CONFLICT", 409)

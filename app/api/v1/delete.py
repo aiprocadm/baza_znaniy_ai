@@ -5,7 +5,9 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlmodel import Session
 
-from app.core.deps import get_ingest_session, get_tenant
+from app.core.auth import ensure_tenant_access, get_current_active_user
+from app.core.deps import get_ingest_session
+from app.models.user import UserRecord
 from app.models import DeleteResponse
 from app.models.file import FileRecord
 
@@ -15,8 +17,9 @@ router = APIRouter(tags=["files"])
 @router.delete("/file/{file_id}", response_model=DeleteResponse)
 def delete_file(
     file_id: str,
+    _: UserRecord = Depends(get_current_active_user),
     session: Session = Depends(get_ingest_session),
-    tenant: str = Depends(get_tenant),
+    tenant: str = Depends(ensure_tenant_access),
 ) -> DeleteResponse:
     """Delete file metadata and remove the file from storage."""
 

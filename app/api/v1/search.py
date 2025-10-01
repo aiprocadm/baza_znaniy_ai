@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Query
 
-from app.core.deps import get_tenant
+from app.core.auth import ensure_tenant_access, get_current_active_user
+from app.models.user import UserRecord
 from app.models import SearchHit, SearchResponse
 from app.services.vectorstore import search
 
@@ -13,9 +14,10 @@ router = APIRouter(tags=["search"])
 
 @router.get("/search", response_model=SearchResponse)
 def search_endpoint(
+    _: UserRecord = Depends(get_current_active_user),
     query: str = Query(..., min_length=1),
     top_k: int = Query(5, ge=1, le=50),
-    tenant: str = Depends(get_tenant),
+    tenant: str = Depends(ensure_tenant_access),
 ) -> SearchResponse:
     """Perform a similarity search without invoking the LLM."""
 
