@@ -13,7 +13,7 @@ from app.llm.exceptions import ModelNotFoundError
 from app.models.chat import ChatIn
 
 
-class StubProvider:
+class DummyProvider:
     handles_citations = False
 
     def __init__(self) -> None:
@@ -29,7 +29,7 @@ class StubProvider:
         return "Ответ"
 
 
-class MissingModelProvider(StubProvider):
+class MissingModelProvider(DummyProvider):
     def ensure_model(self) -> None:
         raise ModelNotFoundError("missing.gguf")
 
@@ -55,7 +55,7 @@ def _prepare_app(tmp_path, provider) -> tuple[Request, Settings]:
 
 
 def test_chat_endpoint_uses_fallback_index(tmp_path):
-    provider = StubProvider()
+    provider = DummyProvider()
     request, _settings = _prepare_app(tmp_path, provider)
 
     payload = chat(
@@ -83,7 +83,7 @@ def test_chat_returns_503_when_model_missing(tmp_path):
 
 
 def test_chat_passes_generation_settings(tmp_path):
-    provider = StubProvider()
+    provider = DummyProvider()
     request, settings = _prepare_app(tmp_path, provider)
     settings.llm_temperature = 0.33
     settings.llm_top_p = 0.77
