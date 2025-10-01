@@ -3,13 +3,20 @@
 from __future__ import annotations
 
 import logging
+import sqlite3
 import time
+        codex/add-dependencies-to-requirements.txt
 from typing import Any, Iterable, Mapping
+
+from contextlib import closing
+from http import HTTPStatus
+from typing import Any, Iterable
+        main
 
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile, status
 from fastapi.responses import JSONResponse
 
-from app.chat.store import ConversationAccessError
+from app.chat.store import ChatStore, ConversationAccessError
 from app.ingest import parse_and_chunk
 from app.llm import (
     LoRAAdapterNotFoundError,
@@ -36,6 +43,139 @@ def health() -> JSONResponse:
 @router.head("/health")
 def health_head() -> JSONResponse:
     return health()
+
+
+def _resolve_app_state(request: Request | None):
+    if request is not None:
+        return request.app.state
+    try:  # pragma: no cover - fallback for test stubs without Request injection
+        from app.main import app as main_app
+
+        return main_app.state
+    except Exception:  # pragma: no cover - defensive guard
+        raise RuntimeError("Не удалось определить состояние приложения")
+
+
+def _check_sqlite_ready(state) -> dict[str, Any]:
+    status_info: dict[str, Any] = {"status": "ok"}
+    chat_store = getattr(state, "chat_store", None)
+    settings = getattr(state, "settings", None)
+
+    if isinstance(chat_store, ChatStore):
+        connect = getattr(chat_store, "_connect", None)
+        if callable(connect):
+            try:
+                with closing(connect()) as connection:
+                    connection.execute("SELECT 1")
+            except sqlite3.Error as exc:
+                message = f"SQLite недоступна: {exc}"
+                status_info.update(status="error", detail=message)
+            except Exception as exc:  # pragma: no cover - defensive guard
+                message = f"Ошибка проверки SQLite: {exc}"
+                status_info.update(status="error", detail=message)
+        else:  # pragma: no cover - unexpected backend implementation
+            status_info.update(status="error", detail="Неподдерживаемый backend чата")
+    else:
+        backend = getattr(settings, "chat_db_backend", None)
+        if backend and backend.lower() != "sqlite":
+            status_info.update(status="skipped", detail=f"backend {backend}")
+        else:
+            status_info.update(status="error", detail="Хранилище чата не инициализировано")
+
+    return status_info
+
+
+def _check_vector_store_ready(state) -> dict[str, Any]:
+    status_info: dict[str, Any] = {"status": "ok"}
+    vector_store = getattr(state, "vector_store", None)
+
+    if vector_store is None:
+        status_info.update(status="error", detail="Векторное хранилище не инициализировано")
+        return status_info
+
+    ensure_ready = getattr(vector_store, "ensure_ready", None)
+    if not callable(ensure_ready):  # pragma: no cover - unexpected implementation
+        status_info.update(status="error", detail="Векторное хранилище не поддерживает проверку готовности")
+        return status_info
+
+    try:
+        ensure_ready()
+    except Exception as exc:
+        status_info.update(status="error", detail=f"Векторное хранилище недоступно: {exc}")
+
+    return status_info
+
+
+def _check_llm_ready(state) -> dict[str, Any]:
+    llm_provider = getattr(state, "llm_provider", None)
+    status_info: dict[str, Any] = {
+        "status": "ok" if llm_provider is not None else "error",
+        "provider": getattr(llm_provider, "name", "unknown"),
+    }
+
+    if llm_provider is None:
+        status_info["detail"] = "LLM провайдер не настроен"
+        return status_info
+
+    try:
+        ensure_ready = getattr(llm_provider, "ensure_ready", None)
+        if callable(ensure_ready):
+            ensure_ready()
+            status_info["model"] = "ok"
+        else:
+            llm_provider.ensure_model()
+            status_info["model"] = "ok"
+
+        ensure_adapter = getattr(llm_provider, "ensure_adapter", None)
+        adapter_name = getattr(llm_provider, "adapter_name", None)
+        if callable(ensure_adapter):
+            ensure_adapter()
+            if adapter_name:
+                status_info["adapter"] = "ok"
+        elif adapter_name:
+            status_info["adapter"] = "unknown"
+    except Exception as exc:
+        status_info.update(status="error", detail=f"LLM недоступна: {exc}")
+
+    return status_info
+
+
+@router.get("/ready", response_class=JSONResponse)
+def ready(request: Request | None = None) -> JSONResponse:
+    """Return an extended readiness status for orchestrators and health checks."""
+
+    state = _resolve_app_state(request)
+
+    sqlite_status = _check_sqlite_ready(state)
+    vector_status = _check_vector_store_ready(state)
+    llm_status = _check_llm_ready(state)
+
+    problems: list[str] = []
+    for component, result in (
+        ("sqlite", sqlite_status),
+        ("vector_store", vector_status),
+        ("llm", llm_status),
+    ):
+        if result.get("status") == "error":
+            detail = result.get("detail")
+            problems.append(f"{component}: {detail}" if detail else component)
+
+    payload = {
+        "status": "ok" if not problems else "error",
+        "ts": int(time.time()),
+        "details": {
+            "sqlite": sqlite_status,
+            "vector_store": vector_status,
+            "llm": llm_status,
+        },
+    }
+
+    if problems:
+        payload["message"] = "; ".join(problems)
+        return JSONResponse(payload, status_code=int(HTTPStatus.SERVICE_UNAVAILABLE))
+
+    payload["message"] = "Service ready"
+    return JSONResponse(payload, status_code=int(HTTPStatus.OK))
 
 
 def _normalise_extension(filename: str) -> str:

@@ -79,6 +79,12 @@ pip install --no-cache-dir -r requirements.txt
    ```bash
    huggingface-cli download meta-llama/Meta-Llama-3-8B-Instruct --include "*"
    ```
+   Эндпоинт `/health` проверяет только то, что приложение запущено.
+   Для полной проверки зависимостей используйте `/ready` — он дополнительно
+   валидирует соединение с SQLite, состояние векторного стора и доступность LLM:
+   ```bash
+   docker compose exec kb_web curl -s http://localhost:8000/ready
+   ```
 
 2. Конвертируйте чекпоинт в GGUF с помощью утилиты, поставляемой вместе с
    `llama-cpp-python`:
