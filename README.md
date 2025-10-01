@@ -137,7 +137,8 @@ Front-end состоит из одного HTML-файла с нативным J
 | `DATA_DIR` | `/opt/knowlab/data/files` | Каталог для загружаемых документов и базы чатов. |
         main
 | `VECTOR_BACKEND` | `qdrant` | Тип векторного движка (поддерживаются `qdrant` и `faiss`). |
-| `QDRANT_URL` | `http://qdrant:6333` | Эндпоинт Qdrant. |
+| `QDRANT_URL` | пусто | Эндпоинт Qdrant (оставьте пустым для встроенного режима). |
+| `QDRANT_PATH` | `DATA_DIR/qdrant` | Каталог для встроенного хранилища Qdrant. |
 | `QDRANT_COLLECTION` | `kb_chunks` | Коллекция для документов. |
 | `QDRANT_API_KEY` | пусто | Ключ доступа к Qdrant при необходимости. |
 | `VECTOR_EMBED_MODEL` | `intfloat/multilingual-e5-small` | Модель эмбеддингов. |
@@ -195,7 +196,8 @@ Front-end состоит из одного HTML-файла с нативным J
 
 | `CHAT_MIN_CITATIONS` | `3` | Минимальное число источников в ответе. |
 | `CHAT_MAX_CITATIONS` | `5` | Максимальное число источников в ответе. |
-| `QDRANT_URL` | `http://qdrant:6333` | Эндпоинт Qdrant. |
+| `QDRANT_URL` | пусто | Эндпоинт Qdrant (оставьте пустым для встроенного режима). |
+| `QDRANT_PATH` | `DATA_DIR/qdrant` | Каталог для встроенного хранилища Qdrant. |
 | `QDRANT_COLLECTION` | `kb_chunks` | Коллекция для документов. |
 | `QDRANT_API_KEY` | пусто | Ключ доступа к Qdrant при необходимости. |
 | `OLLAMA_HOST` | `http://ollama:11434` | Эндпоинт Ollama. |
