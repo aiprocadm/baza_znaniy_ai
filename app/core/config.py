@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, Sequence
 
 from pydantic import AliasChoices, Field
 
@@ -13,6 +13,11 @@ try:  # pragma: no cover - compatibility shims for optional imports
     from pydantic import BaseModel, computed_field, field_validator
 except ImportError:  # pragma: no cover - minimal fallbacks
     from pydantic import BaseModel  # type: ignore[assignment]
+
+        codex/clean-app.py-and-routes.py-implementations
+try:  # pragma: no cover - support optional pydantic features
+    from pydantic import computed_field, field_validator
+except ImportError:  # pragma: no cover - fallback for older versions
 
         codex/refactor-rerank.py-to-remove-placeholders
 try:  # pragma: no cover - optional in slim environments
@@ -40,12 +45,25 @@ except ImportError:  # pragma: no cover - fallback for test stubs
         return decorator
 
         codex/clean-up-retriever-module-exports
+        codex/clean-up-retriever-module-exports
 try:  # pragma: no cover - optional dependency
     from pydantic_settings import BaseSettings, SettingsConfigDict
 except ImportError:  # pragma: no cover - lightweight fallback for tests
     class SettingsConfigDict(dict):
         def __init__(self, **kwargs: object) -> None:
             super().__init__(**kwargs)
+
+        codex/clean-app.py-and-routes.py-implementations
+try:  # pragma: no cover - pydantic-settings is optional in tests
+    from pydantic_settings import BaseSettings, SettingsConfigDict
+except ImportError:  # pragma: no cover - lightweight fallback
+
+    class SettingsConfigDict(dict):  # type: ignore[override]
+        def __init__(self, **kwargs):
+            super().__init__()
+            for key, value in kwargs.items():
+                setattr(self, key, value)
+        main
 
         codex/refactor-rerank.py-to-remove-placeholders
 try:  # pragma: no cover - prefer the real pydantic-settings integration
@@ -69,6 +87,9 @@ except ImportError:  # pragma: no cover - lightweight shim for tests
         codex/clean-up-retriever-module-exports
 
         def __init__(self, **data: object) -> None:
+        codex/clean-app.py-and-routes.py-implementations
+            super().__init__(**data)
+
             # Minimal environment loading to emulate BaseSettings.
             values: dict[str, object] = {}
             for name in getattr(self, "__annotations__", {}):
@@ -78,6 +99,7 @@ except ImportError:  # pragma: no cover - lightweight shim for tests
                     values[name] = env_value
             values.update(data)
             super().__init__(**values)
+        main
 
         main
 
@@ -112,6 +134,10 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("DATA_DIR", "FILES_ROOT"),
     )
         codex/clean-up-retriever-module-exports
+        codex/clean-up-retriever-module-exports
+
+        codex/clean-app.py-and-routes.py-implementations
+        main
 
         codex/refactor-rerank.py-to-remove-placeholders
     files_subdir: str = Field(default="files", validation_alias=AliasChoices("FILES_SUBDIR"))
@@ -141,11 +167,18 @@ class Settings(BaseSettings):
         ),
     )
         codex/clean-up-retriever-module-exports
+        codex/clean-up-retriever-module-exports
     files_subdir: str = Field(default="files", validation_alias=AliasChoices("FILES_SUBDIR"))
 
     # Chat storage -------------------------------------------------------
     chat_db_backend: str = Field(default="sqlite", validation_alias=AliasChoices("CHAT_DB_BACKEND"))
     chat_db_path: Path | None = Field(default=None, validation_alias=AliasChoices("CHAT_DB_PATH"))
+
+        codex/clean-app.py-and-routes.py-implementations
+    files_subdir: str = Field(default="files", validation_alias=AliasChoices("FILES_SUBDIR"))
+
+    # Chat storage -------------------------------------------------------
+        main
 
 
     # Chat storage -------------------------------------------------------
@@ -153,6 +186,7 @@ class Settings(BaseSettings):
 
         codex/clean-up-config.py-and-consolidate-fields
 
+        main
         main
         main
         main
@@ -300,9 +334,15 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("VECTOR_EMBED_DIMENSION", "EMBED_DIMENSION"),
     )
         codex/clean-up-retriever-module-exports
+        codex/clean-up-retriever-module-exports
 
     # LLM provider -------------------------------------------------------
     llm_provider: str = Field(default="ollama", validation_alias=AliasChoices("LLM_PROVIDER"))
+
+        codex/clean-app.py-and-routes.py-implementations
+
+    # LLM provider -------------------------------------------------------
+        main
 
         codex/refactor-rerank.py-to-remove-placeholders
 
@@ -318,6 +358,7 @@ class Settings(BaseSettings):
 
 
     # LLM provider -------------------------------------------------------
+        main
         main
         main
         main
@@ -342,6 +383,8 @@ class Settings(BaseSettings):
         default=6000,
         validation_alias=AliasChoices("MAX_CONTEXT_TOKENS"),
     )
+        codex/clean-app.py-and-routes.py-implementations
+
         codex/refactor-rerank.py-to-remove-placeholders
 
         codex/clean-up-config.py-and-consolidate-fields
@@ -369,8 +412,12 @@ class Settings(BaseSettings):
 
     # Security -----------------------------------------------------------
         codex/clean-up-retriever-module-exports
+        codex/clean-up-retriever-module-exports
     secret_key: str = Field(default="change-me", validation_alias=AliasChoices("SECRET_KEY"))
     jwt_algorithm: str = Field(default="HS256", validation_alias=AliasChoices("JWT_ALGORITHM"))
+
+        codex/clean-app.py-and-routes.py-implementations
+        main
 
         codex/refactor-rerank.py-to-remove-placeholders
     secret_key: str = Field(default="change-me", validation_alias=AliasChoices("SECRET_KEY"))
@@ -378,6 +425,7 @@ class Settings(BaseSettings):
 
         codex/clean-up-config.py-and-consolidate-fields
 
+        main
         main
         main
         main
@@ -419,6 +467,10 @@ class Settings(BaseSettings):
         "chat_memory_ttl_days",
         "chat_memory_max_tokens",
         codex/clean-up-retriever-module-exports
+        codex/clean-up-retriever-module-exports
+
+        codex/clean-app.py-and-routes.py-implementations
+        main
         "access_token_expire_minutes",
         "max_context_tokens",
         "max_generation_tokens",
@@ -446,7 +498,11 @@ class Settings(BaseSettings):
     )
         main
     @classmethod
+        codex/clean-app.py-and-routes.py-implementations
+    def _parse_int(cls, value: object) -> object:
+
     def _normalise_origins(cls, value: object) -> list[str] | object:
+        main
         if value in {None, "", Ellipsis}:
         codex/refactor-rerank.py-to-remove-placeholders
             return ["*"]
@@ -466,6 +522,13 @@ class Settings(BaseSettings):
         return int(value)
 
         codex/clean-up-retriever-module-exports
+        codex/clean-up-retriever-module-exports
+
+        codex/clean-app.py-and-routes.py-implementations
+    @field_validator("chat_memory_enabled", "rerank_enabled", mode="before")
+    @classmethod
+    def _parse_bool(cls, value: object) -> bool:
+        main
 
         codex/clean-up-config.py-and-consolidate-fields
     @field_validator("rate_burst", mode="before")
@@ -501,8 +564,9 @@ class Settings(BaseSettings):
     def _empty_to_none(cls, value: object) -> int | None:
 =
     def _normalise_bool(cls, value: object) -> bool:
+        main
         if isinstance(value, str):
-            return value.lower() in {"1", "true", "yes", "on"}
+            return value.strip().lower() in {"1", "true", "yes", "on"}
         return bool(value)
 
         main
@@ -528,9 +592,12 @@ class Settings(BaseSettings):
             raise ValueError("RERANK_TOPK must be at least 1")
         return value
 
+        codex/clean-app.py-and-routes.py-implementations
+
         codex/refactor-rerank.py-to-remove-placeholders
     @field_validator("chat_db_backend", "vector_backend", "llm_provider", mode="after")
 
+        main
     @field_validator("ollama_base_url", mode="after")
     @classmethod
     def _strip_trailing_slash(cls, value: str) -> str:
@@ -542,9 +609,9 @@ class Settings(BaseSettings):
         if value in {None, "", Ellipsis}:
             return ["*"]
         if isinstance(value, str):
-            items = [piece.strip() for piece in value.split(",") if piece.strip()]
+            items = [item.strip() for item in value.split(",") if item.strip()]
             return items or ["*"]
-        if isinstance(value, Iterable):
+        if isinstance(value, Sequence):
             items = [str(item).strip() for item in value if str(item).strip()]
             return items or ["*"]
         raise ValueError("CORS origins must be a string or iterable")
@@ -563,6 +630,10 @@ class Settings(BaseSettings):
         return value
 
         codex/clean-up-retriever-module-exports
+        codex/clean-up-retriever-module-exports
+
+        codex/clean-app.py-and-routes.py-implementations
+        main
     @field_validator("data_dir", mode="after")
     @classmethod
     def _ensure_dir(cls, value: Path) -> Path:
@@ -612,7 +683,7 @@ class Settings(BaseSettings):
         return minimum, maximum
 
     def iter_secret_fields(self) -> Iterable[str]:
-        """Return names of settings that contain secrets."""
+        """Return names of settings that contain sensitive values."""
 
         return ("secret_key", "qdrant_api_key", "chat_db_dsn")
 
