@@ -4,12 +4,43 @@ from __future__ import annotations
 
 import sys
 import types
+from pathlib import Path
 from typing import Any
 
 
 def install_service_stubs() -> None:
     """Ensure external dependencies are replaced with lightweight stubs."""
 
+    if "llama_cpp" not in sys.modules:
+        llama_module = types.ModuleType("llama_cpp")
+
+        class DummyLlama:
+            def __init__(self, *args: Any, **kwargs: Any) -> None:
+                self.args = args
+                self.kwargs = kwargs
+                self.adapters: dict[str, dict[str, Any]] = {}
+                self.active_adapter: str | None = None
+
+            def load_adapter(self, path: str, adapter_name: str | None = None, scale: float | None = None) -> None:
+                name = adapter_name or Path(path).stem or "adapter"
+                self.adapters[name] = {"path": path, "scale": scale}
+                self.active_adapter = name
+
+            def set_adapter(self, adapter_name: str) -> None:
+                if adapter_name not in self.adapters:
+                    raise ValueError("Adapter not loaded")
+                self.active_adapter = adapter_name
+
+            def unload_adapter(self, adapter_name: str | None = None) -> None:
+                target = adapter_name or self.active_adapter
+                if target is None:
+                    return
+                self.adapters.pop(target, None)
+                if self.active_adapter == target:
+                    self.active_adapter = None
+
+        llama_module.Llama = DummyLlama
+        sys.modules["llama_cpp"] = llama_module
     if "qdrant_client" not in sys.modules:
         qdrant_module = types.ModuleType("qdrant_client")
 

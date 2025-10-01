@@ -12,6 +12,7 @@ from fastapi import Request
 from sqlmodel import Session
 
 from app.core.config import get_settings
+from app.llm.manager import LlamaLoraManager
 from app.ingest.service import IngestService
 
 
@@ -122,12 +123,38 @@ def get_ingest_session(request: Request = None) -> Iterator[Session]:
         yield session
 
 
+def get_lora_manager(request: Request = None) -> LlamaLoraManager:
+    """Access the shared LoRA manager instance."""
+
+    app_state = None
+    if request is not None:
+        app = getattr(request, 'app', None)
+        if app is None and hasattr(request, 'scope'):
+            app = request.scope.get('app')
+        if app is not None:
+            app_state = getattr(app, 'state', None)
+    if app_state is None:
+        try:  # pragma: no cover - fallback path for stubbed requests
+            from app.main import app as main_app  # type: ignore
+        except Exception:  # pragma: no cover - defensive
+            main_app = None
+        if main_app is not None:
+            app_state = getattr(main_app, 'state', None)
+    if app_state is None:
+        raise RuntimeError('LoRA manager is not configured')
+    manager = getattr(app_state, 'lora_manager', None)
+    if not isinstance(manager, LlamaLoraManager):
+        raise RuntimeError('LoRA manager is not configured')
+    return manager
+
+
 __all__ = [
     "DEFAULT_ALLOWED_EXTENSIONS",
     "UploadLimits",
     "get_data_dir",
     "get_ingest_service",
     "get_ingest_session",
+    "get_lora_manager",
     "get_tenant",
     "get_upload_limits",
 ]

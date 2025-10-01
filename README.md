@@ -91,6 +91,29 @@ pip install -r requirements.txt
 заполненные объекты или сервис временно недоступен, сообщения об ошибках
 показываются прямо в интерфейсе.
 
+## API управления LoRA
+
+LoRA-адаптеры можно подгружать и выгружать через REST без перезапуска сервиса.
+При успешной загрузке состояние отображается в эндпоинте `/ready`. Примеры запросов:
+
+```bash
+curl -X POST http://localhost:8000/api/v1/lora/load \
+  -H 'Content-Type: application/json' \
+  -d '{"path":"/path/to/adapter.gguf","scaling":0.85}'
+```
+
+```bash
+curl -X POST http://localhost:8000/api/v1/lora/unload \
+  -H 'Content-Type: application/json' \
+  -d '{"path":"/path/to/adapter.gguf","scaling":1.0}'
+```
+
+Текущее состояние адаптера можно проверить:
+
+```bash
+curl -s http://localhost:8000/ready
+```
+
 ### Пайплайн ассетов
 
 Front-end состоит из одного HTML-файла с нативным JavaScript и встроенными

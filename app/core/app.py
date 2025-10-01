@@ -15,6 +15,8 @@ from app.core.config import get_settings
 from app.core.services import init_chat_store, init_memory_store
 from app.ingest import IngestService, IngestWorker, parse_and_chunk  # noqa: F401
 from app.llm import LLMProvider, get_cached_provider
+from app.models.lora import LoraStatusResponse
+from app.llm.manager import LlamaLoraManager
 from app.retriever import CrossEncoderReranker, get_reranker, get_vector_store
 from app.services.files import FileStore, IngestQueue
 from app.ui import router as ui_router
@@ -68,6 +70,7 @@ def create_app(provider: LLMProvider | None = None) -> FastAPI:
     memory_store = init_memory_store(settings)
     llm_provider = provider or get_cached_provider(settings)
     vector_store = get_vector_store(settings)
+    lora_manager = LlamaLoraManager(settings)
     reranker = _initialise_reranker(settings)
     summarizer = ConversationSummarizer(chat_store, llm_provider.generate)
 
@@ -85,6 +88,7 @@ def create_app(provider: LLMProvider | None = None) -> FastAPI:
     application.state.chat_store = chat_store
     application.state.llm_provider = llm_provider
     application.state.llm_client = llm_provider
+    application.state.lora_manager = lora_manager
     application.state.vector_store = vector_store
     application.state.memory_store = memory_store
     application.state.file_store = file_store
@@ -105,6 +109,15 @@ def create_app(provider: LLMProvider | None = None) -> FastAPI:
 
     application.include_router(ui_router)
     application.include_router(api_router)
+
+    @application.get("/ready")
+    async def readiness() -> dict[str, object]:
+        manager = getattr(application.state, "lora_manager", None)
+        lora_payload = None
+        if isinstance(manager, LlamaLoraManager):
+            status = await manager.get_status()
+            lora_payload = LoraStatusResponse.from_status(status).model_dump()
+        return {"status": "ok", "lora": lora_payload}
 
     @application.on_event("startup")
     async def _startup_ingestion_worker() -> None:  # pragma: no cover - I/O heavy
