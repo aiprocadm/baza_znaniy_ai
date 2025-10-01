@@ -16,6 +16,7 @@ from fastapi.responses import JSONResponse, Response
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
 from app.chat.store import ChatStore, ConversationAccessError
+from app.core.config import get_settings, get_version_info
 from app.core.deps import DEFAULT_ALLOWED_EXTENSIONS, UploadLimits, get_upload_limits
 from app.ingest import parse_and_chunk
 from app.llm import (
@@ -58,6 +59,114 @@ def health() -> JSONResponse:
 @router.head("/health")
 def health_head() -> JSONResponse:
     return health()
+
+
+@router.get("/version", response_class=JSONResponse)
+def version(request: Request) -> JSONResponse:
+    """Return version information for the service and its models."""
+
+    state = _resolve_app_state(request)
+    settings = getattr(state, "settings", None)
+    if settings is None:
+        settings = get_settings()
+
+    payload = get_version_info(settings)
+    payload["ts"] = int(time.time())
+    return JSONResponse(payload)
+
+
+@router.post("/warmup", response_class=JSONResponse)
+def warmup(request: Request) -> JSONResponse:
+    """Preload heavy dependencies like the LLM and vector store."""
+
+    state = _resolve_app_state(request)
+    llm_provider = getattr(state, "llm_provider", None)
+    vector_store = getattr(state, "vector_store", None)
+
+    details: dict[str, Any] = {}
+    problems: list[str] = []
+
+    if llm_provider is None:
+        details["llm"] = {"status": "skipped", "detail": "LLM provider not configured"}
+    else:
+        actions: dict[str, dict[str, Any]] = {}
+        component_status = "ok"
+
+        for action_name in ("ensure_model", "ensure_ready", "ensure_adapter"):
+            operation = getattr(llm_provider, action_name, None)
+            if not callable(operation):
+                actions[action_name] = {"status": "skipped", "detail": "not available"}
+                continue
+            try:
+                operation()
+            except Exception as exc:  # pragma: no cover - defensive logging
+                logger.exception("LLM warmup failed during %s", action_name)
+                actions[action_name] = {
+                    "status": "error",
+                    "detail": str(exc),
+                }
+                component_status = "error"
+                problems.append(f"llm.{action_name}: {exc}")
+            else:
+                actions[action_name] = {"status": "ok"}
+
+        if actions and all(result["status"] == "skipped" for result in actions.values()):
+            component_status = "skipped"
+
+        details["llm"] = {
+            "status": component_status,
+            "provider": getattr(llm_provider, "name", "unknown"),
+            "actions": actions,
+        }
+
+    if vector_store is None:
+        details["vector_store"] = {
+            "status": "skipped",
+            "detail": "Vector store not configured",
+        }
+    else:
+        store_actions: dict[str, dict[str, Any]] = {}
+        store_status = "ok"
+        ensure_ready = getattr(vector_store, "ensure_ready", None)
+        if not callable(ensure_ready):
+            store_actions["ensure_ready"] = {"status": "skipped", "detail": "not available"}
+            store_status = "skipped"
+        else:
+            try:
+                ensure_ready()
+            except Exception as exc:  # pragma: no cover - vector backend specific
+                logger.exception("Vector store warmup failed")
+                store_actions["ensure_ready"] = {
+                    "status": "error",
+                    "detail": str(exc),
+                }
+                store_status = "error"
+                problems.append(f"vector_store.ensure_ready: {exc}")
+            else:
+                store_actions["ensure_ready"] = {"status": "ok"}
+
+        details["vector_store"] = {
+            "status": store_status,
+            "backend": type(vector_store).__name__,
+            "actions": store_actions,
+        }
+
+    overall_status = "error" if any(
+        component.get("status") == "error" for component in details.values()
+    ) else "ok"
+
+    status_code = int(HTTPStatus.OK if overall_status == "ok" else HTTPStatus.SERVICE_UNAVAILABLE)
+    payload = {
+        "status": overall_status,
+        "ts": int(time.time()),
+        "details": details,
+    }
+    if problems:
+        payload["message"] = "; ".join(problems)
+    else:
+        payload["message"] = "Warmup completed"
+
+    return JSONResponse(payload, status_code=status_code)
 
 
 def _resolve_app_state(request: Request | None):

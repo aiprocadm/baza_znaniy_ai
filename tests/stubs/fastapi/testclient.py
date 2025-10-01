@@ -4,11 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import inspect
-        codex/update-upload-handling-in-upload.py
 from tempfile import SpooledTemporaryFile
 
 from io import BytesIO
-        main
 from typing import TYPE_CHECKING, Any, Iterable
 
 from . import HTTPException, UploadFile, _build_call_arguments, _serialise
@@ -82,7 +80,6 @@ class TestClient:
                         entries = [value]
 
                     for entry in entries:  # type: ignore[assignment]
-        codex/update-upload-handling-in-upload.py
                         if isinstance(entry, (list, tuple)):
                             filename = entry[0]
                             raw_content = entry[1] if len(entry) > 1 else b""
@@ -109,7 +106,6 @@ class TestClient:
                         upload_list.append(UploadFile(filename=filename, file=file_obj, content_type=content_type))
 
                         upload_list.append(_build_upload_file(entry))
-        main
 
                 if upload_list:
                     payload["files"] = upload_list
@@ -146,7 +142,6 @@ class TestClient:
                 uploads: list[UploadFile] = []
 
                 if isinstance(value, list):
-        codex/update-upload-handling-in-upload.py
                     entries = value
                 else:
                     entries = [value]
@@ -182,7 +177,6 @@ class TestClient:
                     uploads = [_build_upload_file(item) for item in value]
                 else:
                     uploads = [_build_upload_file(value)]
-        main
                 kwargs[key] = uploads
         try:
             result = route.handler(**kwargs)
