@@ -8,6 +8,8 @@ from functools import lru_cache
 from typing import Optional
 
 from sqlalchemy import UniqueConstraint
+from sqlalchemy.engine import Engine, make_url
+from sqlalchemy.ext.asyncio import create_async_engine
 from sqlmodel import Field, SQLModel, Session, create_engine
 
 
@@ -78,8 +80,16 @@ def _connect_args(url: str) -> dict:
 
 
 @lru_cache(maxsize=1)
-def get_engine(url: Optional[str] = None):
-    db_url = url or os.getenv("DB_URL", "sqlite:///data/ingest.db")
+def get_engine(url: Optional[str] = None) -> Engine:
+    db_url = url or os.getenv("DB_URL", "sqlite+aiosqlite:///./var/data/kb.sqlite")
+    dialect = make_url(db_url)
+
+    if dialect.drivername.endswith("+aiosqlite"):
+        async_engine = create_async_engine(db_url, echo=False)
+        sync_engine = async_engine.sync_engine
+        SQLModel.metadata.create_all(sync_engine)
+        return sync_engine
+
     engine = create_engine(db_url, echo=False, connect_args=_connect_args(db_url))
     SQLModel.metadata.create_all(engine)
     return engine
