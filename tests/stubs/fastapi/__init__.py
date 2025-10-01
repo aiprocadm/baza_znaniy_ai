@@ -5,6 +5,7 @@ from __future__ import annotations
 import inspect
 from dataclasses import dataclass
 from datetime import date, datetime
+        codex/update-upload-handling-in-upload.py
 from tempfile import SpooledTemporaryFile
 from typing import (
     Annotated,
@@ -17,6 +18,10 @@ from typing import (
     get_origin,
     get_type_hints,
 )
+
+from io import BytesIO
+from typing import Annotated, Any, Callable, Dict, List, Optional, get_args, get_origin, get_type_hints
+        main
 from types import SimpleNamespace
 
 from pydantic import BaseModel
@@ -59,6 +64,7 @@ class UploadFile:
         filename: str | None = None,
         file: Any | None = None,
         *,
+        codex/update-upload-handling-in-upload.py
         content: bytes | None = None,
         content_type: str | None = None,
     ) -> None:
@@ -75,17 +81,35 @@ class UploadFile:
         self.file = file
         self.content_type = content_type
 
+        content_type: str | None = None,
+        headers: Any | None = None,
+    ) -> None:
+        self.filename = filename
+        self.content_type = content_type
+        self.headers = headers
+        if file is None:
+            file = BytesIO()
+        self.file = file
+        if hasattr(self.file, "seek"):
+            self.file.seek(0)
+        main
+
     async def read(self) -> bytes:
         if hasattr(self.file, "seek"):
             self.file.seek(0)
         data = self.file.read()
         if isinstance(data, str):
+        codex/update-upload-handling-in-upload.py
             return data.encode()
         return data or b""
 
     async def close(self) -> None:
         if hasattr(self.file, "close") and not getattr(self.file, "closed", False):
             self.file.close()
+
+            data = data.encode()
+        return data or b""
+        main
 
 
 def Depends(dependency: Callable[..., Any] | None = None) -> Callable[..., Any] | None:
