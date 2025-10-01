@@ -18,6 +18,24 @@ def chat_store(tmp_path: Path) -> ChatStore:
     return ChatStore(str(db_path))
 
 
+def test_chat_store_initializes_with_bare_filename(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    store = ChatStore("chat.sqlite3")
+
+    conversation_id = store.ensure_conversation("bare", None)
+    assert isinstance(conversation_id, str)
+
+
+def test_chat_store_initializes_with_memory_database() -> None:
+    store = ChatStore(":memory:")
+
+    # Re-running schema initialisation should succeed for in-memory databases.
+    store._init_schema()
+    assert store.db_path == ":memory:"
+
+
 def test_ensure_conversation_creation_and_ownership(chat_store: ChatStore) -> None:
     conversation_id = chat_store.ensure_conversation("alice", None)
     assert isinstance(conversation_id, str)
@@ -144,3 +162,24 @@ def test_memory_store_truncates_to_token_limit(tmp_path: Path) -> None:
 
     assert transcript.startswith("user")
     assert len(transcript) == store.max_tokens * 2
+
+
+def test_memory_store_initializes_with_bare_filename(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    store = MemoryStore("memory.sqlite3", ttl_days=1, summary_trigger=5, max_tokens=200)
+
+    store.record("bare-user", None, "bare message", "bare answer")
+    transcript = store.load_context("bare-user", None)
+
+    assert "user: bare message" in transcript
+    assert "assistant: bare answer" in transcript
+
+
+def test_memory_store_initializes_with_memory_database() -> None:
+    store = MemoryStore(":memory:", ttl_days=1, summary_trigger=5, max_tokens=200)
+
+    # Re-running schema initialisation ensures the in-memory database stays usable for the session.
+    store._init_sqlite()
+    assert store.db_path == ":memory:"

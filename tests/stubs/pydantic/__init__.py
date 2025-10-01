@@ -84,6 +84,13 @@ else:
         )
 
 
+    def field_validator(*_names: str, mode: str | None = None, **_kwargs: Any):
+        def decorator(function: Callable[..., Any]) -> Callable[..., Any]:
+            return function
+
+        return decorator
+
+
     T = TypeVar("T", bound="BaseModel")
 
 
@@ -167,5 +174,6 @@ else:
         "BaseModel",
         "EmailStr",
         "Field",
+        "field_validator",
         "ValidationError",
     ]
