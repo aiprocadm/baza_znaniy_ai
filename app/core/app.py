@@ -79,8 +79,10 @@ def create_app(provider: LLMProvider | None = None) -> FastAPI:
     ingest_service = IngestService(
         max_retries=settings.ingest_max_retries,
         backoff_seconds=settings.ingest_backoff_seconds,
+        auto_process=True,
     )
     ingest_worker = IngestWorker(ingest_service)
+    ingest_service.set_worker(ingest_worker)
 
     min_citations, max_citations = settings.citations_bounds
 
@@ -114,34 +116,28 @@ def create_app(provider: LLMProvider | None = None) -> FastAPI:
     @application.on_event("startup")
     async def _startup_ingestion_worker() -> None:  # pragma: no cover - I/O heavy
         worker = getattr(application.state, "ingest_worker", None)
-        if worker is None or not hasattr(worker, "run"):
+        service = getattr(application.state, "ingest_service", None)
+        if worker is None or service is None:
             return
         try:
+        codex/add-fields-to-pagerecord-and-chunkrecord
+            service.ensure_background_worker()
+
             worker.ensure_started()
             application.state.ingest_worker_task = getattr(worker, "_task", None)
+        main
         except Exception:  # pragma: no cover - defensive
             logger.exception("Failed to start ingestion worker")
-            application.state.ingest_worker_task = None
 
     @application.on_event("shutdown")
     async def _shutdown_ingestion_worker() -> None:  # pragma: no cover - I/O heavy
-        worker = getattr(application.state, "ingest_worker", None)
-        task = getattr(application.state, "ingest_worker_task", None)
-        if worker is not None and hasattr(worker, "stop"):
-            try:
-                worker.stop()
-            except Exception:  # pragma: no cover - defensive
-                logger.exception("Failed to signal ingestion worker shutdown")
-        if task is not None:
-            task.cancel()
-            try:
-                await task
-            except asyncio.CancelledError:
-                pass
-            except Exception:  # pragma: no cover - defensive
-                logger.exception("Error while awaiting ingestion worker shutdown")
-            finally:
-                application.state.ingest_worker_task = None
+        service = getattr(application.state, "ingest_service", None)
+        if service is None:
+            return
+        try:
+            await service.stop_background_worker()
+        except Exception:  # pragma: no cover - defensive
+            logger.exception("Failed to stop ingestion worker")
 
     return application
 

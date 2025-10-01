@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import List, Optional
+from typing import Any, List, Optional
 
 from pydantic import BaseModel, Field
 
@@ -66,7 +66,7 @@ class SearchHit(BaseModel):
 class SearchResponse(BaseModel):
     """Response model for search requests."""
 
-    query: str
+    query: Any
     hits: List[SearchHit]
 
 
@@ -114,12 +114,39 @@ class FileInfo(BaseModel):
     size: int
     chunks: Optional[int] = None
     error: Optional[str] = None
+    document_id: Optional[str] = None
+    document_status: Optional[str] = None
+    mime_type: Optional[str] = None
 
 
 class FilesResponse(BaseModel):
     """Wrapper for listing files."""
 
     files: List[FileInfo]
+
+
+class JobInfo(BaseModel):
+    """Representation of an asynchronous job entry."""
+
+    id: str
+    tenant_id: str
+    job_type: str
+    status: str
+    priority: int
+    error: Optional[str] = None
+    attempt: int = 0
+    resource_id: Optional[str] = None
+    payload: Optional[dict[str, Any]] = None
+    created_at: datetime
+    updated_at: datetime
+    started_at: Optional[datetime] = None
+    finished_at: Optional[datetime] = None
+
+
+class JobsResponse(BaseModel):
+    """Wrapper returned by the admin jobs endpoint."""
+
+    jobs: List[JobInfo]
 
 
 class DeleteResponse(BaseModel):
@@ -138,6 +165,8 @@ __all__ = [
     "DocumentCreate",
     "FileInfo",
     "FilesResponse",
+    "JobInfo",
+    "JobsResponse",
     "IngestRequest",
     "IngestResponse",
     "SearchHit",
