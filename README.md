@@ -64,7 +64,6 @@ pip install -r requirements.txt
 
 ## Локальный запуск через Uvicorn
 
-        codex/update-readme-with-project-specifics
 
 2. Убедитесь, что контейнер отвечает на health-check:
    ```bash
@@ -104,14 +103,11 @@ Front-end состоит из одного HTML-файла с нативным J
 
 | Переменная | Значение по умолчанию | Назначение |
 |------------|-----------------------|------------|
-        codex/update-default-model-and-settings
-        codex/replace-compose.yml-with-docker-compose.yml
 | `DATA_DIR` | `/app/var/data` | Базовый каталог данных, монтируемый в контейнер. |
 | `FILES_ROOT` | `DATA_DIR/files` | Каталог для загружаемых документов и памяти чата. |
 | `GEN_MODEL` | `llama3.1:8b` | Модель для генерации ответов. |
 | `EMBED_MODEL` | `intfloat/multilingual-e5-small` | Модель эмбеддингов. |
 
-        codex/expand-env.example-and-update-configuration
 | `APP_ENV` | `development` | Рабочий профиль приложения (`development`, `production`, и т.д.). |
 | `APP_HOST` | `0.0.0.0` | Хост, на котором поднимается HTTP-сервер. |
 | `APP_PORT` | `8000` | Порт веб-приложения. |
@@ -119,17 +115,14 @@ Front-end состоит из одного HTML-файла с нативным J
 | `DB_URL` | `sqlite+aiosqlite:///./var/data/kb.sqlite` | Хранилище метаданных загрузок и чанков. |
 | `MAX_UPLOAD_MB` | `25` | Максимальный размер загружаемого файла в мегабайтах. |
 | `UPLOAD_ALLOWED_EXTS` | `pdf,docx,txt` | Допустимые расширения файлов. |
-        main
 
 | `DATA_DIR` | `/opt/knowlab/data/files` | Каталог для загружаемых документов и базы чатов. |
-        main
 | `VECTOR_BACKEND` | `qdrant` | Тип векторного движка (поддерживаются `qdrant` и `faiss`). |
 | `QDRANT_URL` | пусто | Эндпоинт Qdrant (оставьте пустым для встроенного режима). |
 | `QDRANT_PATH` | `DATA_DIR/qdrant` | Каталог для встроенного хранилища Qdrant. |
 | `QDRANT_COLLECTION` | `kb_chunks` | Коллекция для документов. |
 | `QDRANT_API_KEY` | пусто | Ключ доступа к Qdrant при необходимости. |
 | `VECTOR_EMBED_MODEL` | `intfloat/multilingual-e5-small` | Модель эмбеддингов. |
-        codex/expand-env.example-and-update-configuration
 | `VECTOR_EMBED_DIMENSION` | `384` | Размерность эмбеддингов. |
 | `EMBED_BATCH_SIZE` | `32` | Размер батча при расчёте эмбеддингов. |
 | `LLM_PROVIDER` | `ollama` | Провайдер LLM (`ollama` или `stub`). |
@@ -143,24 +136,17 @@ Front-end состоит из одного HTML-файла с нативным J
 | `LLM_PROVIDER` | `ollama` | Провайдер LLM. |
 | `LLM_MODEL_NAME` | `llama3.1:8b` | Модель генерации ответов. |
 
-        codex/update-default-model-and-settings-5pychu
 | `LLM_PROVIDER` | `ollama` | Провайдер LLM (`ollama` или `stub`). |
 | `LLM_MODEL_NAME` / `OLLAMA_MODEL` | `llama3.1:8b` | Модель генерации ответов. |
-        codex/update-default-model-and-settings
-        main
 | `OLLAMA_BASE_URL` | `http://ollama:11434` | Базовый URL Ollama. |
 | `MAX_CONTEXT_TOKENS` | `6000` | Максимальное количество токенов контекста для Ollama. |
 | `MAX_GENERATION_TOKENS` | пусто | Ограничение на количество токенов генерации (по умолчанию без ограничения). |
 | `RAG_TOKENIZER_NAME` | `cl100k_base` | Название токенизатора для разбиения. |
 
-        main
 
-        main
 | `OLLAMA_BASE_URL` | `http://ollama:11434` | Базовый URL Ollama. |
 | `MAX_CONTEXT_TOKENS` | `6000` | Максимальное количество токенов контекста для Ollama. |
 | `MAX_GENERATION_TOKENS` | `1024` | Ограничение на количество токенов при генерации. |
-        main
-        main
 | `RAG_TOKENIZER_NAME` | `cl100k_base` | Название токенизатора для разбиения. |
 | `RAG_CHUNK` | `900` | Размер чанка в токенах. |
 | `RAG_OVERLAP` | `140` | Перекрытие чанков. |
@@ -175,7 +161,6 @@ Front-end состоит из одного HTML-файла с нативным J
 | `CHAT_DB_PATH` | пусто | Путь к SQLite (по умолчанию `DATA_DIR/db/chat_history.sqlite`). |
 | `CHAT_DB_DSN` | пусто | Строка подключения к PostgreSQL при `CHAT_DB_BACKEND=postgres`. |
 | `CHAT_DB_SCHEMA` | пусто | Необязательная схема PostgreSQL. |
-        codex/expand-env.example-and-update-configuration
 | `CHAT_MEMORY_ENABLED` | `false` | Включить долговременную память чата. |
 | `MEMORY_DB_PATH` | пусто | Путь к базе памяти (по умолчанию `DATA_DIR/db/memory.sqlite`). |
 | `CHAT_MEMORY_TTL_DAYS` | `90` | Сколько дней хранить сообщения в памяти. |
@@ -189,7 +174,6 @@ Front-end состоит из одного HTML-файла с нативным J
 | `QDRANT_API_KEY` | пусто | Ключ доступа к Qdrant при необходимости. |
 | `OLLAMA_HOST` | `http://ollama:11434` | Эндпоинт Ollama. |
 
-        main
 | `SECRET_KEY` | `change-me` | Ключ подписи JWT. |
 | `JWT_ALGORITHM` | `HS256` | Алгоритм подписи JWT. |
 | `ACCESS_TOKEN_EXPIRE_MINUTES` | `30` | Время жизни токена в минутах. |
@@ -198,7 +182,6 @@ Front-end состоит из одного HTML-файла с нативным J
 > автоматически переключается на символьный токенизатор и генерирует окна по
 > символам с учётом заданного перекрытия.
 
-        codex/update-default-model-and-settings
 ### Переключение провайдера и моделей
 
 По умолчанию сервис использует Ollama с моделью `llama3.1:8b`. Поменять провайдера
@@ -217,11 +200,9 @@ Front-end состоит из одного HTML-файла с нативным J
 
 ### Переключение провайдера и модели LLM
 
-        codex/expand-env.example-and-update-configuration
 История диалогов по умолчанию сохраняется в SQLite-файле по пути `DATA_DIR/db/chat_history.sqlite`. При необходимости можно переключить приложение на PostgreSQL, задав `CHAT_DB_BACKEND=postgres` и передав строку подключения через `CHAT_DB_DSN`. Для каждого сообщения хранится пользователь, идентификатор диалога, роли (`user`/`assistant`) и содержание. Эти данные используются для восстановления контекста между запросами.
 
 Логи приложения пишутся как в stdout, так и в файл `DATA_DIR/logs/app.log`. Каталоги `DATA_DIR` и вложенные директории создаются автоматически при старте сервиса.
-        main
 
 Метаданные загрузок и чанков по умолчанию сохраняются в SQLite-базе `./var/data/kb.sqlite` (см. `DB_URL`). Путь можно поменять, указав собственный DSN в переменной окружения.
 
@@ -244,12 +225,10 @@ Front-end состоит из одного HTML-файла с нативным J
 История диалогов по умолчанию сохраняется в SQLite-файле по пути `DATA_DIR/db/chat_history.sqlite`. При необходимости можно переключить приложение на PostgreSQL, задав `CHAT_DB_BACKEND=postgres` и передав строку подключения через `CHAT_DB_DSN`. Для каждого сообщения хранится пользователь, идентификатор диалога, роли (`user`/`assistant`) и содержание. Эти данные используются для восстановления контекста между запросами.
 
 Логи приложения пишутся как в stdout, так и в файл `DATA_DIR/logs/app.log`. Каталоги `DATA_DIR` и подкаталоги `logs` создаются автоматически при старте сервиса.
-        main
 
 ## Тестирование
 
 Локально можно запустить unit-тесты (без Docker):
-        main
 ```bash
 source .venv/bin/activate
 uvicorn app.api.main:app --host 0.0.0.0 --port 8000 --reload
