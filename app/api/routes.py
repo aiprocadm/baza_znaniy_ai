@@ -16,6 +16,7 @@ from fastapi.responses import JSONResponse, Response
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
 from app.chat.store import ChatStore, ConversationAccessError
+from app.core.deps import DEFAULT_ALLOWED_EXTENSIONS, UploadLimits, get_upload_limits
 from app.ingest import parse_and_chunk
 from app.llm import (
     LoRAAdapterNotFoundError,
@@ -233,6 +234,44 @@ def _normalise_extension(filename: str) -> str:
     return name.rsplit(".", 1)[-1].lower()
 
 
+def _get_allowed_extensions(request: Request) -> set[str]:
+    state = getattr(request, "app", None)
+    state = getattr(state, "state", None)
+
+    if state is not None:
+        limits = getattr(state, "upload_limits", None)
+        if isinstance(limits, UploadLimits):
+            return set(limits.allowed_extensions)
+
+    try:
+        limits = get_upload_limits()
+    except Exception:
+        return set(DEFAULT_ALLOWED_EXTENSIONS)
+
+    if state is not None:
+        setattr(state, "upload_limits", limits)
+
+    return set(limits.allowed_extensions)
+
+
+def _coerce_upload_file(value: Any) -> UploadFile:
+    if isinstance(value, UploadFile):
+        return value
+    if isinstance(value, dict):
+        candidate = value.get("files") or value.get("file")
+        if candidate is not None:
+            return _coerce_upload_file(candidate)
+    if isinstance(value, (list, tuple)):
+        for item in value:
+            if isinstance(item, UploadFile):
+                return item
+            if isinstance(item, (list, tuple)) and item:
+                filename = item[0]
+                content = item[1] if len(item) > 1 else b""
+                return UploadFile(filename=filename, content=content)
+    raise HTTPException(status.HTTP_400_BAD_REQUEST, "UPLOAD_INVALID_FILE")
+
+
 def _index_chunks(request: Request, chunks: Iterable[dict[str, Any]]) -> int:
     items = list(chunks)
     if not items:
@@ -311,12 +350,14 @@ async def upload(
     user_id: str = Form(...),
     conversation_id: str | None = Form(None),
 ) -> dict[str, Any]:
-    filename = (file.filename or "uploaded").strip()
+    upload_file = _coerce_upload_file(file)
+    filename = (upload_file.filename or "uploaded").strip()
     ext = _normalise_extension(filename)
-    if ext not in {"pdf", "docx", "txt"}:
+    allowed_extensions = _get_allowed_extensions(request)
+    if ext not in allowed_extensions:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "UPLOAD_INVALID_EXT")
 
-    data = await file.read()
+    data = await upload_file.read()
     chunks = parse_and_chunk(filename, data)
     if not chunks:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "NO_TEXT_FOUND")

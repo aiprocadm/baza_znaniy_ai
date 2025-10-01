@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from fastapi import APIRouter
 from fastapi.testclient import TestClient
 
 from tests.demo_assets import ensure_demo_assets
@@ -34,6 +35,11 @@ def _load_service_app(tmp_path: Path) -> Any:
             sys.modules.pop(module_name, None)
 
     install_service_stubs()
+
+    if "app.api.v1" not in sys.modules:
+        v1_module = types.ModuleType("app.api.v1")
+        v1_module.router = APIRouter()
+        sys.modules["app.api.v1"] = v1_module
 
     package = types.ModuleType(package_name)
     package.__path__ = [str(SERVICE_ROOT)]  # type: ignore[attr-defined]
@@ -252,6 +258,61 @@ def test_upload_returns_expected_response(
             {"file": sample_path.name, "page": 2, "content": "chunk-2"},
         ]
     ]
+
+
+@pytest.mark.parametrize(
+    ("filename", "content_type"),
+    [
+        (
+            "slides.pptx",
+            "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        ),
+        (
+            "spreadsheet.xlsx",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        ),
+        ("notes.md", "text/markdown"),
+    ],
+)
+def test_upload_accepts_configured_extensions(
+    service_app: Any, monkeypatch: pytest.MonkeyPatch, filename: str, content_type: str
+) -> None:
+    call_counts = {"parse": 0, "index": 0}
+    extension = filename.rsplit(".", 1)[-1]
+
+    def fake_parse(target: str, data: bytes):
+        call_counts["parse"] += 1
+        assert target == filename
+        assert data == b"payload"
+        return [{"file": target, "page": 1, "content": "chunk"}]
+
+    def fake_index(request: Any, chunks: Any) -> int:
+        call_counts["index"] += 1
+        items = list(chunks)
+        assert items and items[0]["file"] == filename
+        limits = getattr(request.app.state, "upload_limits", None)
+        assert limits is not None
+        allowed = getattr(limits, "allowed_extensions", set())
+        assert extension in allowed
+        return len(items)
+
+    monkeypatch.setattr(service_app, "parse_and_chunk", fake_parse)
+    monkeypatch.setattr("app.api.routes.parse_and_chunk", fake_parse)
+    monkeypatch.setattr("app.api.routes._index_chunks", fake_index)
+
+    with TestClient(service_app.app) as client:
+        response = client.post(
+            "/api/docs/upload",
+            data={"user_id": "tester"},
+            files={"files": (filename, b"payload", content_type)},
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+
+    assert payload["ok"] is True
+    assert payload["chunks"] == 1
+    assert call_counts == {"parse": 1, "index": 1}
 
 
 def test_upload_returns_no_text_found_when_chunks_missing(
