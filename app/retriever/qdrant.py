@@ -1,21 +1,7 @@
-        codex/clean-up-code-and-run-tests
 """Qdrant-backed vector store implementation."""
 
-        codex/refactor-upload-and-ingest-apis-to-use-ingestservice
 from __future__ import annotations
 
-        # codex/implement-vector-store-interface-and-refactor-qdrant-logic
-from .vector_store import QdrantVectorStore, get_vector_store
-
-__all__ = ["QdrantVectorStore", "get_vector_store"]
-=======
-"""Qdrant vector store implementation."""
-        main
-        main
-
-from __future__ import annotations
-
-import os
 from pathlib import Path
 from typing import Callable, Iterable, Iterator, Sequence
 
@@ -26,6 +12,8 @@ from qdrant_client.http.exceptions import UnexpectedResponse
 from sentence_transformers import SentenceTransformer
 
 from app.core.config import Settings, get_settings
+
+__all__ = ["QdrantVectorStore"]
 
 
 class QdrantVectorStore:
@@ -44,8 +32,7 @@ class QdrantVectorStore:
         self._model: SentenceTransformer | None = None
         self._client: QdrantClient | None = None
 
-        data_root = Path(os.getenv("DATA_DIR", str(self.settings.data_dir)))
-        self._storage_dir = data_root / "qdrant"
+        self._storage_dir = Path(self.settings.qdrant_path_resolved)
         self._storage_dir.mkdir(parents=True, exist_ok=True)
 
     # ------------------------------------------------------------------
@@ -71,7 +58,11 @@ class QdrantVectorStore:
 
     def _client_instance(self) -> QdrantClient:
         if self._client is None:
-            kwargs = {"url": self.settings.qdrant_url}
+            url = (self.settings.qdrant_url or "").strip()
+            if url:
+                kwargs: dict[str, object] = {"url": url}
+            else:
+                kwargs = {"path": str(self._storage_dir)}
             if self.settings.qdrant_api_key:
                 kwargs["api_key"] = self.settings.qdrant_api_key
             self._client = self._client_factory(**kwargs)
@@ -270,10 +261,3 @@ class QdrantVectorStore:
         if points:
             client = self._client_instance()
             client.upsert(collection_name=self.settings.qdrant_collection, points=points)
-
-
-__all__ = ["QdrantVectorStore"]
-        codex/refactor-upload-and-ingest-apis-to-use-ingestservice
-        # main
-
-        main
