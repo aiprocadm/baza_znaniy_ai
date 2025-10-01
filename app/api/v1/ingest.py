@@ -2,64 +2,67 @@
 
 from __future__ import annotations
 
-from typing import Optional
-
 from fastapi import APIRouter, Depends, HTTPException
+from sqlmodel import Session
 
-from app.core.deps import get_file_store, get_ingest_queue
-from app.ingest import parse_and_chunk
+from app.core.deps import get_ingest_service, get_ingest_session, get_tenant
+from app.ingest.service import IngestService
 from app.models import IngestRequest, IngestResponse
-from app.services.files import FileRecord, FileStore, IngestQueue, IngestStatus
-from app.services.vectorstore import index_chunks
+from app.models.file import FileRecord, FileStatus
 
 router = APIRouter(tags=["ingest"])
-
-
-def _load_record(store: FileStore, file_id: str) -> FileRecord:
-    record = store.get(file_id)
-    if record is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="FILE_NOT_FOUND")
-    return record
-
-
-def _process_file(record: FileRecord) -> tuple[int, Optional[str]]:
-    try:
-        data = record.path.read_bytes()
-    except FileNotFoundError:
-        return 0, "FILE_MISSING"
-
-    chunks = parse_and_chunk(record.filename, data)
-    if not chunks:
-        return 0, "NO_TEXT_FOUND"
-
-    indexed = index_chunks(chunks)
-    return indexed, None
 
 
 @router.post("/ingest", response_model=IngestResponse)
 async def ingest_file(
     payload: IngestRequest,
-    store: FileStore = Depends(get_file_store),
-    queue: IngestQueue = Depends(get_ingest_queue),
+    ingest_service: IngestService = Depends(get_ingest_service),
+    session: Session = Depends(get_ingest_session),
+    tenant: str = Depends(get_tenant),
 ) -> IngestResponse:
-    """Trigger ingestion of the uploaded file and report its status."""
+    """Ensure the requested file has been ingested and return its status."""
 
-    record = _load_record(store, payload.file_id)
+    try:
+        record_id = int(payload.file_id)
+    except (TypeError, ValueError):  # pragma: no cover - invalid identifier
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="FILE_NOT_FOUND") from None
 
-    if record.status == IngestStatus.PROCESSING:
-        return IngestResponse(file_id=record.id, status=record.status, chunks=record.chunks, error=record.error)
+    record = session.get(FileRecord, record_id)
+    if record is None or record.tenant_id != tenant:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="FILE_NOT_FOUND")
 
-    if record.status == IngestStatus.COMPLETED and not payload.force:
-        return IngestResponse(file_id=record.id, status=record.status, chunks=record.chunks)
+    if record.status in {FileStatus.QUEUED, FileStatus.PROCESSING} and not payload.force:
+        await ingest_service.queue.join()
+        session.refresh(record)
+        return IngestResponse(
+            file_id=str(record.id),
+            status=record.status,
+            chunks=record.chunks,
+            error=record.error,
+        )
 
-    queue.remove(record.id)
-    store.update_status(record.id, status=IngestStatus.PROCESSING, error=None)
+    if record.status == FileStatus.COMPLETED and not payload.force:
+        return IngestResponse(
+            file_id=str(record.id),
+            status=record.status,
+            chunks=record.chunks,
+        )
 
-    indexed, error = _process_file(record)
+    record.status = FileStatus.QUEUED
+    record.retries = 0
+    record.error = None
+    record.chunks = None
+    session.add(record)
+    session.commit()
+    session.refresh(record)
 
-    if error is not None:
-        store.update_status(record.id, status=IngestStatus.FAILED, chunks=indexed, error=error)
-        return IngestResponse(file_id=record.id, status=IngestStatus.FAILED, chunks=indexed, error=error)
+    await ingest_service.enqueue_job(record)
+    await ingest_service.queue.join()
+    session.refresh(record)
 
-    store.update_status(record.id, status=IngestStatus.COMPLETED, chunks=indexed, error=None)
-    return IngestResponse(file_id=record.id, status=IngestStatus.COMPLETED, chunks=indexed)
+    return IngestResponse(
+        file_id=str(record.id),
+        status=record.status,
+        chunks=record.chunks,
+        error=record.error,
+    )

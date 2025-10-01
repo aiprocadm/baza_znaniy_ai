@@ -11,13 +11,12 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from app.core.deps import (
     UploadLimits,
     get_data_dir,
-    get_file_store,
-    get_ingest_queue,
+    get_ingest_service,
     get_tenant,
     get_upload_limits,
 )
 from app.models import UploadResponse
-from app.services.files import FileRecord, FileStore, IngestQueue
+from app.ingest.service import IngestService
 
 router = APIRouter(tags=["upload"])
 
@@ -46,8 +45,7 @@ async def upload_file(
     limits: UploadLimits = Depends(get_upload_limits),
     data_dir: Path = Depends(get_data_dir),
     tenant: str = Depends(get_tenant),
-    store: FileStore = Depends(get_file_store),
-    queue: IngestQueue = Depends(get_ingest_queue),
+    ingest_service: IngestService = Depends(get_ingest_service),
 ) -> UploadResponse:
     """Store an uploaded file on disk and register it for ingestion."""
 
@@ -95,20 +93,27 @@ async def upload_file(
     target = tenant_dir / f"{file_id}.{extension}"
     target.write_bytes(payload)
 
-    record = FileRecord(
-        id=file_id,
+    record, queued = await ingest_service.register_file(
+        tenant,
+        str(target),
         filename=upload.filename or target.name,
-        tenant=tenant,
-        path=target,
         size=len(payload),
     )
-    store.add(record)
-    queue.enqueue(file_id)
+
+    if not queued and record.path != str(target):
+        try:
+            target.unlink()
+        except FileNotFoundError:  # pragma: no cover - defensive cleanup
+            pass
+
+    file_identifier = str(record.id or "")
+    if not file_identifier:
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, detail="UPLOAD_FAILED")
 
     return UploadResponse(
-        file_id=file_id,
+        file_id=file_identifier,
         filename=record.filename,
         tenant=tenant,
         status=record.status,
-        queued=True,
+        queued=queued,
     )

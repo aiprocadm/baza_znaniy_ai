@@ -13,6 +13,16 @@ from app.api.main import api_router
 from app.chat.summarizer import ConversationSummarizer
 from app.core.config import get_settings
 from app.core.services import init_chat_store, init_memory_store
+        codex/refactor-upload-and-ingest-apis-to-use-ingestservice
+from app.ingest import (  # ensure package initialised for scripts
+    IngestService,
+    IngestWorker,
+    parse_and_chunk,
+)
+        # codex/implement-reranking-functionality-and-tests
+from app.llm import get_llm_client
+from app.retriever import CrossEncoderReranker, get_vector_store
+
         codex/create-file-upload-progress-ui-with-fastapi
 from app.llm import LLMProvider, get_cached_provider
 from app.retriever import CrossEncoderReranker, get_reranker, get_vector_store
@@ -24,11 +34,19 @@ from app.ingest import parse_and_chunk  # ensure package initialised for scripts
 from app.llm import LLMProvider, get_cached_provider
 from app.retriever import CrossEncoderReranker, get_reranker, get_vector_store
 from app.services.files import FileStore, IngestQueue
+        main
 
         main
 
 logger = logging.getLogger(__name__)
 
+        codex/refactor-upload-and-ingest-apis-to-use-ingestservice
+        # codex/create-llm-provider-package-and-implementations
+from app.llm import LLMProvider, get_cached_provider
+from app.retriever import get_vector_store
+        # main
+
+        main
 
         codex/create-file-upload-progress-ui-with-fastapi
 def _prepare_cors_origins(origins: Sequence[str] | None) -> list[str]:
@@ -43,7 +61,7 @@ def _prepare_cors_origins(origins: Sequence[str] | None) -> list[str]:
 
 from app.llm import LLMProvider, get_cached_provider
 from app.retriever import CrossEncoderReranker, get_reranker, get_vector_store
-        main
+        # main
 
 logger = logging.getLogger(__name__)
 
@@ -81,13 +99,37 @@ def create_app(provider: LLMProvider | None = None) -> FastAPI:
     memory_store = init_memory_store(settings)
     llm_provider = provider or get_cached_provider(settings)
     vector_store = get_vector_store(settings)
+        codex/refactor-upload-and-ingest-apis-to-use-ingestservice
+        # codex/implement-reranking-functionality-and-tests
+    reranker = None
+
         codex/create-file-upload-progress-ui-with-fastapi
 
     reranker: CrossEncoderReranker | None = None
+        main
     if settings.rerank_enabled:
         try:
             reranker = get_reranker()
         except Exception:  # pragma: no cover - optional dependency initialisation
+
+        codex/refactor-upload-and-ingest-apis-to-use-ingestservice
+        # codex/create-llm-provider-package-and-implementations
+    summarizer = ConversationSummarizer(chat_store, llm_provider.generate)
+
+        # main
+    summarizer = ConversationSummarizer(chat_store, llm_client.generate)
+    reranker: CrossEncoderReranker | None = None
+    if settings.rerank_enabled:
+        reranker = get_reranker()
+        # main
+    memory_store = init_memory_store(settings)
+
+    ingest_service = IngestService(
+        max_retries=settings.ingest_max_retries,
+        backoff_seconds=settings.ingest_backoff_seconds,
+    )
+    ingest_worker = IngestWorker(ingest_service)
+
 
         codex/update-app.py-and-ingestion-workflow
     memory_store = init_memory_store(settings)
@@ -117,14 +159,21 @@ def create_app(provider: LLMProvider | None = None) -> FastAPI:
     summarizer = ConversationSummarizer(chat_store, llm_provider.generate)
 
         main
+        main
     application.state.settings = settings
     application.state.chat_store = chat_store
     application.state.llm_provider = llm_provider
     application.state.vector_store = vector_store
     application.state.memory_store = memory_store
+        codex/refactor-upload-and-ingest-apis-to-use-ingestservice
+    application.state.ingest_service = ingest_service
+    application.state.ingest_worker = ingest_worker
+    application.state.ingest_worker_task = None
+
         codex/create-file-upload-progress-ui-with-fastapi
     application.state.file_store = FileStore()
     application.state.ingest_queue = IngestQueue()
+        main
     application.state.fallback_index: list[dict[str, object]] = []
     application.state.chat_history_limit = settings.chat_history_limit
     application.state.retrieve_topk = settings.retrieve_topk
@@ -141,6 +190,24 @@ def create_app(provider: LLMProvider | None = None) -> FastAPI:
     application.state.file_store = file_store
     application.state.ingest_queue = ingest_queue
     application.state.fallback_index: list[dict[str, object]] = []
+
+        codex/refactor-upload-and-ingest-apis-to-use-ingestservice
+    @application.on_event("startup")
+    async def _start_ingest_worker() -> None:
+        task = asyncio.create_task(ingest_worker.run())
+        application.state.ingest_worker_task = task
+
+    @application.on_event("shutdown")
+    async def _stop_ingest_worker() -> None:
+        ingest_worker.stop()
+        await ingest_service.queue.put(None)
+        task = application.state.ingest_worker_task
+        if task is not None:
+            try:
+                await task
+            except asyncio.CancelledError:  # pragma: no cover - shutdown race
+                pass
+
 
     application.state.chat_history_limit = settings.chat_history_limit
     application.state.retrieve_topk = settings.retrieve_topk
@@ -187,6 +254,7 @@ def create_app(provider: LLMProvider | None = None) -> FastAPI:
     application.state.fallback_index: list[dict[str, object]] = []
         main
 
+        main
         main
     application.include_router(api_router)
     return application

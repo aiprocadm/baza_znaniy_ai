@@ -1,10 +1,23 @@
+        codex/clean-up-code-and-run-tests
+"""Qdrant-backed vector store implementation."""
+
+        codex/refactor-upload-and-ingest-apis-to-use-ingestservice
+from __future__ import annotations
+
+        # codex/implement-vector-store-interface-and-refactor-qdrant-logic
+from .vector_store import QdrantVectorStore, get_vector_store
+
+__all__ = ["QdrantVectorStore", "get_vector_store"]
+=======
 """Qdrant vector store implementation."""
+        main
+        main
 
 from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Callable, Iterable, Iterator, List, Sequence
+from typing import Callable, Iterable, Iterator, Sequence
 
 import numpy as np
 from qdrant_client import QdrantClient
@@ -147,7 +160,7 @@ class QdrantVectorStore:
         if not len(embeddings):
             return
 
-        points: List[qmodels.PointStruct] = []
+        points: list[qmodels.PointStruct] = []
         for embedding, (identifier, chunk) in zip(embeddings, unique.items()):
             payload = {
                 "file": chunk.get("file"),
@@ -204,7 +217,7 @@ class QdrantVectorStore:
         client = self._client_instance()
         try:
             client.delete_collection(collection_name=self.settings.qdrant_collection)
-        except Exception:
+        except Exception:  # pragma: no cover - collection may not exist
             pass
         self.ensure_ready()
 
@@ -233,7 +246,7 @@ class QdrantVectorStore:
 
     def import_payloads(self, payloads: Iterable[dict[str, object]]) -> None:
         self.ensure_ready()
-        points: List[qmodels.PointStruct] = []
+        points: list[qmodels.PointStruct] = []
         for payload in payloads:
             vector = payload.get("vector")
             text = payload.get("text")
@@ -260,3 +273,7 @@ class QdrantVectorStore:
 
 
 __all__ = ["QdrantVectorStore"]
+        codex/refactor-upload-and-ingest-apis-to-use-ingestservice
+        # main
+
+        main
