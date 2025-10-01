@@ -7,12 +7,13 @@ from sqlmodel import Session, select
 
 from app.ingest.service import IngestService, IngestWorker
 from app.models import file as file_models
-from app.models.entities import JobRecord, JobStatus
+from app.models.entities import JobStatus
 from app.models.file import (
     ChunkRecord,
     DocumentRecord,
     DocumentStatus,
     FileRecord,
+    JobRecord,
     PageRecord,
 )
 

@@ -120,12 +120,9 @@ def create_app(provider: LLMProvider | None = None) -> FastAPI:
         if worker is None or service is None:
             return
         try:
-        codex/add-fields-to-pagerecord-and-chunkrecord
             service.ensure_background_worker()
-
             worker.ensure_started()
             application.state.ingest_worker_task = getattr(worker, "_task", None)
-        main
         except Exception:  # pragma: no cover - defensive
             logger.exception("Failed to start ingestion worker")
 
