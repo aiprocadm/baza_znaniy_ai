@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+from tempfile import SpooledTemporaryFile
 from typing import TYPE_CHECKING, Any, Iterable
 
 from . import HTTPException, UploadFile, _build_call_arguments, _serialise
@@ -79,11 +80,28 @@ class TestClient:
                     for entry in entries:  # type: ignore[assignment]
                         if isinstance(entry, (list, tuple)):
                             filename = entry[0]
-                            content = entry[1] if len(entry) > 1 else b""
+                            raw_content = entry[1] if len(entry) > 1 else b""
+                            if hasattr(raw_content, "read"):
+                                file_obj = raw_content
+                                if hasattr(file_obj, "seek"):
+                                    try:
+                                        file_obj.seek(0)
+                                    except Exception:  # pragma: no cover - defensive
+                                        pass
+                            else:
+                                file_obj = SpooledTemporaryFile(mode="w+b")
+                                if raw_content:
+                                    if isinstance(raw_content, bytes):
+                                        file_obj.write(raw_content)
+                                    else:
+                                        file_obj.write(str(raw_content).encode())
+                                    file_obj.seek(0)
+                            content_type = entry[2] if len(entry) > 2 else None
                         else:
                             filename = str(entry)
-                            content = b""
-                        upload_list.append(UploadFile(filename=filename, content=content))
+                            file_obj = SpooledTemporaryFile(mode="w+b")
+                            content_type = None
+                        upload_list.append(UploadFile(filename=filename, file=file_obj, content_type=content_type))
 
                 if upload_list:
                     payload["files"] = upload_list
@@ -117,11 +135,40 @@ class TestClient:
                 kwargs.setdefault(key, value)
         if files:
             for key, value in files.items():
+                uploads: list[UploadFile] = []
+
                 if isinstance(value, list):
-                    uploads = [UploadFile(filename=item[0], content=item[1]) for item in value]
+                    entries = value
                 else:
-                    filename, content, *_ = value
-                    uploads = [UploadFile(filename=filename, content=content)]
+                    entries = [value]
+
+                for entry in entries:
+                    if isinstance(entry, (list, tuple)):
+                        filename = entry[0]
+                        raw_content = entry[1] if len(entry) > 1 else b""
+                        if hasattr(raw_content, "read"):
+                            file_obj = raw_content
+                            if hasattr(file_obj, "seek"):
+                                try:
+                                    file_obj.seek(0)
+                                except Exception:  # pragma: no cover - defensive
+                                    pass
+                        else:
+                            file_obj = SpooledTemporaryFile(mode="w+b")
+                            if raw_content:
+                                if isinstance(raw_content, bytes):
+                                    file_obj.write(raw_content)
+                                else:
+                                    file_obj.write(str(raw_content).encode())
+                                file_obj.seek(0)
+                        content_type = entry[2] if len(entry) > 2 else None
+                    else:
+                        filename = str(entry)
+                        file_obj = SpooledTemporaryFile(mode="w+b")
+                        content_type = None
+
+                    uploads.append(UploadFile(filename=filename, file=file_obj, content_type=content_type))
+
                 kwargs[key] = uploads
         try:
             result = route.handler(**kwargs)

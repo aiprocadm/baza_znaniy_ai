@@ -5,7 +5,18 @@ from __future__ import annotations
 import inspect
 from dataclasses import dataclass
 from datetime import date, datetime
-from typing import Annotated, Any, Callable, Dict, List, Optional, get_args, get_origin, get_type_hints
+from tempfile import SpooledTemporaryFile
+from typing import (
+    Annotated,
+    Any,
+    Callable,
+    Dict,
+    List,
+    Optional,
+    get_args,
+    get_origin,
+    get_type_hints,
+)
 from types import SimpleNamespace
 
 from pydantic import BaseModel
@@ -43,12 +54,38 @@ class Request:
 class UploadFile:
     """Very small subset of the real UploadFile implementation."""
 
-    def __init__(self, filename: str | None = None, content: bytes | None = None) -> None:
+    def __init__(
+        self,
+        filename: str | None = None,
+        file: Any | None = None,
+        *,
+        content: bytes | None = None,
+        content_type: str | None = None,
+    ) -> None:
+        if file is None:
+            stream = SpooledTemporaryFile(mode="w+b")
+            if content:
+                stream.write(content)
+                stream.seek(0)
+            file = stream
+            self._owns_file = True
+        else:
+            self._owns_file = False
         self.filename = filename
-        self._content = content or b""
+        self.file = file
+        self.content_type = content_type
 
     async def read(self) -> bytes:
-        return self._content
+        if hasattr(self.file, "seek"):
+            self.file.seek(0)
+        data = self.file.read()
+        if isinstance(data, str):
+            return data.encode()
+        return data or b""
+
+    async def close(self) -> None:
+        if hasattr(self.file, "close") and not getattr(self.file, "closed", False):
+            self.file.close()
 
 
 def Depends(dependency: Callable[..., Any] | None = None) -> Callable[..., Any] | None:
