@@ -98,7 +98,9 @@ DB_URL="sqlite+aiosqlite:///./var/data/custom.sqlite" alembic upgrade head
    ```
    Эндпоинт `/health` проверяет только то, что приложение запущено.
    Для полной проверки зависимостей используйте `/ready` — он дополнительно
-   валидирует соединение с SQLite, состояние векторного стора и доступность LLM:
+   валидирует соединение с SQLite, состояние векторного стора и доступность LLM.
+   Метрики Prometheus доступны по `/metrics` и включают показатели парсинга,
+   индексации, поиска и чата.
    ```bash
    docker compose exec kb_web curl -s http://localhost:8000/ready
    ```

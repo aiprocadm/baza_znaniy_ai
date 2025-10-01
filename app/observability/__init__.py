@@ -1,0 +1,41 @@
+"""Observability utilities such as Prometheus metrics."""
+
+from .metrics import (
+    CHAT_CITATIONS_TOTAL,
+    CHAT_COMPLETIONS_TOTAL,
+    CHAT_CONTEXT_HITS_TOTAL,
+    CHAT_LATENCY_SECONDS,
+    DOCUMENT_PARSE_CHUNKS_TOTAL,
+    DOCUMENT_PARSE_DURATION_SECONDS,
+    DOCUMENT_PARSE_TOTAL,
+    INDEX_CHUNKS_TOTAL,
+    INDEX_DURATION_SECONDS,
+    INDEX_OPERATIONS_TOTAL,
+    SEARCH_DURATION_SECONDS,
+    SEARCH_HITS_TOTAL,
+    SEARCH_QUERIES_TOTAL,
+    record_chat_completion,
+    record_document_parse,
+    record_index_operation,
+    record_search_operation,
+)
+
+__all__ = [
+    "CHAT_CITATIONS_TOTAL",
+    "CHAT_COMPLETIONS_TOTAL",
+    "CHAT_CONTEXT_HITS_TOTAL",
+    "CHAT_LATENCY_SECONDS",
+    "DOCUMENT_PARSE_CHUNKS_TOTAL",
+    "DOCUMENT_PARSE_DURATION_SECONDS",
+    "DOCUMENT_PARSE_TOTAL",
+    "INDEX_CHUNKS_TOTAL",
+    "INDEX_DURATION_SECONDS",
+    "INDEX_OPERATIONS_TOTAL",
+    "SEARCH_DURATION_SECONDS",
+    "SEARCH_HITS_TOTAL",
+    "SEARCH_QUERIES_TOTAL",
+    "record_chat_completion",
+    "record_document_parse",
+    "record_index_operation",
+    "record_search_operation",
+]
