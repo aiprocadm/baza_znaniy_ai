@@ -113,9 +113,6 @@ def test_conversation_summarizer_ignores_blank_summary(tmp_path: Path) -> None:
 
     assert summary is None
     assert store.get_summary(conversation_id) is None
-        codex/clean-up-codebase-by-removing-codex-markers
-
-        main
     assert store.messages_since_summary(conversation_id) == 2
     assert prompts, "LLM should have been invoked"
 
