@@ -6,11 +6,16 @@ import hashlib
 import io
 import sys
 import types
-import zipfile
 from typing import List
 
 import pytest
+
+pytest.importorskip("openpyxl")
+pytest.importorskip("pptx")
+
 from openpyxl import Workbook
+from pptx import Presentation
+from pptx.util import Inches
 
 if "app.ingest.service" not in sys.modules:
     service_stub = types.ModuleType("app.ingest.service")
@@ -323,19 +328,20 @@ def _expected_sha(file: str, page: int, text: str) -> str:
 
 
 def _make_pptx_bytes(slides: List[str]) -> bytes:
-    buffer = io.BytesIO()
-    with zipfile.ZipFile(buffer, "w") as archive:
-        for index, text in enumerate(slides, start=1):
-            payload = (
-                "<p:sld xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\" "
-                "xmlns:p=\"http://schemas.openxmlformats.org/presentationml/2006/main\">"
-                "<p:cSld><p:spTree><p:sp><p:txBody><a:p><a:r><a:t>"
-                + text
-                + "</a:t></a:r></a:p></p:txBody></p:sp></p:spTree></p:cSld></p:sld>"
-            )
-            archive.writestr(f"ppt/slides/slide{index}.xml", payload)
-    buffer.seek(0)
-    return buffer.getvalue()
+    presentation = Presentation()
+    blank_index = 6 if len(presentation.slide_layouts) > 6 else 0
+    layout = presentation.slide_layouts[blank_index]
+
+    for text in slides:
+        slide = presentation.slides.add_slide(layout)
+        textbox = slide.shapes.add_textbox(Inches(1), Inches(1.5), Inches(8), Inches(2))
+        textbox.text_frame.clear()
+        textbox.text_frame.text = text
+
+    stream = io.BytesIO()
+    presentation.save(stream)
+    stream.seek(0)
+    return stream.getvalue()
 
 
 
@@ -364,12 +370,20 @@ def test_parse_and_chunk_pdf_uses_mock_tokenizer(monkeypatch: pytest.MonkeyPatch
         def __init__(self, text: str) -> None:
             self._text = text
 
-        def extract_text(self) -> str:
+        def get_text(self, mode: str) -> str:
+            assert mode == "text"
             return self._text
 
-    class FakePdfReader:
-        def __init__(self, _stream: object) -> None:
-            self.pages = [FakePage(text) for text in texts]
+    class FakeDocument:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            self._pages = [FakePage(text) for text in texts]
+            self.page_count = len(self._pages)
+
+        def load_page(self, index: int) -> FakePage:
+            return self._pages[index]
+
+        def close(self) -> None:
+            return None
 
     encode_calls: List[str] = []
 
@@ -388,7 +402,8 @@ def test_parse_and_chunk_pdf_uses_mock_tokenizer(monkeypatch: pytest.MonkeyPatch
         tokenizer_calls["count"] += 1
         return tokenizer
 
-    monkeypatch.setattr(ingest, "PdfReader", FakePdfReader)
+    monkeypatch.setattr(ingest, "fitz", types.SimpleNamespace(open=lambda **_: FakeDocument()))
+    monkeypatch.setattr(ingest, "pdfminer_extract_pages", None)
     monkeypatch.setattr(ingest, "_get_tokenizer", fake_get_tokenizer)
     monkeypatch.setenv("RAG_CHUNK", "50")
     monkeypatch.setenv("RAG_OVERLAP", "0")
@@ -411,6 +426,60 @@ def test_parse_and_chunk_pdf_uses_mock_tokenizer(monkeypatch: pytest.MonkeyPatch
     assert tokenizer_calls["count"] == 1
     for text in cleaned_texts:
         assert text in encode_calls
+
+
+def test_iter_document_pages_pdfminer_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
+    class FakeLTText:
+        def __init__(self, text: str) -> None:
+            self._text = text
+
+        def get_text(self) -> str:
+            return self._text
+
+    def fake_extract_pages(_stream: io.BytesIO):
+        yield [FakeLTText(" First page ")]
+        yield [FakeLTText("Second page")]
+
+    monkeypatch.setattr(ingest, "fitz", None)
+    monkeypatch.setattr(ingest, "pdfminer_extract_pages", fake_extract_pages)
+    monkeypatch.setattr(ingest, "LTTextContainer", FakeLTText)
+
+    pages = list(iter_document_pages("fallback.pdf", b"binary"))
+
+    assert [number for number, _ in pages] == [1, 2]
+    assert pages[0][1] == "First page"
+    assert pages[1][1] == "Second page"
+
+
+def test_iter_document_pages_uses_ocr_when_page_is_empty(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FakePage:
+        def get_text(self, mode: str) -> str:
+            assert mode == "text"
+            return ""
+
+        def get_pixmap(self) -> object:
+            return object()
+
+    class FakeDocument:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            self.page_count = 1
+
+        def load_page(self, index: int) -> FakePage:
+            assert index == 0
+            return FakePage()
+
+        def close(self) -> None:
+            return None
+
+    monkeypatch.setattr(ingest, "fitz", types.SimpleNamespace(open=lambda **_: FakeDocument()))
+    monkeypatch.setattr(ingest, "_OCR_AVAILABLE", True)
+    monkeypatch.setattr(ingest, "_run_ocr_on_pixmap", lambda _pixmap: "ocr text")
+
+    pages = list(iter_document_pages("scan.pdf", b"binary"))
+
+    assert pages == [(1, "ocr text")]
 
 
 def test_parse_and_chunk_docx_uses_mock_tokenizer(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -464,13 +533,26 @@ def test_parse_and_chunk_docx_uses_mock_tokenizer(monkeypatch: pytest.MonkeyPatc
     assert cleaned_text in encode_calls
 
 
-def test_iter_document_pages_splits_markdown_sections() -> None:
-    payload = b"# Intro\nFirst paragraph\n# Next\nSecond part"
+def test_iter_document_pages_converts_markdown_to_plain_text() -> None:
+    payload = b"# Intro\n\n**Bold** text with [link](https://example.com)"
     pages = list(iter_document_pages("notes.md", payload))
 
-    assert [number for number, _ in pages] == [1, 2]
-    assert "Intro" in pages[0][1]
-    assert "Second" in pages[1][1]
+    assert len(pages) == 1
+    page_number, text = pages[0]
+    assert page_number == 1
+    assert "Intro" in text
+    assert "Bold text" in text
+    assert "example.com" not in text
+
+
+def test_iter_document_pages_converts_html_to_plain_text() -> None:
+    payload = b"<html><body><h1>Heading</h1><p>Paragraph with <strong>bold</strong>.</p></body></html>"
+    pages = list(iter_document_pages("page.html", payload))
+
+    assert len(pages) == 1
+    _, text = pages[0]
+    assert text.startswith("Heading")
+    assert "Paragraph with bold." in text
 
 
 def test_iter_document_pages_reads_pptx_slides() -> None:
