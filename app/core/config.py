@@ -171,6 +171,11 @@ class Settings(BaseSettings):
         default=False,
         validation_alias=AliasChoices("RERANK_ENABLED"),
     )
+        codex/refactor-upload-and-ingest-apis-to-use-ingestservice
+    rerank_topk: int = Field(
+        default=10,
+        validation_alias=AliasChoices("RERANK_TOP_K", "RERANK_TOPK"),
+
         codex/expand-env.example-and-update-configuration
     rerank_topk: int = Field(
         default=10,
@@ -182,6 +187,7 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("RERANK_TOP_K", "RERANK_TOPK"),
 
         validation_alias=AliasChoices("RERANK_TOPK", "RERANK_TOP_K"),
+        main
         main
         main
     )
@@ -217,8 +223,19 @@ class Settings(BaseSettings):
         default=140,
         validation_alias=AliasChoices("RAG_OVERLAP"),
     )
+        codex/refactor-upload-and-ingest-apis-to-use-ingestservice
+    ingest_max_retries: int = Field(
+        default=3,
+        validation_alias=AliasChoices("INGEST_MAX_RETRIES"),
+    )
+    ingest_backoff_seconds: float = Field(
+        default=1.0,
+        validation_alias=AliasChoices("INGEST_BACKOFF_SECONDS", "INGEST_BACKOFF_BASE"),
+    )
+
 
     # Vector store -------------------------------------------------------
+        main
     vector_backend: str = Field(
         default="qdrant",
         validation_alias=AliasChoices("VECTOR_BACKEND"),

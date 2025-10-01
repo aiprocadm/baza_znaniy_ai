@@ -1,5 +1,23 @@
+        codex/refactor-upload-and-ingest-apis-to-use-ingestservice
+        # codex/implement-vector-store-interface-and-refactor-qdrant-logic
+"""Vector store abstractions and concrete implementations."""
+
+from __future__ import annotations
+
+import json
+import logging
+from typing import Dict, Iterable, Iterator, List, MutableMapping, Protocol, Sequence, runtime_checkable
+
+import faiss  # type: ignore[import-untyped]
+import numpy as np
+from qdrant_client import QdrantClient
+from qdrant_client.http import models as qmodels
+from qdrant_client.http.exceptions import UnexpectedResponse
+from sentence_transformers import SentenceTransformer
+
         codex/clean-up-code-and-run-tests
 """Vector store protocol and factory helpers."""
+        main
 
 """Common vector store interfaces and factory helpers."""
         main
@@ -7,12 +25,22 @@
 from __future__ import annotations
 
 from typing import Iterable, Protocol, runtime_checkable
+        codex/refactor-upload-and-ingest-apis-to-use-ingestservice
+        # main
+
+        main
 
 from app.core.config import Settings, get_settings
         codex/clean-up-code-and-run-tests
 from .faiss import FaissVectorStore
 from .qdrant import QdrantVectorStore
 
+        codex/refactor-upload-and-ingest-apis-to-use-ingestservice
+
+        # codex/implement-vector-store-interface-and-refactor-qdrant-logic
+logger = logging.getLogger(__name__)
+
+        main
         main
 
 
@@ -118,4 +146,8 @@ def get_vector_store(settings: Settings | None = None) -> VectorStore:
 
 
 __all__ = ["VectorStore", "get_vector_store"]
+          codex/refactor-upload-and-ingest-apis-to-use-ingestservice
+        # main
+
+          main
           main

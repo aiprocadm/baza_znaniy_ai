@@ -1,7 +1,16 @@
         codex/clean-up-code-and-run-tests
 """Qdrant-backed vector store implementation."""
 
+        codex/refactor-upload-and-ingest-apis-to-use-ingestservice
+from __future__ import annotations
+
+        # codex/implement-vector-store-interface-and-refactor-qdrant-logic
+from .vector_store import QdrantVectorStore, get_vector_store
+
+__all__ = ["QdrantVectorStore", "get_vector_store"]
+=======
 """Qdrant vector store implementation."""
+        main
         main
 
 from __future__ import annotations
@@ -264,3 +273,7 @@ class QdrantVectorStore:
 
 
 __all__ = ["QdrantVectorStore"]
+        codex/refactor-upload-and-ingest-apis-to-use-ingestservice
+        # main
+
+        main
