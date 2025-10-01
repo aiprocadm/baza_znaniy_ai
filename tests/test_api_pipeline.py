@@ -14,20 +14,15 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlmodel import Session
 
-        codex/add-user-and-tenant-models
 from tests.service_stubs import install_service_stubs
 
 install_service_stubs()
 
-from app.models import file as file_models
 from app.core import auth as core_auth, deps as core_deps
-from app.services import vectorstore as vectorstore_module
-from app.models.user import UserRole
-
 from app.llm.exceptions import ModelNotFoundError
 from app.models import file as file_models
-from tests.service_stubs import install_service_stubs
-        main
+from app.models.user import UserRole
+from app.services import vectorstore as vectorstore_module
 
 
 @pytest.fixture()

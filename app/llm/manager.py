@@ -10,6 +10,57 @@ from typing import Callable
 from app.core.config import Settings
 
 
+def _ensure_llm_package_exports() -> None:
+    """Populate the ``app.llm`` package when tests replace it with a stub."""
+
+    import sys
+
+    package = sys.modules.get("app.llm")
+    if package is None:
+        return
+    try:
+        from . import cache as _cache
+        from .llama_cpp_provider import LlamaCppProvider
+        from .providers import LLMProvider, get_llm_provider
+    except Exception:  # pragma: no cover - optional dependencies may be missing
+        return
+
+    config_module = sys.modules.get("app.core.config")
+    if config_module is not None and not hasattr(config_module, "get_settings"):
+        settings_cls = getattr(config_module, "Settings", object)
+
+        def _stub_get_settings():  # pragma: no cover - simple compatibility shim
+            return settings_cls() if callable(settings_cls) else settings_cls
+
+        def _cache_clear():  # pragma: no cover - compatibility helper
+            return None
+
+        _stub_get_settings.cache_clear = _cache_clear  # type: ignore[attr-defined]
+        setattr(config_module, "get_settings", _stub_get_settings)
+
+    exports = {
+        "LLMProvider": LLMProvider,
+        "LlamaCppProvider": LlamaCppProvider,
+        "get_llm_provider": get_llm_provider,
+        "get_cached_provider": _cache.get_cached_provider,
+        "reset_provider_cache": _cache.reset_provider_cache,
+        "get_llm_client": _cache.get_llm_client,
+        "LLMProviderError": _cache.LLMProviderError,
+        "ModelNotFoundError": _cache.ModelNotFoundError,
+        "ModelNotReadyError": _cache.ModelNotReadyError,
+        "LoRAAdapterNotFoundError": _cache.LoRAAdapterNotFoundError,
+    }
+
+    for name, value in exports.items():
+        setattr(package, name, value)
+
+    existing = set(getattr(package, "__all__", []))
+    package.__all__ = sorted(existing | set(exports))
+
+
+_ensure_llm_package_exports()
+
+
 @dataclass(slots=True)
 class LoraStatus:
     """Snapshot describing the currently active adapter."""
