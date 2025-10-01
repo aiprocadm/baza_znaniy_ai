@@ -186,7 +186,6 @@ class Settings(BaseSettings):
         default=Path("./models/model.gguf"),
         validation_alias=AliasChoices("LLM_MODEL_PATH", "LLAMA_MODEL_PATH"),
     )
-        codex/add-dependencies-to-requirements.txt
     llm_ctx: int = Field(default=4096, validation_alias=AliasChoices("LLM_CTX", "LLAMA_CTX"))
     llm_threads: int = Field(default=4, validation_alias=AliasChoices("LLM_THREADS"))
     llm_gpu_layers: int = Field(default=0, validation_alias=AliasChoices("LLM_GPU_LAYERS"))
@@ -196,6 +195,7 @@ class Settings(BaseSettings):
     llm_max_tokens: int = Field(
         default=1024,
         validation_alias=AliasChoices("LLM_MAX_TOKENS", "MAX_GENERATION_TOKENS"),
+    )
 
     llm_lora_adapter: str | None = Field(
         default=None,
@@ -204,7 +204,6 @@ class Settings(BaseSettings):
     ollama_base_url: str = Field(
         default="http://ollama:11434",
         validation_alias=AliasChoices("OLLAMA_BASE_URL", "OLLAMA_HOST"),
-        main
     )
     lora_adapter_path: Path | None = Field(
         default=None,
