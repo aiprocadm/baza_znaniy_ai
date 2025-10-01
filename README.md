@@ -98,9 +98,14 @@ DB_URL="sqlite+aiosqlite:///./var/data/custom.sqlite" alembic upgrade head
    ```
    Эндпоинт `/health` проверяет только то, что приложение запущено.
    Для полной проверки зависимостей используйте `/ready` — он дополнительно
+        codex/refactor-/ready-handler-implementation
+   валидирует соединение с SQLite, состояние векторного стора, доступность LLM
+   и активный LoRA-адаптер:
+
    валидирует соединение с SQLite, состояние векторного стора и доступность LLM.
    Метрики Prometheus доступны по `/metrics` и включают показатели парсинга,
    индексации, поиска и чата.
+        main
    ```bash
    docker compose exec kb_web curl -s http://localhost:8000/ready
    ```
@@ -155,6 +160,20 @@ curl -X POST http://localhost:8000/api/v1/lora/unload \
 
 ```bash
 curl -s http://localhost:8000/ready
+```
+
+Ответ содержит раздел `details` со статусами всех ключевых подсистем:
+
+```json
+{
+  "status": "ok",
+  "details": {
+    "sqlite": {"status": "ok"},
+    "vector_store": {"status": "ok"},
+    "llm": {"status": "ok", "model": "ok"},
+    "lora": {"status": "ok", "detail": {"loaded": false}}
+  }
+}
 ```
 
 ### Пайплайн ассетов

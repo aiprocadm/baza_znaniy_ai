@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import inspect
 import logging
 import sqlite3
 import time
 from contextlib import closing
 from http import HTTPStatus
-from typing import Any, Iterable, Mapping
+from typing import Any, Iterable, Mapping, Tuple
 
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile, status
 from fastapi.responses import JSONResponse, Response
@@ -23,6 +24,7 @@ from app.llm import (
     get_cached_provider,
 )
 from app.memory.store import MemoryStore
+from app.models.lora import LoraStatusResponse
 from app.models.chat import ChatIn
 from app.rag.context import build_context
 from app.observability.metrics import (
@@ -151,21 +153,46 @@ def _check_llm_ready(state) -> dict[str, Any]:
     return status_info
 
 
-@router.get("/ready", response_class=JSONResponse)
-def ready(request: Request | None = None) -> JSONResponse:
-    """Return an extended readiness status for orchestrators and health checks."""
+async def _check_lora_ready(state) -> dict[str, Any]:
+    status_info: dict[str, Any] = {"status": "ok"}
+    manager = getattr(state, "lora_manager", None)
 
-    state = _resolve_app_state(request)
+    if manager is None:
+        status_info.update(status="skipped", detail="LoRA manager not configured")
+        return status_info
+
+    get_status = getattr(manager, "get_status", None)
+    if not callable(get_status):  # pragma: no cover - unexpected implementation
+        status_info.update(status="error", detail="LoRA manager missing status accessor")
+        return status_info
+
+    try:
+        status = get_status()
+        if inspect.isawaitable(status):
+            status = await status
+        payload = LoraStatusResponse.from_status(status).model_dump()
+        status_info["detail"] = payload
+        status_info["loaded"] = payload.get("loaded", False)
+    except Exception as exc:
+        status_info.update(status="error", detail=f"LoRA недоступна: {exc}")
+
+    return status_info
+
+
+async def build_ready_payload(state) -> Tuple[int, dict[str, Any]]:
+    """Assemble the readiness response payload for the given application *state*."""
 
     sqlite_status = _check_sqlite_ready(state)
     vector_status = _check_vector_store_ready(state)
     llm_status = _check_llm_ready(state)
+    lora_status = await _check_lora_ready(state)
 
     problems: list[str] = []
     for component, result in (
         ("sqlite", sqlite_status),
         ("vector_store", vector_status),
         ("llm", llm_status),
+        ("lora", lora_status),
     ):
         if result.get("status") == "error":
             detail = result.get("detail")
@@ -178,15 +205,25 @@ def ready(request: Request | None = None) -> JSONResponse:
             "sqlite": sqlite_status,
             "vector_store": vector_status,
             "llm": llm_status,
+            "lora": lora_status,
         },
     }
 
     if problems:
         payload["message"] = "; ".join(problems)
-        return JSONResponse(payload, status_code=int(HTTPStatus.SERVICE_UNAVAILABLE))
+        return int(HTTPStatus.SERVICE_UNAVAILABLE), payload
 
     payload["message"] = "Service ready"
-    return JSONResponse(payload, status_code=int(HTTPStatus.OK))
+    return int(HTTPStatus.OK), payload
+
+
+@router.get("/ready", response_class=JSONResponse)
+async def ready(request: Request) -> JSONResponse:
+    """Return an extended readiness status for orchestrators and health checks."""
+
+    state = _resolve_app_state(request)
+    status_code, payload = await build_ready_payload(state)
+    return JSONResponse(payload, status_code=status_code)
 
 
 def _normalise_extension(filename: str) -> str:
