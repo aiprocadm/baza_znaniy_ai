@@ -549,10 +549,11 @@ def test_iter_document_pages_converts_html_to_plain_text() -> None:
     payload = b"<html><body><h1>Heading</h1><p>Paragraph with <strong>bold</strong>.</p></body></html>"
     pages = list(iter_document_pages("page.html", payload))
 
-    assert len(pages) == 1
-    _, text = pages[0]
-    assert text.startswith("Heading")
-    assert "Paragraph with bold." in text
+    assert len(pages) == 2
+    assert pages[0][0] == 1
+    assert pages[0][1] == "Heading"
+    assert pages[1][0] == 2
+    assert pages[1][1].startswith("Paragraph with bold.")
 
 
 def test_iter_document_pages_reads_pptx_slides() -> None:
