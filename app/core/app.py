@@ -16,7 +16,6 @@ from app.core.config import get_settings
 from app.core.services import init_chat_store, init_memory_store
 from app.ingest import IngestService, IngestWorker, parse_and_chunk  # noqa: F401
 from app.llm import LLMProvider, get_cached_provider
-from app.models.lora import LoraStatusResponse
 from app.llm.manager import LlamaLoraManager
 from app.retriever import CrossEncoderReranker, get_reranker, get_vector_store
 from app.services.files import FileStore, IngestQueue
@@ -111,15 +110,6 @@ def create_app(provider: LLMProvider | None = None) -> FastAPI:
 
     application.include_router(ui_router)
     application.include_router(api_router)
-
-    @application.get("/ready")
-    async def readiness() -> dict[str, object]:
-        manager = getattr(application.state, "lora_manager", None)
-        lora_payload = None
-        if isinstance(manager, LlamaLoraManager):
-            status = await manager.get_status()
-            lora_payload = LoraStatusResponse.from_status(status).model_dump()
-        return {"status": "ok", "lora": lora_payload}
 
     @application.on_event("startup")
     async def _startup_ingestion_worker() -> None:  # pragma: no cover - I/O heavy

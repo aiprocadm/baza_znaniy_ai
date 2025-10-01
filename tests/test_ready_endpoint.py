@@ -1,12 +1,10 @@
 from __future__ import annotations
 
-import json
+import asyncio
 from pathlib import Path
 from types import SimpleNamespace
 
-import pytest
-
-from app.api.routes import ready
+from app.api.routes import build_ready_payload
 from app.chat.store import ChatStore
 
 
@@ -43,10 +41,6 @@ class _BrokenProvider(_HealthyProvider):
         raise RuntimeError("model not available")
 
 
-def _make_request(state: SimpleNamespace) -> SimpleNamespace:
-    return SimpleNamespace(app=SimpleNamespace(state=state))
-
-
 def _build_state(tmp_path: Path, provider, vector_store) -> SimpleNamespace:
     chat_store = ChatStore(str(tmp_path / "chat.sqlite3"))
     settings = SimpleNamespace(chat_db_backend="sqlite")
@@ -58,57 +52,36 @@ def _build_state(tmp_path: Path, provider, vector_store) -> SimpleNamespace:
     )
 
 
-def _extract_json(response) -> dict[str, object]:
-    if hasattr(response, "content") and isinstance(response.content, dict):
-        return response.content
-    body = getattr(response, "body", None)
-    if isinstance(body, (bytes, bytearray)):
-        return json.loads(body.decode())
-    text = getattr(response, "text", None)
-    if isinstance(text, str):
-        return json.loads(text)
-    raise AssertionError("Unable to decode JSON response")
-
-
 def test_ready_endpoint_returns_ok(tmp_path: Path) -> None:
     provider = _HealthyProvider()
     vector_store = _ReadyVectorStore()
     state = _build_state(tmp_path, provider, vector_store)
-    request = _make_request(state)
+    status_code, payload = asyncio.run(build_ready_payload(state))
 
-    response = ready(request)
-    data = _extract_json(response)
-
-    assert response.status_code == 200
-    assert data["status"] == "ok"
-    assert data["details"]["sqlite"]["status"] == "ok"
-    assert data["details"]["vector_store"]["status"] == "ok"
-    assert data["details"]["llm"]["status"] == "ok"
+    assert status_code == 200
+    assert payload["status"] == "ok"
+    assert payload["details"]["sqlite"]["status"] == "ok"
+    assert payload["details"]["vector_store"]["status"] == "ok"
+    assert payload["details"]["llm"]["status"] == "ok"
 
 
 def test_ready_endpoint_reports_llm_error(tmp_path: Path) -> None:
     provider = _BrokenProvider()
     vector_store = _ReadyVectorStore()
     state = _build_state(tmp_path, provider, vector_store)
-    request = _make_request(state)
+    status_code, payload = asyncio.run(build_ready_payload(state))
 
-    response = ready(request)
-    data = _extract_json(response)
-
-    assert response.status_code == 503
-    assert data["status"] == "error"
-    assert "model not available" in data["message"]
-    assert data["details"]["llm"]["status"] == "error"
+    assert status_code == 503
+    assert payload["status"] == "error"
+    assert "model not available" in payload["message"]
+    assert payload["details"]["llm"]["status"] == "error"
 
 
 def test_ready_endpoint_reports_missing_vector_store(tmp_path: Path) -> None:
     provider = _HealthyProvider()
     state = _build_state(tmp_path, provider, vector_store=None)
-    request = _make_request(state)
+    status_code, payload = asyncio.run(build_ready_payload(state))
 
-    response = ready(request)
-    data = _extract_json(response)
-
-    assert response.status_code == 503
-    assert data["status"] == "error"
-    assert data["details"]["vector_store"]["status"] == "error"
+    assert status_code == 503
+    assert payload["status"] == "error"
+    assert payload["details"]["vector_store"]["status"] == "error"

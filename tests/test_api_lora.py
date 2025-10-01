@@ -25,6 +25,8 @@ def lora_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Tes
     monkeypatch.setenv("DATA_DIR", str(data_dir))
     monkeypatch.setenv("DB_URL", f"sqlite:///{tmp_path / 'ingest.db'}")
     monkeypatch.setenv("LLM_MODEL_NAME", str(base_model))
+    monkeypatch.setenv("LLM_MODEL_PATH", str(base_model))
+    monkeypatch.setenv("VECTOR_BACKEND", "faiss")
 
     install_service_stubs()
 
@@ -72,7 +74,9 @@ def test_load_and_unload_adapter_updates_ready(lora_client: TestClient, tmp_path
     ready_response = lora_client.get("/ready")
     assert ready_response.status_code == 200
     ready_payload = ready_response.json()
-    assert ready_payload["lora"]["loaded"] is True
+    lora_details = ready_payload["details"]["lora"]
+    assert lora_details["status"] == "ok"
+    assert lora_details["detail"]["loaded"] is True
 
     unload_response = lora_client.post(
         "/api/v1/lora/unload",
@@ -84,7 +88,10 @@ def test_load_and_unload_adapter_updates_ready(lora_client: TestClient, tmp_path
 
     ready_after = lora_client.get("/ready")
     assert ready_after.status_code == 200
-    assert ready_after.json()["lora"]["loaded"] is False
+    ready_after_payload = ready_after.json()
+    assert (
+        ready_after_payload["details"]["lora"]["detail"]["loaded"] is False
+    )
 
 
 def test_load_missing_adapter_returns_not_found(lora_client: TestClient, tmp_path: Path) -> None:

@@ -120,19 +120,18 @@ def core_app(monkeypatch):
     llm_module = types.ModuleType("app.llm")
     llm_module.__spec__ = ModuleSpec("app.llm", loader=None, is_package=True)
 
-    class StubProvider:
+    class DummyProvider:
         def __init__(self):
             self.generate = lambda *args, **kwargs: None
 
-    llm_module.LLMProvider = StubProvider
-    llm_module.get_cached_provider = lambda settings: StubProvider()
+    llm_module.LLMProvider = DummyProvider
+    llm_module.get_cached_provider = lambda settings: DummyProvider()
     monkeypatch.setitem(sys.modules, "app.llm", llm_module)
 
     llm_providers_module = types.ModuleType("app.llm.providers")
     llm_providers_module.__spec__ = ModuleSpec("app.llm.providers", loader=None)
-    llm_providers_module.LLMProvider = StubProvider
-    llm_providers_module.StubProvider = StubProvider
-    llm_providers_module.get_llm_provider = lambda *args, **kwargs: StubProvider()
+    llm_providers_module.LLMProvider = DummyProvider
+    llm_providers_module.get_llm_provider = lambda *args, **kwargs: DummyProvider()
     monkeypatch.setitem(sys.modules, "app.llm.providers", llm_providers_module)
 
     llm_manager_module = types.ModuleType("app.llm.manager")

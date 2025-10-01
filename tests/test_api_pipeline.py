@@ -14,6 +14,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlmodel import Session
 
+        codex/add-user-and-tenant-models
 from tests.service_stubs import install_service_stubs
 
 install_service_stubs()
@@ -22,6 +23,11 @@ from app.models import file as file_models
 from app.core import auth as core_auth, deps as core_deps
 from app.services import vectorstore as vectorstore_module
 from app.models.user import UserRole
+
+from app.llm.exceptions import ModelNotFoundError
+from app.models import file as file_models
+from tests.service_stubs import install_service_stubs
+        main
 
 
 @pytest.fixture()
@@ -83,14 +89,14 @@ def api_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Test
     monkeypatch.setattr(search_module, "search", lambda query, top_k=5: chunks[:top_k])
     monkeypatch.setattr(chat_module, "search", lambda query, top_k=10: chunks[:top_k])
 
-    class StubProvider:
+    class DummyProvider:
         def ensure_model(self) -> None:
             return None
 
         def generate(self, prompt: str, *, context: dict[str, object] | None = None) -> str:
             return "Ответ"
 
-    app.state.llm_provider = StubProvider()
+    app.state.llm_provider = DummyProvider()
 
     client = TestClient(app)
     try:
@@ -222,3 +228,31 @@ def test_ingest_endpoint_returns_quickly(api_client: TestClient) -> None:
         worker._process = original_process
 
     _wait_for_completion(api_client, file_id, timeout=3.0)
+
+
+def test_chat_returns_503_when_model_missing(api_client: TestClient) -> None:
+    """Ensure chat endpoint propagates missing model errors."""
+
+    class MissingModelProvider:
+        def ensure_model(self) -> None:
+            raise ModelNotFoundError(Path("missing.gguf"))
+
+        def ensure_ready(self) -> None:  # pragma: no cover - defensive stub
+            return None
+
+        def ensure_adapter(self) -> None:  # pragma: no cover - defensive stub
+            return None
+
+        def generate(self, prompt: str, *, context: dict[str, object] | None = None) -> str:
+            return ""
+
+    api_client.app.state.llm_provider = MissingModelProvider()
+
+    response = api_client.post(
+        "/api/v1/chat",
+        json={"user_id": "tester", "message": "Ping", "conversation_id": None},
+    )
+
+    assert response.status_code == 503
+    payload = response.json()
+    assert payload["detail"] == "LLM_MODEL_MISSING"

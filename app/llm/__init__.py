@@ -13,12 +13,11 @@ from .exceptions import (
     ModelNotReadyError,
 )
 from .llama_cpp_provider import LlamaCppProvider
-from .providers import LLMProvider, StubProvider, get_llm_provider
+from .providers import LLMProvider, get_llm_provider
 
 __all__ = [
     "LLMProvider",
     "LlamaCppProvider",
-    "StubProvider",
     "get_llm_provider",
     "get_cached_provider",
     "reset_provider_cache",
