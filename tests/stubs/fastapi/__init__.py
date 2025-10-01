@@ -7,6 +7,7 @@ import io
 from dataclasses import dataclass
 from datetime import date, datetime
 
+
 from typing import Annotated, Any, Callable, Dict, IO, List, Optional, get_args, get_origin, get_type_hints
 
 
@@ -24,10 +25,12 @@ from typing import (
 )
 
 from io import BytesIO
+
 from typing import Annotated, Any, Callable, Dict, List, Optional, get_args, get_origin, get_type_hints
 
         main
         main
+
 
 from types import SimpleNamespace
 
@@ -87,6 +90,9 @@ class UploadFile:
 
         file: Any | None = None,
         *,
+
+        content: bytes | str | None = None,
+
         content: bytes | None = None,
         content_type: str | None = None,
     ) -> None:
@@ -103,15 +109,23 @@ class UploadFile:
         self.file = file
         self.content_type = content_type
 
+
         content_type: str | None = None,
         headers: Any | None = None,
     ) -> None:
         self.filename = filename
         self.content_type = content_type
         self.headers = headers
+
         if file is None:
-            file = BytesIO()
-        self.file = file
+            stream = SpooledTemporaryFile(mode="w+b")
+            if content:
+                data = content.encode() if isinstance(content, str) else bytes(content)
+                stream.write(data)
+            stream.seek(0)
+            file = stream
+
+        self.file = file if file is not None else BytesIO()
         if hasattr(self.file, "seek"):
             self.file.seek(0)
 
@@ -120,12 +134,17 @@ class UploadFile:
             self.file.seek(0)
         data = self.file.read()
         if isinstance(data, str):
+
+            data = data.encode()
+
             return data.encode()
+
         return data or b""
 
     async def close(self) -> None:
         if hasattr(self.file, "close") and not getattr(self.file, "closed", False):
             self.file.close()
+
 
             data = data.encode()
         return data or b""
@@ -133,6 +152,7 @@ class UploadFile:
 
         main
         main
+
 
 
 
