@@ -8,7 +8,8 @@ import pytest
 
 from app.core.config import Settings
 from app.llm import get_cached_provider, reset_provider_cache
-from app.llm.providers import LLMProvider, OllamaProvider, StubProvider, get_llm_provider
+from app.llm.llama_cpp_provider import LlamaCppProvider
+from app.llm.providers import LLMProvider, StubProvider, get_llm_provider
 
 
 def test_get_llm_provider_selects_stub() -> None:
@@ -17,10 +18,12 @@ def test_get_llm_provider_selects_stub() -> None:
     assert isinstance(provider, StubProvider)
 
 
-def test_get_llm_provider_selects_ollama() -> None:
-    settings = Settings(llm_provider="ollama")
+def test_get_llm_provider_selects_llama_cpp(tmp_path) -> None:
+    model_path = tmp_path / "model.gguf"
+    model_path.write_bytes(b"gguf")
+    settings = Settings(llm_provider="llama-cpp", llm_model_path=str(model_path))
     provider = get_llm_provider(settings)
-    assert isinstance(provider, OllamaProvider)
+    assert isinstance(provider, LlamaCppProvider)
 
 
 def test_stub_provider_appends_citations() -> None:

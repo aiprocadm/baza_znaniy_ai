@@ -230,7 +230,7 @@ def _format_answer(answer: str, citations: Iterable[Mapping[str, Any]]) -> str:
     if not items:
         return text
 
-    lines = [text, "", "Источники:"]
+    lines = [text, "", "Источники:", ""]
     for index, citation in enumerate(items, start=1):
         file_id = (
             citation.get("file")
@@ -329,8 +329,8 @@ def chat(payload: ChatRequest) -> ChatResponse:
         conversation_id=conversation_id,
         citations_insufficient=not has_minimum,
         latency_ms=latency_ms,
-        max_context_tokens=settings.max_context_tokens,
-        max_generation_tokens=settings.max_generation_tokens,
+        max_context_tokens=getattr(settings, "llm_ctx", None),
+        max_generation_tokens=getattr(settings, "llm_max_tokens", None),
     )
 
 

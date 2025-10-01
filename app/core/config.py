@@ -122,7 +122,7 @@ class Settings(BaseSettings):
     retrieve_topk: int = Field(default=10, validation_alias=AliasChoices("RETRIEVE_TOPK"))
     rerank_enabled: bool = Field(default=False, validation_alias=AliasChoices("RERANK_ENABLED"))
     rerank_topk: int | None = Field(
-        default=10,
+        default=50,
         validation_alias=AliasChoices("RERANK_TOPK", "RERANK_TOP_K"),
     )
     rag_tokenizer_name: str = Field(default="cl100k_base", validation_alias=AliasChoices("RAG_TOKENIZER_NAME"))
@@ -145,7 +145,7 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("VECTOR_EMBED_DIMENSION", "EMBED_DIMENSION"),
     )
     embed_batch_size: int = Field(
-        default=32,
+        default=64,
         validation_alias=AliasChoices("EMBED_BATCH_SIZE", "VECTOR_EMBED_BATCH_SIZE"),
     )
     qdrant_url: str = Field(
@@ -177,17 +177,30 @@ class Settings(BaseSettings):
     )
 
     # LLM ----------------------------------------------------------------
-    llm_provider: str = Field(default="ollama", validation_alias=AliasChoices("LLM_PROVIDER"))
+    llm_provider: str = Field(default="llama-cpp", validation_alias=AliasChoices("LLM_PROVIDER"))
     llm_model_name: str = Field(
-        default="llama3.1:8b",
-        validation_alias=AliasChoices("LLM_MODEL_NAME", "GEN_MODEL", "OLLAMA_MODEL"),
+        default="kb-llama",
+        validation_alias=AliasChoices("LLM_MODEL_NAME", "GEN_MODEL"),
     )
-    ollama_base_url: str = Field(
-        default="http://ollama:11434",
-        validation_alias=AliasChoices("OLLAMA_BASE_URL", "OLLAMA_HOST"),
+    llm_model_path: Path = Field(
+        default=Path("./models/model.gguf"),
+        validation_alias=AliasChoices("LLM_MODEL_PATH", "LLAMA_MODEL_PATH"),
     )
-    max_context_tokens: int = Field(default=6000, validation_alias=AliasChoices("MAX_CONTEXT_TOKENS"))
-    max_generation_tokens: int = Field(default=1024, validation_alias=AliasChoices("MAX_GENERATION_TOKENS"))
+    llm_ctx: int = Field(default=4096, validation_alias=AliasChoices("LLM_CTX", "LLAMA_CTX"))
+    llm_threads: int = Field(default=4, validation_alias=AliasChoices("LLM_THREADS"))
+    llm_gpu_layers: int = Field(default=0, validation_alias=AliasChoices("LLM_GPU_LAYERS"))
+    llm_temperature: float = Field(default=0.7, validation_alias=AliasChoices("LLM_TEMPERATURE"))
+    llm_top_p: float = Field(default=0.95, validation_alias=AliasChoices("LLM_TOP_P"))
+    llm_top_k: int = Field(default=40, validation_alias=AliasChoices("LLM_TOP_K"))
+    llm_max_tokens: int = Field(
+        default=1024,
+        validation_alias=AliasChoices("LLM_MAX_TOKENS", "MAX_GENERATION_TOKENS"),
+    )
+    lora_adapter_path: Path | None = Field(
+        default=None,
+        validation_alias=AliasChoices("LORA_ADAPTER_PATH"),
+    )
+    lora_scaling: float = Field(default=1.0, validation_alias=AliasChoices("LORA_SCALING"))
 
     # Security -----------------------------------------------------------
     secret_key: str = Field(default="change-me", validation_alias=AliasChoices("SECRET_KEY"))
@@ -234,12 +247,15 @@ class Settings(BaseSettings):
             return 0
         return int(value)
 
-    @field_validator("ollama_base_url", mode="after")
-    @classmethod
-    def _strip_trailing_slash(cls, value: str) -> str:
-        return value.rstrip("/")
-
-    @field_validator("data_dir", "chat_db_path", "memory_db_path", "qdrant_path", mode="before")
+    @field_validator(
+        "data_dir",
+        "chat_db_path",
+        "memory_db_path",
+        "qdrant_path",
+        "llm_model_path",
+        "lora_adapter_path",
+        mode="before",
+    )
     @classmethod
     def _expand_paths(cls, value: object) -> object:
         if isinstance(value, str) and value:

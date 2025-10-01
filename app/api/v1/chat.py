@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Iterable, List
+from typing import Iterable, List, Mapping
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 
@@ -13,13 +13,19 @@ from app.core.config import get_settings
 from app.core.deps import get_tenant
 from app.memory.store import MemoryStore
 from app.models import ChatRequest, ChatResponse, Citation
-from app.ollama_client import ensure_model, generate
+from app.llm import (
+    LoRAAdapterNotFoundError,
+    ModelNotFoundError,
+    ModelNotReadyError,
+)
 from app.rag.context import build_context, select_citations
 from app.services.vectorstore import search
 
 LOGGER = logging.getLogger(__name__)
 
 router = APIRouter(tags=["chat"])
+
+_SERVICE_UNAVAILABLE = getattr(status, "HTTP_503_SERVICE_UNAVAILABLE", 503)
 
 
 def _format_answer(answer: str, citations: Iterable[Citation]) -> str:
@@ -43,7 +49,6 @@ def chat(
 ) -> ChatResponse:
     """Return an assistant answer generated via RAG pipeline."""
 
-    ensure_model()
     LOGGER.debug("Handling chat request", extra={"tenant": tenant})
 
     if request is None:
@@ -72,12 +77,30 @@ def chat(
     rerank_enabled = getattr(app_state, "rerank_enabled", False)
     reranker = getattr(app_state, "reranker", None)
 
-    max_context_tokens = (
-        getattr(settings, "max_context_tokens", None) if settings else None
-    )
-    max_generation_tokens = (
-        getattr(settings, "max_generation_tokens", None) if settings else None
-    )
+    llm_ctx = getattr(settings, "llm_ctx", None) if settings else None
+    llm_max_tokens = getattr(settings, "llm_max_tokens", None) if settings else None
+
+    provider = getattr(app_state, "llm_provider", None)
+    if provider is None and settings is not None:
+        from app.llm import get_cached_provider
+
+        provider = get_cached_provider(settings)
+        app_state.llm_provider = provider
+
+    if provider is None:
+        raise HTTPException(_SERVICE_UNAVAILABLE, detail="LLM_NOT_CONFIGURED")
+
+    try:
+        provider.ensure_model()
+    except ModelNotFoundError as exc:
+        LOGGER.error("LLM model file is missing", extra={"path": str(exc.path)})
+        raise HTTPException(_SERVICE_UNAVAILABLE, detail="LLM_MODEL_MISSING") from exc
+    except LoRAAdapterNotFoundError as exc:
+        LOGGER.error("Configured LoRA adapter is missing", extra={"path": str(exc.path)})
+        raise HTTPException(_SERVICE_UNAVAILABLE, detail="LORA_ADAPTER_MISSING") from exc
+    except ModelNotReadyError as exc:
+        LOGGER.warning("LLM provider is not ready", exc_info=exc)
+        raise HTTPException(_SERVICE_UNAVAILABLE, detail="LLM_NOT_READY") from exc
 
     start = time.perf_counter()
 
@@ -111,28 +134,37 @@ def chat(
 
     context = build_context(hits, token_limit=3000)
 
-    prompt_parts = [
-        "You are a helpful assistant providing concise answers based on the provided documentation context.",
-        "Always answer in Russian.",
+    prompt_sections: list[str] = [
+        "### Система",
+        "Ты — корпоративный ассистент, отвечающий на вопросы по базе знаний.",
+        "Отвечай кратко и по-русски, опираясь на предоставленный контекст.",
     ]
     if summary_text:
-        prompt_parts.extend(["Conversation summary:", summary_text])
+        prompt_sections.extend(["\n### Краткое содержание диалога", summary_text])
     if history_text:
-        prompt_parts.extend(["Recent chat history:", history_text])
+        prompt_sections.extend(["\n### Недавняя история", history_text])
     if memory_text:
-        prompt_parts.extend(["Long-term memory:", memory_text])
-    prompt_parts.extend(
+        prompt_sections.extend(["\n### Долгосрочная память", memory_text])
+    prompt_sections.extend(
         [
-            "Retrieved context:",
-            context or "(нет подходящего контекста)",
-            "",
-            f"User message: {payload.message}",
-            "Сформулируй точный ответ, используя контекст, если он релевантен. Если данных недостаточно, сообщи об этом.",
+            "\n### Контекст",
+            context or "(релевантные фрагменты не найдены)",
+            "\n### Вопрос пользователя",
+            payload.message,
+            "\n### Инструкция",
+            "Если контекст не содержит ответа, честно сообщи об этом. Укажи важные детали кратко.",
         ]
     )
-    prompt = "\n".join(part for part in prompt_parts if part is not None)
+    prompt = "\n".join(filter(None, prompt_sections))
 
-    answer = generate(prompt).strip()
+    generation_context: Mapping[str, object] = {
+        "temperature": getattr(settings, "llm_temperature", 0.7) if settings else 0.7,
+        "top_p": getattr(settings, "llm_top_p", 0.95) if settings else 0.95,
+        "top_k": getattr(settings, "llm_top_k", 40) if settings else 40,
+        "max_tokens": llm_max_tokens or 1024,
+    }
+
+    answer = provider.generate(prompt, context=generation_context).strip()
 
     citations_raw, has_minimum = select_citations(hits, minimum=min_citations, maximum=max_citations)
     citations = [
@@ -163,6 +195,6 @@ def chat(
         conversation_id=conversation_id,
         citations_insufficient=not has_minimum,
         latency_ms=latency_ms,
-        max_context_tokens=max_context_tokens,
-        max_generation_tokens=max_generation_tokens,
+        max_context_tokens=llm_ctx,
+        max_generation_tokens=llm_max_tokens,
     )
