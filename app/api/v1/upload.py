@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+        codex/update-upload-file-handling-and-tests
+import io
+
+        main
 import mimetypes
 import secrets
 from pathlib import Path
@@ -62,6 +66,39 @@ async def upload_file(
     if not uploads:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="UPLOAD_EMPTY")
 
+    coerced = [_coerce_upload_argument(item) for item in uploads]
+    upload = next(
+        (
+            item
+            for item in coerced
+            if _normalise_extension((item.filename or "")) in limits.allowed_extensions
+        ),
+        coerced[0],
+    )
+    extension = _normalise_extension(upload.filename or "")
+    if extension not in limits.allowed_extensions:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="UPLOAD_INVALID_EXT")
+
+    def _as_bytes(value: object) -> bytes:
+        if isinstance(value, bytes):
+            return value
+        if isinstance(value, bytearray):
+            return bytes(value)
+        if isinstance(value, memoryview):  # pragma: no cover - defensive branch
+            return value.tobytes()
+        if value is None:
+            return b""
+        return str(value).encode()
+
+    def _spooled_file(data: object) -> SpooledTemporaryFile:
+        stream = SpooledTemporaryFile(max_size=max(1, limits.max_size), mode="w+b")
+        payload = _as_bytes(data)
+        if payload:
+            stream.write(payload)
+        stream.seek(0)
+        return stream
+
+
     def _coerce(item: object) -> UploadFile:
         if isinstance(item, UploadFile):
             return item
@@ -88,9 +125,14 @@ async def upload_file(
             filename = "uploaded"
             content = b""
 
+
         return create_upload_file(filename, content, content_type)
 
+        return UploadFile(filename=filename, file=file_obj, content_type=content_type)
+
+
     coerced = [_coerce(item) for item in uploads]
+        main
 
     selected_extension = ""
     selected_filename: Optional[str] = None
@@ -163,3 +205,45 @@ async def upload_file(
         status=record.status,
         queued=queued,
     )
+
+
+def _coerce_upload_argument(item: object) -> UploadFile:
+    if isinstance(item, UploadFile):
+        return item
+    if isinstance(item, dict):  # pragma: no cover - compatibility for test stubs
+        filename = item.get("filename")
+        content = item.get("content", b"")
+        return UploadFile(filename=filename, file=io.BytesIO(_ensure_bytes(content)))
+    if isinstance(item, (list, tuple)):
+        filename = item[0] if item else "uploaded"
+        content = item[1] if len(item) > 1 else b""
+        return UploadFile(filename=filename, file=io.BytesIO(_ensure_bytes(content)))
+    if isinstance(item, str):
+        return UploadFile(filename=item, file=io.BytesIO())
+    return UploadFile(filename="uploaded", file=io.BytesIO())
+
+
+def _ensure_bytes(payload: object) -> bytes:
+    if isinstance(payload, bytes):
+        return payload
+    if isinstance(payload, bytearray):
+        return bytes(payload)
+    if isinstance(payload, str):
+        return payload.encode()
+    if payload is None:
+        return b""
+    read = getattr(payload, "read", None)
+    if callable(read):
+        data = read()
+        if isinstance(data, bytes):
+            return data
+        if isinstance(data, str):
+            return data.encode()
+        try:
+            return bytes(data)
+        except Exception:
+            return b""
+    try:
+        return bytes(payload)
+    except Exception:
+        return b""

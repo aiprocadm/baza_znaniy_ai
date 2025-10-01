@@ -3,21 +3,58 @@
 from __future__ import annotations
 
 import hashlib
+import html
 import io
 import logging
 import os
 import re
 import time
 from functools import lru_cache
-from typing import BinaryIO, Iterable, Iterator, List, NamedTuple, Optional, Protocol, Union
+from typing import BinaryIO, Iterator, List, NamedTuple, Optional, Protocol, Union
 
 from docx import Document
-from pypdf import PdfReader
+
+try:  # pragma: no cover - PyMuPDF optional in minimal environments
+    import fitz  # type: ignore[import-not-found]
+except Exception:  # pragma: no cover - gracefully degrade when unavailable
+    fitz = None  # type: ignore[assignment]
+
+try:  # pragma: no cover - pdfminer optional at runtime
+    from pdfminer.high_level import extract_pages as pdfminer_extract_pages
+    from pdfminer.layout import LTTextContainer
+except Exception:  # pragma: no cover - fallback when dependency missing
+    pdfminer_extract_pages = None  # type: ignore[assignment]
+    LTTextContainer = None  # type: ignore[assignment]
 
 try:  # pragma: no cover - optional dependency used for spreadsheets
     from openpyxl import load_workbook
 except Exception:  # pragma: no cover - fallback for minimal environments
     load_workbook = None  # type: ignore[assignment]
+
+try:  # pragma: no cover - optional dependency for PowerPoint parsing
+    from pptx import Presentation
+except Exception:  # pragma: no cover - fallback when dependency missing
+    Presentation = None  # type: ignore[assignment]
+
+try:  # pragma: no cover - optional dependency for HTML conversion
+    import html2text
+except Exception:  # pragma: no cover - fallback when dependency missing
+    html2text = None  # type: ignore[assignment]
+
+try:  # pragma: no cover - optional dependency for Markdown conversion
+    import markdown as markdown_lib
+except Exception:  # pragma: no cover - fallback when dependency missing
+    markdown_lib = None  # type: ignore[assignment]
+
+try:  # pragma: no cover - optional dependency for OCR
+    import pytesseract
+except Exception:  # pragma: no cover - fallback when dependency missing
+    pytesseract = None  # type: ignore[assignment]
+
+try:  # pragma: no cover - optional dependency for OCR
+    from PIL import Image
+except Exception:  # pragma: no cover - fallback when dependency missing
+    Image = None  # type: ignore[assignment]
 
 import zipfile
 from xml.etree import ElementTree as ET
@@ -51,6 +88,8 @@ class _CharTokenizer:
 
 
 _TOKENIZER: Optional[_Tokenizer] = None
+
+_OCR_AVAILABLE = pytesseract is not None and Image is not None
 
 
 def _ensure_binary_stream(data: Union[bytes, bytearray, BinaryIO]) -> BinaryIO:
@@ -120,6 +159,82 @@ def _clean(text: str) -> str:
     """Collapse whitespace and trim the provided *text*."""
 
     return re.sub(r"\s+", " ", text).strip()
+
+
+def _html_to_plain_text(html_content: str) -> str:
+    if not html_content:
+        return ""
+
+    text = html_content
+    if html2text is not None:
+        converter = html2text.HTML2Text()
+        converter.ignore_images = True
+        converter.ignore_links = True
+        converter.ignore_emphasis = True
+        converter.body_width = 0
+        text = converter.handle(html_content)
+    else:  # pragma: no cover - minimal fallback when dependency missing
+        text = re.sub(r"<[^>]+>", " ", html_content)
+
+    text = re.sub(r"^\s*=+\s*$", " ", text, flags=re.MULTILINE)
+    text = re.sub(r"^\s*#+\s*", "", text, flags=re.MULTILINE)
+    text = text.replace("\r", " ")
+    text = text.replace("\n", " ")
+    return _clean(html.unescape(text))
+
+
+def _markdown_to_plain_text(markdown_content: str) -> str:
+    if not markdown_content:
+        return ""
+
+    html_content = (
+        markdown_lib.markdown(markdown_content) if markdown_lib is not None else markdown_content
+    )
+    return _html_to_plain_text(html_content)
+
+
+def _read_stream_to_bytes(stream: BinaryIO) -> bytes:
+    payload = stream.read()
+    if isinstance(payload, bytes):
+        return payload
+    if isinstance(payload, bytearray):
+        return bytes(payload)
+    if isinstance(payload, memoryview):  # pragma: no cover - rarely triggered
+        return payload.tobytes()
+    return str(payload).encode("utf-8", errors="ignore")
+
+
+def _run_ocr_on_pixmap(pixmap: object) -> str:
+    if not _OCR_AVAILABLE:
+        return ""
+
+    try:
+        png_bytes = pixmap.tobytes("png")  # type: ignore[call-arg]
+    except Exception:
+        try:  # pragma: no cover - secondary attempt for alternative APIs
+            png_bytes = pixmap.tobytes()
+        except Exception:
+            return ""
+
+    try:
+        with Image.open(io.BytesIO(png_bytes)) as image:  # type: ignore[call-arg]
+            text = pytesseract.image_to_string(image)
+    except Exception:  # pragma: no cover - OCR failures should not break ingest
+        return ""
+
+    return _clean(text)
+
+
+def _extract_text_via_ocr(page: object) -> str:
+    if not _OCR_AVAILABLE or fitz is None:
+        return ""
+
+    try:
+        pixmap = page.get_pixmap()  # type: ignore[attr-defined]
+    except Exception:
+        return ""
+
+    return _run_ocr_on_pixmap(pixmap)
 
 
 class _WindowPlan(NamedTuple):
@@ -284,16 +399,66 @@ def _chunk(
     return pieces
 
 
-def _iter_pdf_text(handle: BinaryIO) -> Iterator[tuple[int, str]]:
-    reader = PdfReader(handle)
-    for page_number, page in enumerate(reader.pages, start=1):
-        try:
-            text = page.extract_text() or ""
-        except Exception:  # pragma: no cover - pypdf quirks
-            text = ""
-        cleaned = _clean(text)
+def _iter_pdf_text_pymupdf(data: bytes) -> Iterator[tuple[int, str]]:
+    if fitz is None:
+        raise RuntimeError("PyMuPDF is not available")
+
+    document = fitz.open(stream=data, filetype="pdf")  # type: ignore[call-arg]
+    try:
+        for index in range(document.page_count):
+            page = document.load_page(index)
+            try:
+                text = page.get_text("text") or ""
+            except Exception:  # pragma: no cover - PyMuPDF edge cases
+                text = ""
+            cleaned = _clean(text)
+            if not cleaned:
+                cleaned = _extract_text_via_ocr(page)
+            if cleaned:
+                yield index + 1, cleaned
+    finally:
+        document.close()
+
+
+def _iter_pdf_text_pdfminer(data: bytes) -> Iterator[tuple[int, str]]:
+    if pdfminer_extract_pages is None:
+        raise RuntimeError("pdfminer.six is not available")
+
+    stream = io.BytesIO(data)
+    for page_number, layout in enumerate(pdfminer_extract_pages(stream), start=1):
+        fragments: List[str] = []
+        for element in layout:
+            if LTTextContainer is not None and isinstance(element, LTTextContainer):
+                fragments.append(element.get_text())
+            elif hasattr(element, "get_text"):
+                fragments.append(element.get_text())
+        cleaned = _clean(" ".join(part.strip() for part in fragments))
         if cleaned:
             yield page_number, cleaned
+
+
+def _iter_pdf_text(data: bytes) -> Iterator[tuple[int, str]]:
+    pymupdf_error: Optional[BaseException] = None
+    if fitz is not None:
+        try:
+            found = False
+            for item in _iter_pdf_text_pymupdf(data):
+                found = True
+                yield item
+            if found:
+                return
+        except Exception as exc:  # pragma: no cover - PyMuPDF failure fallback
+            pymupdf_error = exc
+            LOGGER.warning("PyMuPDF parser failed, falling back to pdfminer: %s", exc)
+
+    if pdfminer_extract_pages is not None:
+        yield from _iter_pdf_text_pdfminer(data)
+        return
+
+    if pymupdf_error is not None:
+        raise RuntimeError("Failed to parse PDF with available backends") from pymupdf_error
+
+    raise RuntimeError("No PDF parser backend available")
 
 
 def _iter_docx_text(handle: BinaryIO) -> Iterator[tuple[int, str]]:
@@ -347,33 +512,56 @@ def _iter_txt_text(handle: BinaryIO) -> Iterator[tuple[int, str]]:
 
 
 def _iter_markdown_text(handle: BinaryIO) -> Iterator[tuple[int, str]]:
-    wrapper = io.TextIOWrapper(handle, encoding="utf-8", errors="ignore")
-    try:
-        buffer = io.StringIO()
-        page_number = 1
-        for line in wrapper:
-            stripped = line.rstrip()
-            if stripped.startswith("#") and buffer.tell():
-                text = _clean(buffer.getvalue())
-                if text:
-                    yield page_number, text
-                    page_number += 1
-                buffer = io.StringIO()
-            if stripped:
-                if buffer.tell():
-                    buffer.write(" ")
-                buffer.write(stripped)
-        final = _clean(buffer.getvalue())
-        if final:
-            yield page_number, final
-    finally:
-        try:
-            wrapper.detach()
-        except Exception:
-            pass
+    content = handle.read()
+    if isinstance(content, bytes):
+        text = content.decode("utf-8", errors="ignore")
+    else:  # pragma: no cover - defensive fallback for unusual streams
+        text = str(content)
+
+    cleaned = _markdown_to_plain_text(text)
+    if cleaned:
+        yield 1, cleaned
+
+
+def _iter_html_text(handle: BinaryIO) -> Iterator[tuple[int, str]]:
+    content = handle.read()
+    if isinstance(content, bytes):
+        text = content.decode("utf-8", errors="ignore")
+    else:  # pragma: no cover - defensive fallback
+        text = str(content)
+
+    cleaned = _html_to_plain_text(text)
+    if cleaned:
+        yield 1, cleaned
 
 
 def _iter_pptx_text(handle: BinaryIO) -> Iterator[tuple[int, str]]:
+    if Presentation is not None:
+        try:
+            presentation = Presentation(handle)
+            for slide_index, slide in enumerate(presentation.slides, start=1):
+                text_parts: List[str] = []
+                for shape in slide.shapes:
+                    if getattr(shape, "has_text_frame", False):
+                        for paragraph in shape.text_frame.paragraphs:  # type: ignore[union-attr]
+                            runs = [run.text for run in paragraph.runs if run.text]
+                            paragraph_text = " ".join(part.strip() for part in runs if part)
+                            if paragraph_text:
+                                text_parts.append(paragraph_text)
+                    elif hasattr(shape, "text"):
+                        value = str(shape.text).strip()
+                        if value:
+                            text_parts.append(value)
+                cleaned = _clean(" ".join(text_parts))
+                if cleaned:
+                    yield slide_index, cleaned
+            return
+        except Exception:  # pragma: no cover - fallback to zip parsing
+            try:
+                handle.seek(0)
+            except Exception:
+                pass
+
     with zipfile.ZipFile(handle) as archive:
         slide_names = sorted(
             name
@@ -426,19 +614,26 @@ def iter_document_pages(
 
     ext = name.rsplit(".", 1)[-1].lower()
     stream = _ensure_binary_stream(data)
+    raw_bytes = _read_stream_to_bytes(stream)
 
     if ext == "pdf":
-        return _iter_pdf_text(stream)
+        return _iter_pdf_text(bytes(raw_bytes))
+
+    def _buffer() -> BinaryIO:
+        return io.BytesIO(raw_bytes)
+
     if ext == "docx":
-        return _iter_docx_text(stream)
+        return _iter_docx_text(_buffer())
     if ext == "txt":
-        return _iter_txt_text(stream)
+        return _iter_txt_text(_buffer())
     if ext in {"md", "markdown"}:
-        return _iter_markdown_text(stream)
+        return _iter_markdown_text(_buffer())
+    if ext in {"html", "htm"}:
+        return _iter_html_text(_buffer())
     if ext == "pptx":
-        return _iter_pptx_text(stream)
+        return _iter_pptx_text(_buffer())
     if ext == "xlsx":
-        return _iter_xlsx_text(stream)
+        return _iter_xlsx_text(_buffer())
     return iter(())
 
 

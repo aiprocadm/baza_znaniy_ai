@@ -31,6 +31,10 @@ def api_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Test
 
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
     monkeypatch.setenv("DB_URL", f"sqlite:///{tmp_path / 'ingest.db'}")
+    monkeypatch.setenv("APP_VERSION", "test-app-1.2.3")
+    monkeypatch.setenv("LLM_MODEL_VERSION", "test-model-4.5.6")
+    monkeypatch.setenv("LORA_ADAPTER_VERSION", "test-lora-7.8.9")
+    monkeypatch.setenv("LLM_LORA_ADAPTER", "stub-adapter")
     install_service_stubs()
 
     from app.core import config as config_module
@@ -85,8 +89,22 @@ def api_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Test
     monkeypatch.setattr(chat_module, "search", lambda query, top_k=10: chunks[:top_k])
 
     class DummyProvider:
+        name = "dummy-provider"
+        adapter_name = "stub-adapter"
+
+        def __init__(self) -> None:
+            self.ensure_model_calls = 0
+            self.ensure_ready_calls = 0
+            self.ensure_adapter_calls = 0
+
         def ensure_model(self) -> None:
-            return None
+            self.ensure_model_calls += 1
+
+        def ensure_ready(self) -> None:
+            self.ensure_ready_calls += 1
+
+        def ensure_adapter(self) -> None:
+            self.ensure_adapter_calls += 1
 
         def generate(self, prompt: str, *, context: dict[str, object] | None = None) -> str:
             return "Ответ"
@@ -260,3 +278,51 @@ def test_chat_returns_503_when_model_missing(api_client: TestClient) -> None:
     assert response.status_code == 503
     payload = response.json()
     assert payload["detail"] == "LLM_MODEL_MISSING"
+
+
+def test_version_endpoint_reports_versions(api_client: TestClient) -> None:
+    response = api_client.get("/version")
+    assert response.status_code == 200
+
+    payload = response.json()
+    assert payload["app"]["version"] == "test-app-1.2.3"
+    assert payload["model"]["version"] == "test-model-4.5.6"
+    assert payload["lora"]["version"] == "test-lora-7.8.9"
+    assert payload["lora"]["enabled"] is True
+    assert isinstance(payload["ts"], int)
+
+
+def test_warmup_endpoint_preloads_components(
+    api_client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    provider = api_client.app.state.llm_provider
+    vector_store = api_client.app.state.vector_store
+
+    vector_calls = {"count": 0}
+    original_ensure_ready = vector_store.ensure_ready
+
+    def tracked_ensure_ready(*args, **kwargs):
+        vector_calls["count"] += 1
+        return original_ensure_ready(*args, **kwargs)
+
+    monkeypatch.setattr(vector_store, "ensure_ready", tracked_ensure_ready)
+
+    response = api_client.post("/warmup")
+    assert response.status_code == 200, response.json()
+    payload = response.json()
+
+    assert payload["status"] == "ok"
+    assert payload["message"] == "Warmup completed"
+
+    llm_details = payload["details"]["llm"]
+    assert llm_details["actions"]["ensure_model"]["status"] == "ok"
+    assert llm_details["actions"]["ensure_ready"]["status"] == "ok"
+    assert llm_details["actions"]["ensure_adapter"]["status"] == "ok"
+
+    vector_details = payload["details"]["vector_store"]
+    assert vector_details["actions"]["ensure_ready"]["status"] == "ok"
+
+    assert provider.ensure_model_calls == 1
+    assert provider.ensure_ready_calls == 1
+    assert provider.ensure_adapter_calls == 1
+    assert vector_calls["count"] == 1
