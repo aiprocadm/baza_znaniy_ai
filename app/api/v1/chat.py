@@ -163,11 +163,6 @@ def chat(
         conversation_id=conversation_id,
         citations_insufficient=not has_minimum,
         latency_ms=latency_ms,
-        codex/update-default-model-and-settings
-        max_context_tokens=settings.max_context_tokens or None,
-        max_generation_tokens=settings.max_generation_tokens or None,
-
         max_context_tokens=max_context_tokens,
         max_generation_tokens=max_generation_tokens,
-        main
     )
