@@ -69,6 +69,12 @@ pip install -r requirements.txt
    ```bash
    docker compose exec kb_web curl -s http://localhost:8000/health
    ```
+   Эндпоинт `/health` проверяет только то, что приложение запущено.
+   Для полной проверки зависимостей используйте `/ready` — он дополнительно
+   валидирует соединение с SQLite, состояние векторного стора и доступность LLM:
+   ```bash
+   docker compose exec kb_web curl -s http://localhost:8000/ready
+   ```
 
 3. Откройте веб-интерфейс `http://<сервер>:8000` и авторизуйтесь с учётными данными из `.env`.
 
