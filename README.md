@@ -47,6 +47,23 @@ pip install --upgrade pip
 pip install --no-cache-dir -r requirements.txt
 ```
 
+## Миграции базы данных
+
+Сервис использует Alembic для управления схемой SQLite. После установки
+зависимостей выполните миграции (каталог `var/data` будет создан автоматически):
+
+```bash
+mkdir -p var/data
+alembic upgrade head
+```
+
+По умолчанию Alembic использует `DB_URL` из переменных окружения или значение из
+`alembic.ini`. При необходимости можно переопределить путь к базе данных:
+
+```bash
+DB_URL="sqlite+aiosqlite:///./var/data/custom.sqlite" alembic upgrade head
+```
+
 ## Конфигурация и ключевые переменные окружения
 
 1. Скопируйте шаблон и отредактируйте значения под свои директории и модели:
