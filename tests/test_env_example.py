@@ -16,7 +16,7 @@ EXPECTED_DEFAULTS = {
     "APP_PORT": "8000",
     "DATA_DIR": "./var/data",
     "DB_URL": "sqlite+aiosqlite:///./var/data/kb.sqlite",
-    "MAX_UPLOAD_MB": "40",
+    "MAX_UPLOAD_MB": "25",
     "UPLOAD_ALLOWED_EXTS": "pdf,docx,pptx,xlsx,txt,md",
     "VECTOR_BACKEND": "qdrant",
     "QDRANT_URL": "",
