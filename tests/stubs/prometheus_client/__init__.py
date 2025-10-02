@@ -1,48 +1,9 @@
-"""Minimal stub of :mod:`prometheus_client` for tests."""
+"""Minimal Prometheus client stub tailored for unit tests."""
 
 from __future__ import annotations
 
-from typing import Any
-
-
-CONTENT_TYPE_LATEST = "text/plain; version=0.0.4"
-
-
-def generate_latest() -> bytes:
-    return b""
-
-
-class _Metric:
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
-        self._args = args
-        self._kwargs = kwargs
-
-    def labels(self, *args: Any, **kwargs: Any) -> "_Metric":  # pragma: no cover - stub
-        return self
-
-    def inc(self, amount: float = 1.0) -> None:  # pragma: no cover - stub
-        return None
-
-    def observe(self, value: float) -> None:  # pragma: no cover - stub
-        return None
-
-
-class Counter(_Metric):
-    """Test double for :class:`prometheus_client.Counter`."""
-
-
-class Histogram(_Metric):
-    """Test double for :class:`prometheus_client.Histogram`."""
-
-
-"""Lightweight Prometheus client stub used for unit testing."""
-
-
-__all__ = ["Counter", "Histogram", "CONTENT_TYPE_LATEST", "generate_latest"]
-
-
 from collections import defaultdict
-from typing import Iterable
+from typing import Iterable, Mapping, MutableMapping, TypeVar
 
 __all__ = [
     "CollectorRegistry",
@@ -52,12 +13,11 @@ __all__ = [
     "generate_latest",
 ]
 
-
 CONTENT_TYPE_LATEST = "text/plain; version=0.0.4; charset=utf-8"
 
 
 class CollectorRegistry:
-    """Minimal registry storing metric samples for assertions."""
+    """Registry that stores metric instances for lookup during tests."""
 
     def __init__(self) -> None:
         self._metrics: dict[str, _MetricBase] = {}
@@ -66,31 +26,36 @@ class CollectorRegistry:
         self._metrics[metric._name] = metric
         metric._registry = self
 
-    def get_sample_value(self, name: str, labels: dict[str, str] | None = None) -> float | None:
+    def get_sample_value(
+        self, name: str, labels: Mapping[str, str] | None = None
+    ) -> float | None:
         labels = labels or {}
         if name.endswith("_sum"):
-            base = name[: -len("_sum")]
-            metric = self._metrics.get(base)
+            metric_name = name[: -len("_sum")]
+            metric = self._metrics.get(metric_name)
             if isinstance(metric, Histogram):
-                return metric._sums.get(metric._canonicalise(labels))
+                key = metric._canonicalise(labels)
+                return metric._sums.get(key)
             return None
         if name.endswith("_count"):
-            base = name[: -len("_count")]
-            metric = self._metrics.get(base)
+            metric_name = name[: -len("_count")]
+            metric = self._metrics.get(metric_name)
             if isinstance(metric, Histogram):
-                return metric._counts.get(metric._canonicalise(labels))
+                key = metric._canonicalise(labels)
+                return metric._counts.get(key)
             return None
         metric = self._metrics.get(name)
         if metric is None:
             return None
-        return metric._samples.get(metric._canonicalise(labels))
+        key = metric._canonicalise(labels)
+        return metric._samples.get(key)
 
 
 _DEFAULT_REGISTRY = CollectorRegistry()
 
 
 def generate_latest(registry: CollectorRegistry | None = None) -> bytes:
-    """Return a very small payload suitable for tests."""
+    """Render the stored samples in Prometheus exposition format."""
 
     registry = registry or _DEFAULT_REGISTRY
     lines: list[str] = []
@@ -99,7 +64,15 @@ def generate_latest(registry: CollectorRegistry | None = None) -> bytes:
     return "\n".join(lines).encode("utf-8")
 
 
+_ChildT = TypeVar("_ChildT", bound="_MetricChild")
+
+
 class _MetricBase:
+    """Shared behaviour for Counter and Histogram test doubles."""
+
+    _type: str = ""
+    _child_type: type[_MetricChild]
+
     def __init__(
         self,
         name: str,
@@ -112,45 +85,73 @@ class _MetricBase:
         self._documentation = documentation
         self._labelnames = tuple(labelnames or ())
         self._registry: CollectorRegistry | None = None
-        self._samples: dict[tuple[str, ...], float] = defaultdict(float)
-        if registry is None:
-            _DEFAULT_REGISTRY.register(self)
-        else:
-            registry.register(self)
+        self._samples: MutableMapping[tuple[str, ...], float] = defaultdict(float)
+        registry = registry or _DEFAULT_REGISTRY
+        registry.register(self)
 
-    # ``*args`` support is provided for compatibility with the real client.
-    def labels(self, *args: str, **kwargs: str) -> "_MetricChild":  # pragma: no cover - overwritten
-        raise NotImplementedError
+    def labels(self, *args: str, **kwargs: str) -> _MetricChild:
+        if len(args) > len(self._labelnames):  # pragma: no cover - defensive
+            raise ValueError("Too many positional label values provided")
+        provided = dict(zip(self._labelnames, args))
+        provided.update(kwargs)
+        values = tuple(provided.get(name, "") for name in self._labelnames)
+        return self._child_type(self, values)
 
-    def _canonicalise(self, labels: dict[str, str]) -> tuple[str, ...]:
+    def _canonicalise(self, labels: Mapping[str, str]) -> tuple[str, ...]:
         return tuple(labels.get(name, "") for name in self._labelnames)
 
-    def _export_lines(self) -> list[str]:  # pragma: no cover - seldom used in tests
-        return []
+    def _format_labels(self, values: tuple[str, ...]) -> str:
+        if not self._labelnames:
+            return ""
+        parts = [
+            f'{name}="{value}"'
+            for name, value in zip(self._labelnames, values, strict=False)
+            if value
+        ]
+        return f"{{{','.join(parts)}}}" if parts else ""
+
+    def _export_lines(self) -> list[str]:  # pragma: no cover - compatibility helper
+        if not self._samples:
+            return []
+        lines = [
+            f"# HELP {self._name} {self._documentation}",
+            f"# TYPE {self._name} {self._type}",
+        ]
+        for labels, value in sorted(self._samples.items()):
+            lines.append(f"{self._name}{self._format_labels(labels)} {value}")
+        return lines
 
 
 class _MetricChild:
-    def __init__(self, metric: "_MetricBase", labels: tuple[str, ...]) -> None:
+    def __init__(self, metric: _MetricBase, label_values: tuple[str, ...]) -> None:
         self._metric = metric
-        self._labels = labels
+        self._label_values = label_values
 
     def inc(self, amount: float = 1.0) -> None:
-        self._metric._samples[self._labels] += amount
+        self._metric._samples[self._label_values] += float(amount)
 
     def observe(self, value: float) -> None:
-        self._metric._samples[self._labels] += value
-        if isinstance(self._metric, Histogram):
-            self._metric._sums[self._labels] += value
-            self._metric._counts[self._labels] += 1.0
+        self._metric._samples[self._label_values] += float(value)
 
 
 class Counter(_MetricBase):
-    def labels(self, *args: str, **kwargs: str) -> _MetricChild:
-        labels = self._canonicalise(dict(zip(self._labelnames, args, strict=False)) | kwargs)
-        return _MetricChild(self, labels)
+    _type = "counter"
+    _child_type = _MetricChild
+
+
+class _HistogramChild(_MetricChild):
+    def observe(self, value: float) -> None:
+        observation = float(value)
+        metric = self._metric
+        metric._counts[self._label_values] += 1.0
+        metric._sums[self._label_values] += observation
+        metric._samples[self._label_values] = metric._counts[self._label_values]
 
 
 class Histogram(_MetricBase):
+    _type = "histogram"
+    _child_type = _HistogramChild
+
     def __init__(
         self,
         name: str,
@@ -158,38 +159,30 @@ class Histogram(_MetricBase):
         *,
         labelnames: Iterable[str] | None = None,
         registry: CollectorRegistry | None = None,
-        buckets: Iterable[float] | None = None,  # pragma: no cover - compatibility only
+        buckets: Iterable[float] | None = None,  # pragma: no cover - compatibility
     ) -> None:
-        super().__init__(name, documentation, labelnames=labelnames, registry=registry)
-        self._sums: dict[tuple[str, ...], float] = defaultdict(float)
-        self._counts: dict[tuple[str, ...], float] = defaultdict(float)
+        super().__init__(
+            name,
+            documentation,
+            labelnames=labelnames,
+            registry=registry,
+        )
+        self._counts: MutableMapping[tuple[str, ...], float] = defaultdict(float)
+        self._sums: MutableMapping[tuple[str, ...], float] = defaultdict(float)
         self._buckets = tuple(buckets or ())
 
-    def labels(self, *args: str, **kwargs: str) -> _MetricChild:
-        labels = self._canonicalise(dict(zip(self._labelnames, args, strict=False)) | kwargs)
-        return _MetricChild(self, labels)
+    def labels(self, *args: str, **kwargs: str) -> _HistogramChild:
+        return super().labels(*args, **kwargs)  # type: ignore[return-value]
 
-    def _export_lines(self) -> list[str]:  # pragma: no cover - compatibility only
-        lines: list[str] = []
-        for labels, value in self._samples.items():
-            label_str = ",".join(f"{name}=\"{label}\"" for name, label in zip(self._labelnames, labels, strict=False) if label)
-            suffix = f"{{{label_str}}}" if label_str else ""
-            lines.append(f"# HELP {self._name} {self._documentation}")
-            lines.append(f"# TYPE {self._name} histogram")
-            lines.append(f"{self._name}_sum{suffix} {self._sums[labels]}")
+    def _export_lines(self) -> list[str]:  # pragma: no cover - compatibility helper
+        if not self._counts:
+            return []
+        lines = [
+            f"# HELP {self._name} {self._documentation}",
+            f"# TYPE {self._name} histogram",
+        ]
+        for labels in sorted(self._counts):
+            suffix = self._format_labels(labels)
             lines.append(f"{self._name}_count{suffix} {self._counts[labels]}")
-            for bucket in self._buckets:
-                lines.append(f"{self._name}_bucket{suffix},le=\"{bucket}\" {value}")
+            lines.append(f"{self._name}_sum{suffix} {self._sums[labels]}")
         return lines
-
-
-class _HistogramChild(_MetricChild):
-    def observe(self, amount: float) -> None:
-        value = float(amount)
-        self._metric._counts[self._label_values] = self._metric._counts.get(self._label_values, 0.0) + 1.0
-        self._metric._sums[self._label_values] = self._metric._sums.get(self._label_values, 0.0) + value
-        # Histograms expose both ``_count`` and ``_sum`` samples.  The base sample tracks
-        # the observation count to keep the registry data consistent.
-        self._metric._samples[self._label_values] = self._metric._counts[self._label_values]
-
-
