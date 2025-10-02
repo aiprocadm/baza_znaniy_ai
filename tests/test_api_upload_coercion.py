@@ -8,7 +8,7 @@ import io
 import pytest
 from fastapi import HTTPException, UploadFile, status
 
-from app.api.routes import _coerce_upload_file
+from app.api.routes import _coerce_bytes, _coerce_upload_file
 from app.api.v1.upload import _coerce_upload_argument
 
 
@@ -99,3 +99,13 @@ def test_upload_v1_coerce_from_tuple_builds_uploadfile() -> None:
     assert isinstance(result, UploadFile)
     assert result.filename == "tuple.txt"
     assert _read(result) == b"tuple-bytes"
+
+
+def test_coerce_bytes_reads_from_start_and_restores_position() -> None:
+    payload = io.BytesIO(b"abcdef")
+    payload.seek(6)
+
+    result = _coerce_bytes(payload)
+
+    assert result == b"abcdef"
+    assert payload.tell() == 6

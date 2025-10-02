@@ -411,7 +411,34 @@ def _coerce_bytes(payload: Any) -> bytes:
         return b""
     read = getattr(payload, "read", None)
     if callable(read):
-        data = read()
+        seeker = getattr(payload, "seek", None)
+        teller = getattr(payload, "tell", None)
+        original_position: int | None = None
+        should_restore = False
+
+        if callable(seeker):
+            try:
+                if callable(teller):
+                    original_position = teller()
+                else:
+                    current_position = seeker(0, io.SEEK_CUR)
+                    if isinstance(current_position, int):
+                        original_position = current_position
+                seeker(0)
+            except Exception:
+                original_position = None
+            else:
+                if original_position is not None:
+                    should_restore = True
+
+        try:
+            data = read()
+        finally:
+            if callable(seeker) and should_restore and original_position is not None:
+                try:
+                    seeker(original_position)
+                except Exception:
+                    pass
         if isinstance(data, bytes):
             return data
         if isinstance(data, str):
