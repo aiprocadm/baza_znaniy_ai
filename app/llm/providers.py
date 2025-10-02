@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Mapping, Protocol, runtime_checkable
+from typing import Any, Mapping, Protocol, runtime_checkable
 
 from app.core.config import Settings, get_settings
 
