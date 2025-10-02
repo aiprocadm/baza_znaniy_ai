@@ -25,6 +25,11 @@ except Exception:  # pragma: no cover - fallback when dependency missing
     pdfminer_extract_pages = None  # type: ignore[assignment]
     LTTextContainer = None  # type: ignore[assignment]
 
+try:  # pragma: no cover - optional dependency for lightweight PDF parsing fallback
+    from pypdf import PdfReader
+except Exception:  # pragma: no cover - fallback when dependency missing
+    PdfReader = None  # type: ignore[assignment]
+
 try:  # pragma: no cover - optional dependency used for spreadsheets
     from openpyxl import load_workbook
 except Exception:  # pragma: no cover - fallback for minimal environments
@@ -459,6 +464,24 @@ def _iter_pdf_text(data: bytes) -> Iterator[tuple[int, str]]:
     if pdfminer_extract_pages is not None:
         yield from _iter_pdf_text_pdfminer(data)
         return
+
+    if PdfReader is not None:
+        try:
+            reader = PdfReader(io.BytesIO(data))
+            found = False
+            for page_number, page in enumerate(reader.pages, start=1):
+                try:
+                    text = page.extract_text() or ""
+                except Exception:  # pragma: no cover - defensive fallback
+                    text = ""
+                cleaned = _clean(text)
+                if cleaned:
+                    found = True
+                    yield page_number, cleaned
+            if found:
+                return
+        except Exception as exc:  # pragma: no cover - PdfReader failure fallback
+            LOGGER.warning("pypdf parser failed, no text extracted: %s", exc)
 
     if pymupdf_error is not None:
         raise RuntimeError("Failed to parse PDF with available backends") from pymupdf_error
