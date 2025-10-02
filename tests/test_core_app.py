@@ -34,8 +34,14 @@ def core_app(monkeypatch):
 
     config_module = types.ModuleType("app.core.config")
     config_module.__spec__ = ModuleSpec("app.core.config", loader=None)
-    config_module.Settings = type("Settings", (), {})
-    config_module.get_settings = lambda: (_ for _ in ()).throw(RuntimeError("stub"))
+
+    class StubSettings:  # pragma: no cover - simple stub
+        secret_key = "stub-secret"
+        jwt_algorithm = "HS256"
+        access_token_expire_minutes = 15
+
+    config_module.Settings = StubSettings
+    config_module.get_settings = lambda: StubSettings()
     monkeypatch.setitem(sys.modules, "app.core.config", config_module)
 
     core_services_module = types.ModuleType("app.core.services")
@@ -151,6 +157,19 @@ def core_app(monkeypatch):
             return types.SimpleNamespace(model_dump=lambda: {})
 
     models_lora_module.LoraStatusResponse = StubLoraStatusResponse
+
+    class StubLoraLoadRequest:
+        def __init__(self, **data):  # pragma: no cover - simple stub
+            self.__dict__.update(data)
+
+        def model_dump(self, *args, **kwargs):  # pragma: no cover - simple stub
+            return dict(self.__dict__)
+
+    class StubLoraUnloadRequest(StubLoraLoadRequest):  # pragma: no cover - simple stub
+        pass
+
+    models_lora_module.LoraLoadRequest = StubLoraLoadRequest
+    models_lora_module.LoraUnloadRequest = StubLoraUnloadRequest
     monkeypatch.setitem(sys.modules, "app.models.lora", models_lora_module)
 
     router_module = types.ModuleType("app.api.router")
@@ -324,9 +343,13 @@ def _stub_app_dependencies(core_app, monkeypatch):
     monkeypatch.setattr(core_app, "IngestQueue", lambda: ingest_queue)
 
     class DummyIngestService:
-        def __init__(self, max_retries, backoff_seconds):
+        def __init__(self, max_retries, backoff_seconds, auto_process=False):
             self.max_retries = max_retries
             self.backoff_seconds = backoff_seconds
+            self.auto_process = auto_process
+
+        def set_worker(self, worker):  # pragma: no cover - simple stub
+            self.worker = worker
 
     class DummyIngestWorker:
         def __init__(self, service):
