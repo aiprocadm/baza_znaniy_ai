@@ -26,8 +26,6 @@ from typing import (
 
 from tempfile import SpooledTemporaryFile
 
-from typing import Annotated, Any, Callable, Dict, IO, List, Optional, get_args, get_origin, get_type_hints
-
 
 from pydantic import BaseModel
 
@@ -42,9 +40,6 @@ except Exception:  # pragma: no cover - fallback when Starlette is unavailable
 
 
 T = TypeVar("T")
-
-
-    StarletteRequest = None
 
 
 class HTTPException(Exception):
@@ -78,29 +73,28 @@ class UploadFile:
         *,
         content: bytes | None = None,
         content_type: str | None = None,
-
-        content_type: str | None = None,
-        *,
-
         headers: Any | None = None,
     ) -> None:
         self.filename = filename
         self.content_type = content_type
         self.headers = headers
 
-        self._owns_file = False
         if file is None:
             stream = SpooledTemporaryFile(mode="w+b")
             if content:
                 stream.write(content)
             stream.seek(0)
-            file = stream
+            file_obj: IO[bytes] = stream
             self._owns_file = True
-        self.file = file
+        else:
+            file_obj = file
+            self._owns_file = False
 
-        if file is None:
-            file = io.BytesIO()
-        self.file: IO[bytes] = file
+        if file_obj is None:
+            file_obj = io.BytesIO()
+            self._owns_file = True
+
+        self.file = file_obj
 
         if hasattr(self.file, "seek"):
             try:
