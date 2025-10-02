@@ -4,13 +4,9 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-
 from . import conninfo, errors, rows, sql
 
 IS_STUB = True
-
-from . import conninfo, rows, sql
-
 
 
 class Connection:  # pragma: no cover - placeholder for type compatibility
@@ -39,7 +35,6 @@ def connect(dsn: str, row_factory: Optional[Any] = None, **_: Any) -> Connection
     raise RuntimeError("psycopg stub connect() should be patched in tests")
 
 
-
 __all__ = [
     "IS_STUB",
     "connect",
@@ -49,6 +44,3 @@ __all__ = [
     "sql",
     "rows",
 ]
-=======
-__all__ = ["connect", "Connection", "sql", "rows", "conninfo"]
-
