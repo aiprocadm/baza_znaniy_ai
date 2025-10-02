@@ -353,6 +353,66 @@ def test_upload_file_coerces_tuple_and_list_payloads(tmp_path: Path, monkeypatch
     assert closed_files and all(file in closed_files for file in created_files)
 
 
+def test_upload_file_tuple_input_preserves_payload(tmp_path: Path) -> None:
+    limits = UploadLimits(max_upload_mb=1, allowed_extensions={"txt"})
+    service = _StubIngestService()
+
+    payload = b"tuple-content"
+    stream = SpooledTemporaryFile(mode="w+b")
+    stream.write(payload)
+    stream.seek(len(payload))
+
+    response = asyncio.run(
+        upload_module.upload_file(
+            file=[("tuple.txt", stream, "text/plain")],
+            files=None,
+            limits=limits,
+            data_dir=tmp_path,
+            _=object(),
+            tenant="tuple-tenant",
+            ingest_service=service,  # type: ignore[arg-type]
+        )
+    )
+
+    assert response.filename == "tuple.txt"
+    recorded = service.calls[0]
+    stored_path = Path(recorded["path"])
+    assert stored_path.exists()
+    assert stored_path.read_bytes() == payload
+    assert recorded["size"] == len(payload)
+
+
+def test_upload_file_dict_input_preserves_payload(tmp_path: Path) -> None:
+    limits = UploadLimits(max_upload_mb=1, allowed_extensions={"txt"})
+    service = _StubIngestService()
+
+    payload = b"dict-content"
+    entry = {
+        "filename": "dict.txt",
+        "content": payload,
+        "content_type": "text/plain",
+    }
+
+    response = asyncio.run(
+        upload_module.upload_file(
+            file=[entry],
+            files=None,
+            limits=limits,
+            data_dir=tmp_path,
+            _=object(),
+            tenant="dict-tenant",
+            ingest_service=service,  # type: ignore[arg-type]
+        )
+    )
+
+    assert response.filename == "dict.txt"
+    recorded = service.calls[0]
+    stored_path = Path(recorded["path"])
+    assert stored_path.exists()
+    assert stored_path.read_bytes() == payload
+    assert recorded["size"] == len(payload)
+
+
 def test_upload_endpoint_handles_multiple_formats(tmp_path: Path) -> None:
     limits = UploadLimits(max_upload_mb=2, allowed_extensions={"pdf", "md", "txt"})
     service = _StubIngestService()

@@ -6,6 +6,7 @@ import io
 import mimetypes
 import secrets
 from pathlib import Path
+from tempfile import SpooledTemporaryFile
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
@@ -102,60 +103,31 @@ async def upload_file(
         if isinstance(item, UploadFile):
             return item
 
-        filename: Optional[str] = None
-        content: object = b""
-        content_type: Optional[str] = None
-
-
-        if isinstance(item, dict):  # pragma: no cover - compatibility for test stubs
-            filename = (item.get("filename") or "uploaded").strip() or "uploaded"
-
         if isinstance(item, dict):  # pragma: no cover - compatibility for legacy clients
-            filename = item.get("filename")
-
+            filename = (item.get("filename") or "uploaded").strip() or "uploaded"
             content_type = item.get("content_type")
             content = item.get("file")
             if content is None:
                 content = item.get("content", b"")
-        elif isinstance(item, (list, tuple)):
+            return create_upload_file(filename, content, content_type)
 
+        if isinstance(item, (list, tuple)):
             filename = str(item[0]).strip() if item else "uploaded"
             filename = filename or "uploaded"
-            if len(item) > 1:
-                candidate = item[1]
-                if hasattr(candidate, "read"):
-                    file_obj = candidate
-                    if hasattr(file_obj, "seek"):
-                        try:
-                            file_obj.seek(0)
-                        except Exception:  # pragma: no cover - defensive
-                            pass
-                else:
-                    file_obj = _spooled_file(candidate)
-            else:
-                file_obj = _spooled_file(b"")
-            if len(item) > 2 and isinstance(item[2], str):
-                content_type = item[2]
-        elif isinstance(item, str):
-            filename = item.strip() or "uploaded"
-            file_obj = _spooled_file(b"")
-
-            filename = str(item[0]) if item else "uploaded"
             content = item[1] if len(item) > 1 else b""
             third = item[2] if len(item) > 2 else None
             content_type = third if isinstance(third, str) else None
-        elif isinstance(item, str):
-            filename = item
-            content = b""
+            return create_upload_file(filename, content, content_type)
 
-        else:
-            filename = "uploaded"
-            content = b""
+        if isinstance(item, str):
+            filename = item.strip() or "uploaded"
+            return create_upload_file(filename, _spooled_file(b""))
 
+        file_like = getattr(item, "read", None)
+        if callable(file_like):
+            return create_upload_file("uploaded", item)
 
-        return create_upload_file(filename, content, content_type)
-
-        return UploadFile(filename=filename, file=file_obj, content_type=content_type)
+        return create_upload_file("uploaded", _spooled_file(item))
 
     coerced = [_coerce(item) for item in uploads]
 
