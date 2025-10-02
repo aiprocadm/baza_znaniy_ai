@@ -74,6 +74,23 @@ def auth_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Tes
         config_module.get_settings.cache_clear()
 
 
+def test_get_engine_sync_sqlite(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.models import file as file_models
+
+    monkeypatch.setenv("DB_URL", f"sqlite:///{tmp_path / 'auth.db'}")
+    file_models.get_engine.cache_clear()
+
+    engine = file_models.get_engine(create_schema=False)
+
+    try:
+        assert engine.dialect.name == "sqlite"
+        assert engine.dialect.driver != "aiosqlite"
+        assert str(engine.url).startswith("sqlite:")
+    finally:
+        engine.dispose()
+        file_models.get_engine.cache_clear()
+
+
 def test_login_refresh_and_logout_flow(auth_client: TestClient) -> None:
     login_response = auth_client.post(
         "/api/v1/auth/login",
