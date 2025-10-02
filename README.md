@@ -49,6 +49,9 @@ pip install --no-cache-dir -r requirements.txt
 pip install --no-cache-dir -r requirements-dev.txt
 ```
 
+Dev-зависимости включают парсеры `openpyxl` и `python-pptx`, которые нужны для
+юнит-тестов обработки XLSX и PPTX-документов.
+
 ### Минимальный набор для pytest
 
 Если требуется лишь прогнать тесты без полного окружения, заранее установите
@@ -59,6 +62,8 @@ pip install --no-cache-dir -r requirements-dev.txt
 - `faiss-cpu` — локальный бэкенд векторного поиска;
 - `sentence-transformers` — генерация эмбеддингов для тестов;
 - `llama-cpp-python` — локальный LLM-провайдер.
+- `openpyxl` — чтение XLSX-таблиц в пайплайне индексации;
+- `python-pptx` — парсинг презентаций PowerPoint.
 
 ## Миграции базы данных
 
