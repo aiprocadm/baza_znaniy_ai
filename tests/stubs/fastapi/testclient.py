@@ -10,11 +10,7 @@ from typing import TYPE_CHECKING, Any, Iterable
 from . import HTTPException, UploadFile, _build_call_arguments, _serialise
 from .responses import HTMLResponse, JSONResponse, Response
 
-
 if TYPE_CHECKING:  # pragma: no cover - typing aid only
-
-if TYPE_CHECKING:  # pragma: no cover - used for type checkers only
-
     from . import FastAPI
 
 
@@ -68,29 +64,9 @@ class TestClient:
         if data is not None or files is not None:
             payload: dict[str, Any] = dict(data or {})
             if files:
-
                 for key, value in self._iter_files(files):
                     uploads = self._coerce_files(value)
                     self._merge_uploads(payload, key, uploads)
-
-                def _iter_files(items: Any) -> Iterable[tuple[str, Any]]:
-                    if isinstance(items, dict):
-                        return items.items()
-                    return list(items)
-
-                for key, value in _iter_files(files):
-                    entries = _normalise_file_entries(value)
-                    uploads = [_build_upload_file(entry) for entry in entries]
-
-                    existing = payload.get(key)
-                    if existing is None:
-                        payload[key] = uploads[0] if len(uploads) == 1 else uploads
-                    else:
-                        combined = _ensure_list(existing)
-                        combined.extend(uploads)
-                        payload[key] = combined
-
-
             return self._request("POST", path, body=payload, **options)
 
         return self._request("POST", path, body=json, **options)
@@ -120,40 +96,10 @@ class TestClient:
             for key, value in data.items():
                 kwargs.setdefault(key, value)
         if files:
-
-            file_payload: dict[str, Any] = {}
             for key, value in files.items():
                 uploads = self._coerce_files(value)
-                self._merge_uploads(file_payload, key, uploads)
-            body = dict(body or {})
-            body.update(file_payload)
+                self._merge_uploads(kwargs, key, uploads)
 
-        kwargs = _build_call_arguments(route.handler, body, params, self.app)
-        result = route.handler(**kwargs)
-        if inspect.iscoroutine(result):
-            result = asyncio.run(result)
-
-        status_code = route.status_code
-        if isinstance(result, Response):
-            return _SimpleResponse(result.status_code, result.content)
-        if isinstance(result, (HTMLResponse, JSONResponse)):
-            return _SimpleResponse(result.status_code, result.content)
-        if isinstance(result, tuple):
-            content, status_code = result if len(result) == 2 else (result[0], status_code)
-            return _SimpleResponse(status_code, _serialise(content))
-        return _SimpleResponse(status_code, _serialise(result))
-
-            for key, value in files.items():
-                entries = _normalise_file_entries(value)
-                uploads = [_build_upload_file(entry) for entry in entries]
-
-                existing = kwargs.get(key)
-                if existing is None:
-                    kwargs[key] = uploads[0] if len(uploads) == 1 else uploads
-                else:
-                    combined = _ensure_list(existing)
-                    combined.extend(uploads)
-                    kwargs[key] = combined
         try:
             result = route.handler(**kwargs)
             if inspect.isawaitable(result):
@@ -163,10 +109,12 @@ class TestClient:
 
         if isinstance(result, (JSONResponse, HTMLResponse, Response)):
             return _SimpleResponse(result.status_code, result.json())
+        if isinstance(result, tuple):
+            content, status_code = result if len(result) == 2 else (result[0], route.status_code)
+            return _SimpleResponse(status_code, _serialise(content))
 
         content = _serialise(result)
         return _SimpleResponse(route.status_code, content)
-
 
     def _run_handler(self, handler: Any) -> None:
         result = handler()
@@ -190,6 +138,7 @@ class TestClient:
             combined = _ensure_list(existing)
             combined.extend(uploads)
             target[key] = combined
+
 
 def _normalise_file_entries(value: Any) -> list[Any]:
     if isinstance(value, list):
@@ -241,7 +190,4 @@ def _build_upload_file(entry: Any) -> UploadFile:
     return UploadFile(**kwargs)
 
 
-
 __all__ = ["TestClient"]
-
-
