@@ -51,6 +51,15 @@ def test_coerce_upload_file_from_tuple_pair() -> None:
     assert _read(result) == b"binary"
 
 
+def test_coerce_upload_file_from_tuple_with_content_type() -> None:
+    result = _coerce_upload_file(("typed.txt", b"payload", "text/plain"))
+
+    assert isinstance(result, UploadFile)
+    assert result.filename == "typed.txt"
+    assert result.content_type == "text/plain"
+    assert _read(result) == b"payload"
+
+
 def test_coerce_upload_file_from_wrapped_dict_pair() -> None:
     result = _coerce_upload_file({"file": ("wrapped.txt", b"wrapped")})
 

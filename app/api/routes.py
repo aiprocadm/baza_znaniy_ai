@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import io
 import inspect
 import logging
 import sqlite3
@@ -443,7 +442,8 @@ def _coerce_sequence(items: Any) -> UploadFile | None:
             return nested
     filename = first
     content = items[1] if len(items) > 1 else b""
-    return UploadFile(filename=filename, file=io.BytesIO(_coerce_bytes(content)))
+    content_type = items[2] if len(items) > 2 and isinstance(items[2], str) else None
+    return create_upload_file(filename, _coerce_bytes(content), content_type)
 
 
 def _index_chunks(request: Request, chunks: Iterable[dict[str, Any]]) -> int:
