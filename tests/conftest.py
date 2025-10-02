@@ -18,9 +18,14 @@ for module_name in (
     "sqlmodel",
     "fastapi",
     "fastapi.testclient",
+
+    "psycopg",
+    "psycopg.conninfo",
+
     "numpy",
     "openpyxl",
     "pptx",
+
 ):
     try:  # pragma: no cover - exercised during integration tests
         __import__(module_name)
