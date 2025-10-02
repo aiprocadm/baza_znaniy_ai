@@ -10,6 +10,7 @@ from typing import List, Optional
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 
+from app.api.upload_utils import create_upload_file
 from app.core.auth import ensure_tenant_access, get_current_active_user
 from app.core.deps import (
     UploadLimits,
