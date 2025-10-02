@@ -1,5 +1,4 @@
 """Minimal Prometheus client stub tailored for unit tests."""
-
 from collections import defaultdict
 from typing import Iterable, Mapping, MutableMapping, TypeVar
 
