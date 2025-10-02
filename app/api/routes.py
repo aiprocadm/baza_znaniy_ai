@@ -18,7 +18,7 @@ from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
 from app.chat.store import ChatStore, ConversationAccessError
 from app.core.config import get_settings, get_version_info
-from app.core.deps import DEFAULT_ALLOWED_EXTENSIONS, UploadLimits, get_upload_limits
+from app.core.deps import UploadLimits, get_upload_limits
 from app.ingest import parse_and_chunk
 from app.llm import (
     LoRAAdapterNotFoundError,
@@ -42,6 +42,7 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 _SERVICE_UNAVAILABLE = getattr(status, "HTTP_503_SERVICE_UNAVAILABLE", 503)
+_REQUEST_TOO_LARGE = getattr(status, "HTTP_413_REQUEST_ENTITY_TOO_LARGE", 413)
 
 
 @router.get("/metrics")
@@ -345,24 +346,24 @@ def _normalise_extension(filename: str) -> str:
     return name.rsplit(".", 1)[-1].lower()
 
 
-def _get_allowed_extensions(request: Request) -> set[str]:
-    state = getattr(request, "app", None)
-    state = getattr(state, "state", None)
+def _resolve_upload_limits(request: Request) -> UploadLimits:
+    app = getattr(request, "app", None)
+    state = getattr(app, "state", None)
 
     if state is not None:
-        limits = getattr(state, "upload_limits", None)
-        if isinstance(limits, UploadLimits):
-            return set(limits.allowed_extensions)
+        cached = getattr(state, "upload_limits", None)
+        if isinstance(cached, UploadLimits):
+            return cached
 
     try:
         limits = get_upload_limits()
     except Exception:
-        return set(DEFAULT_ALLOWED_EXTENSIONS)
+        limits = UploadLimits()
 
     if state is not None:
         setattr(state, "upload_limits", limits)
 
-    return set(limits.allowed_extensions)
+    return limits
 
 
 def _coerce_upload_file(value: Any) -> UploadFile:
@@ -514,14 +515,20 @@ async def upload(
     user_id: str = Form(...),
     conversation_id: str | None = Form(None),
 ) -> dict[str, Any]:
+    limits = _resolve_upload_limits(request)
+    allowed_extensions = set(limits.allowed_extensions)
+
     upload_file = _coerce_upload_file(file)
     filename = (upload_file.filename or "uploaded").strip()
     ext = _normalise_extension(filename)
-    allowed_extensions = _get_allowed_extensions(request)
     if ext not in allowed_extensions:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "UPLOAD_INVALID_EXT")
 
     data = await upload_file.read()
+    if not data:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "UPLOAD_EMPTY")
+    if len(data) > limits.max_size:
+        raise HTTPException(_REQUEST_TOO_LARGE, "UPLOAD_TOO_LARGE")
     chunks = parse_and_chunk(filename, data)
     if not chunks:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "NO_TEXT_FOUND")
