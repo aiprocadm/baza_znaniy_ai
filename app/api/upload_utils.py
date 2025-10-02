@@ -6,6 +6,10 @@ from tempfile import SpooledTemporaryFile
 from typing import Any
 
 from fastapi import UploadFile
+import app.models  # noqa: F401 - ensure package registration for test stubs
+import app.core.deps  # noqa: F401 - ensure dependency module registration
+import app.core.auth  # noqa: F401 - ensure auth module registration
+from starlette.datastructures import MutableHeaders
 
 
 def create_upload_file(
@@ -34,7 +38,18 @@ def create_upload_file(
             file_obj.write(data)
         file_obj.seek(0)
 
-    kwargs: dict[str, Any] = {"filename": filename, "file": file_obj}
+    upload = UploadFile(filename=filename, file=file_obj)
     if content_type is not None:
-        kwargs["content_type"] = content_type
-    return UploadFile(**kwargs)
+        try:
+            setattr(upload, "content_type", content_type)
+        except AttributeError:
+            headers = getattr(upload, "headers", None)
+            if headers is not None:
+                try:
+                    raw = list(getattr(headers, "raw"))  # type: ignore[attr-defined]
+                except Exception:
+                    raw = list(getattr(headers, "items")())  # type: ignore[attr-defined]
+                mutable = MutableHeaders(raw=raw)
+                mutable["content-type"] = content_type
+                upload.headers = mutable
+    return upload
