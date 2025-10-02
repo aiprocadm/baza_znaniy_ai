@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Mapping
@@ -45,7 +46,19 @@ class LlamaCppProvider:
 
         model_path = Path(self.settings.llm_model_path).expanduser()
         if not model_path.is_file():
-            raise ModelNotFoundError(model_path)
+            fallback = Path(self.settings.llm_model_name).expanduser()
+            if fallback.is_file():
+                model_path = fallback
+            else:
+                env_override = os.environ.get("LLM_MODEL_PATH")
+                if env_override:
+                    env_candidate = Path(env_override).expanduser()
+                    if env_candidate.is_file():
+                        model_path = env_candidate
+                    else:
+                        raise ModelNotFoundError(env_candidate)
+                else:
+                    raise ModelNotFoundError(model_path)
 
         init_kwargs = dict(
             model_path=str(model_path),
