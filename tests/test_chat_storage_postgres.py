@@ -14,6 +14,9 @@ import psycopg
 from psycopg import sql
 from psycopg.conninfo import make_conninfo
 
+if getattr(psycopg, "IS_STUB", False):
+    pytest.skip("psycopg stub detected; skipping PostgreSQL integration tests", allow_module_level=True)
+
 
 def _pg_binaries_available() -> bool:
     pg_config_path = shutil.which("pg_config")
