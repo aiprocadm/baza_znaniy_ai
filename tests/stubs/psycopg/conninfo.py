@@ -1,29 +1,18 @@
-
 """Minimal psycopg.conninfo stub used in unit tests."""
-
-"""Subset of :mod:`psycopg.conninfo` required by the tests."""
-
 
 from __future__ import annotations
 
 from typing import Any
 
 
-
-def make_conninfo(**kwargs: Any) -> str:
-    """Return a simple DSN string constructed from keyword arguments."""
-
-    parts = []
-    for key, value in kwargs.items():
-        if value is None:
-            continue
-        parts.append(f"{key}={value}")
-
 def _format_value(value: Any) -> str:
+    """Format a single DSN value following libpq quoting rules."""
+
     if value is None:
         raise ValueError("None is not a valid DSN component")
     if isinstance(value, (int, float)):
         return str(value)
+
     text = str(value)
     if not text:
         return "''"
