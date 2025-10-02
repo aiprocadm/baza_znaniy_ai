@@ -118,7 +118,7 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("DB_URL", "INGEST_DB_URL"),
     )
     max_upload_mb: int = Field(
-        default=25,
+        default=40,
         validation_alias=AliasChoices("MAX_UPLOAD_MB", "UPLOAD_MAX_MB"),
     )
     cors_allow_origins: list[str] = Field(
@@ -148,7 +148,7 @@ class Settings(BaseSettings):
 
     # Retrieval ----------------------------------------------------------
     retrieve_topk: int = Field(default=10, validation_alias=AliasChoices("RETRIEVE_TOPK"))
-    rerank_enabled: bool = Field(default=False, validation_alias=AliasChoices("RERANK_ENABLED"))
+    rerank_enabled: bool = Field(default=True, validation_alias=AliasChoices("RERANK_ENABLED"))
     rerank_topk: int | None = Field(
         default=50,
         validation_alias=AliasChoices("RERANK_TOPK", "RERANK_TOP_K"),
