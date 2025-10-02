@@ -3,53 +3,11 @@
 from __future__ import annotations
 
 import inspect
+import io
 from dataclasses import dataclass
 from datetime import date, datetime
-
-from types import SimpleNamespace
-
-
-
-from tempfile import SpooledTemporaryFile
-
-
-
-from typing import Annotated, Any, Callable, Dict, IO, List, Optional, get_args, get_origin, get_type_hints
-
-
-from tempfile import SpooledTemporaryFile
-
-from typing import (
-    Annotated,
-    Any,
-    Callable,
-    Dict,
-    IO,
-    Iterable,
-    List,
-    Optional,
-    Tuple,
-    TypeVar,
-    get_args,
-    get_origin,
-    get_type_hints,
-)
-
-
-from tempfile import SpooledTemporaryFile
-
-from io import BytesIO
-
-from typing import Annotated, Any, Callable, Dict, List, Optional, get_args, get_origin, get_type_hints
-
-        main
-        main
-
-
-
 from types import SimpleNamespace
 from typing import Annotated, Any, Callable, Dict, IO, List, Optional, get_args, get_origin, get_type_hints
-
 
 from pydantic import BaseModel
 
@@ -59,12 +17,7 @@ from .responses import HTMLResponse, JSONResponse
 try:  # pragma: no cover - optional dependency
     from starlette.requests import Request as StarletteRequest
 except Exception:  # pragma: no cover - fallback when Starlette is unavailable
-    StarletteRequest = None  # type: ignore[assignment]
-
-
-
-T = TypeVar("T")
-
+    StarletteRequest = None
 
 
 class HTTPException(Exception):
@@ -77,7 +30,7 @@ class HTTPException(Exception):
 
 
 class Request:
-    """Placeholder request object used by the tests."""
+    """Placeholder request object."""
 
     def __init__(self, scope: Optional[dict[str, Any]] = None) -> None:
         self.scope = scope or {}
@@ -85,10 +38,6 @@ class Request:
     @property
     def app(self) -> Any:
         return self.scope.get("app")
-
-    @app.setter
-    def app(self, value: Any) -> None:
-        self.scope["app"] = value
 
 
 class UploadFile:
@@ -98,151 +47,33 @@ class UploadFile:
         self,
         filename: str | None = None,
         file: IO[bytes] | None = None,
-
-        *,
-
-        *,
-        content: bytes | str | None = None,
         content_type: str | None = None,
-
         *,
-
         headers: Any | None = None,
     ) -> None:
         self.filename = filename
         self.content_type = content_type
         self.headers = headers
-
-        payload: bytes | None
-        if isinstance(content, str):
-            payload = content.encode()
-        else:
-            payload = content
-
-
-        file: Any | None = None,
-        *,
-
-        content: bytes | str | None = None,
-
-        content: bytes | None = None,
-        content_type: str | None = None,
-        headers: Any | None = None,
-    ) -> None:
-
-        self.filename = filename
-        self.content_type = content_type
-        self.headers = headers
-        self._owns_file = False
         if file is None:
-            stream = SpooledTemporaryFile(mode="w+b")
-            if content:
-                stream.write(content)
-            stream.seek(0)
-            file = stream
-            self._owns_file = True
-        self.file = file
-
-
-        if file is None:
-            stream: IO[bytes] = SpooledTemporaryFile(mode="w+b")
-            if payload:
-                stream.write(payload)
-                stream.seek(0)
-            self.file = stream
-            self._owns_file = True
-        else:
-            self.file = file
-            self._owns_file = False
-            if payload and hasattr(self.file, "write"):
-                if hasattr(self.file, "seek"):
-                    self.file.seek(0)
-                self.file.write(payload)
-                if hasattr(self.file, "seek"):
-                    self.file.seek(0)
-
-
-
-        content_type: str | None = None,
-
-        headers: Any | None = None,
-    ) -> None:
-        self.filename = filename
-        self.content_type = content_type
-        self.headers = headers
-
-        if file is None:
-
             file = io.BytesIO()
         self.file: IO[bytes] = file
-
         if hasattr(self.file, "seek"):
             try:
                 self.file.seek(0)
             except Exception:  # pragma: no cover - defensive
                 pass
 
-
     async def read(self, size: int = -1) -> bytes:
         data = self.file.read(size)
         if isinstance(data, str):
-
-
-    async def read(self, size: int = -1) -> bytes:
-        data = self.file.read(size)
-        if isinstance(data, str):
-
-            stream = SpooledTemporaryFile(mode="w+b")
-            if content:
-                data = content.encode() if isinstance(content, str) else bytes(content)
-                stream.write(data)
-            stream.seek(0)
-            file = stream
-
-        self.file = file if file is not None else BytesIO()
-
-        if hasattr(self.file, "seek"):
-            self.file.seek(0)
-
-    async def read(self, size: int = -1) -> bytes:
-        data = self.file.read(size)
-        if isinstance(data, str):
-
-
-
             return data.encode()
         if data is None:
             return b""
         return data
 
-
-
-
-            data = data.encode()
-
-            return data.encode()
-
-        return data or b""
-
-
-
-
     async def close(self) -> None:
-        if self._owns_file and hasattr(self.file, "close"):
+        if hasattr(self.file, "close") and not getattr(self.file, "closed", False):
             self.file.close()
-
-
-
-
-            data = data.encode()
-        return data or b""
-
-
-        main
-        main
-
-
-
 
 
 def Depends(dependency: Callable[..., Any] | None = None) -> Callable[..., Any] | None:
@@ -325,9 +156,10 @@ class _RouterBase:
         return self._add_route("HEAD", path, **options)
 
     def include_router(self, router: "APIRouter") -> None:
-        self._routes.extend(router._routes)
+        for route in router._routes:
+            self._routes.append(route)
         for key, handlers in router._event_handlers.items():
-            self._event_handlers.setdefault(key, []).extend(handlers)
+            self._event_handlers[key].extend(handlers)
 
     def on_event(self, event_type: str) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
         def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
@@ -336,7 +168,7 @@ class _RouterBase:
 
         return decorator
 
-    def _find_route(self, method: str, path: str) -> tuple[_Route | None, Dict[str, str] | None]:
+    def _find_route(self, method: str, path: str) -> tuple[_Route, Dict[str, str]] | tuple[None, None]:
         for route in self._routes:
             if route.method != method:
                 continue
@@ -381,11 +213,13 @@ def _serialise(data: Any) -> Any:
     return data
 
 
-def _resolve_dependency(dependency: Callable[..., Any] | Any, app: "FastAPI") -> Any:
+def _resolve_dependency(
+    dependency: Callable[..., Any] | Any, app: "FastAPI"
+) -> Any:
     if not callable(dependency):
         return dependency
 
-    override = app.dependency_overrides.get(dependency)
+    override = app.dependency_overrides.get(dependency) if hasattr(app, "dependency_overrides") else None
     target = override or dependency
 
     signature = inspect.signature(target)
@@ -429,7 +263,6 @@ def _build_call_arguments(
     type_hints = get_type_hints(handler, include_extras=True)
     kwargs: Dict[str, Any] = {}
     body_assigned = False
-
     for name, parameter in signature.parameters.items():
         if name in path_params:
             kwargs[name] = path_params[name]
@@ -466,7 +299,6 @@ def _build_call_arguments(
 
         if parameter.default is not inspect._empty:
             kwargs[name] = _resolve_dependency(parameter.default, app)
-
     return kwargs
 
 
@@ -475,14 +307,15 @@ __all__ = [
     "Depends",
     "FastAPI",
     "File",
-    "Form",
     "HTMLResponse",
     "HTTPException",
     "JSONResponse",
     "Query",
     "Request",
     "UploadFile",
-    "_build_call_arguments",
-    "_serialise",
     "status",
 ]
+
+from .testclient import TestClient  # noqa: E402  # isort:skip
+
+__all__.append("TestClient")
