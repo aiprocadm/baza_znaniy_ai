@@ -27,6 +27,59 @@ if "fastapi" not in sys.modules:
 from fastapi import FastAPI
 
 
+if "starlette.datastructures" not in sys.modules:
+    starlette_module = ModuleType("starlette")
+    datastructures_module = ModuleType("starlette.datastructures")
+
+    class MutableHeaders(dict):
+        def __init__(self, raw=None):
+            super().__init__()
+            self._raw: list[tuple[bytes, bytes]] = []
+            if raw:
+                for key, value in raw:
+                    key_str = (
+                        key.decode().lower()
+                        if isinstance(key, (bytes, bytearray))
+                        else str(key).lower()
+                    )
+                    value_str = (
+                        value.decode()
+                        if isinstance(value, (bytes, bytearray))
+                        else str(value)
+                    )
+                    super().__setitem__(key_str, value_str)
+                self._rebuild_raw()
+
+        def _rebuild_raw(self) -> None:
+            self._raw = [
+                (key.encode("latin-1", "ignore"), value.encode("latin-1", "ignore"))
+                for key, value in super().items()
+            ]
+
+        def __setitem__(self, key, value) -> None:  # type: ignore[override]
+            key_str = str(key).lower()
+            value_str = str(value)
+            super().__setitem__(key_str, value_str)
+            self._rebuild_raw()
+
+        def pop(self, key, default=None):  # type: ignore[override]
+            key_str = str(key).lower()
+            result = super().pop(key_str, default)
+            self._rebuild_raw()
+            return result
+
+        def items(self):  # type: ignore[override]
+            return super().items()
+
+        @property
+        def raw(self) -> list[tuple[bytes, bytes]]:
+            return list(self._raw)
+
+    datastructures_module.MutableHeaders = MutableHeaders
+    sys.modules["starlette"] = starlette_module
+    sys.modules["starlette.datastructures"] = datastructures_module
+
+
 def _coerce_form_entry(entry: object):
     from fastapi import UploadFile as FastAPIUploadFile  # type: ignore
 
@@ -375,6 +428,35 @@ def test_upload_file_tuple_input_preserves_payload(tmp_path: Path) -> None:
     )
 
     assert response.filename == "tuple.txt"
+    recorded = service.calls[0]
+    stored_path = Path(recorded["path"])
+    assert stored_path.exists()
+    assert stored_path.read_bytes() == payload
+    assert recorded["size"] == len(payload)
+
+
+def test_upload_file_list_input_preserves_payload(tmp_path: Path) -> None:
+    limits = UploadLimits(max_upload_mb=1, allowed_extensions={"txt"})
+    service = _StubIngestService()
+
+    payload = b"list-content"
+    stream = SpooledTemporaryFile(mode="w+b")
+    stream.write(payload)
+    stream.seek(len(payload))
+
+    response = asyncio.run(
+        upload_module.upload_file(
+            file=[["list.txt", stream, "text/plain"]],
+            files=None,
+            limits=limits,
+            data_dir=tmp_path,
+            _=object(),
+            tenant="list-tenant",
+            ingest_service=service,  # type: ignore[arg-type]
+        )
+    )
+
+    assert response.filename == "list.txt"
     recorded = service.calls[0]
     stored_path = Path(recorded["path"])
     assert stored_path.exists()
