@@ -21,6 +21,7 @@ from app.rag.context import build_context, select_citations
 from app.retriever import CrossEncoderReranker, get_reranker, get_vector_store
 from app.retriever.rerank import apply_rerank
 from app.services.files import FileStore, IngestQueue
+from app.services import vectorstore as vectorstore_service
 
 logger = logging.getLogger(__name__)
 
@@ -365,7 +366,9 @@ def bootstrap() -> None:
     state.memory_store = memory_store
     state.file_store = FileStore()
     state.ingest_queue = IngestQueue()
-    state.fallback_index = []
+    fallback_index: list[dict[str, object]] = []
+    vectorstore_service.set_fallback_storage(fallback_index)
+    state.fallback_index = fallback_index
     state.chat_history_limit = settings.chat_history_limit
     state.retrieve_topk = settings.retrieve_topk
     state.rerank_topk = settings.rerank_topk

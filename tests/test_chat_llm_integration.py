@@ -11,6 +11,7 @@ from app.core.app import create_app
 from app.core.config import Settings
 from app.llm.exceptions import ModelNotFoundError
 from app.models.chat import ChatIn
+from app.services import vectorstore
 
 
 class DummyProvider:
@@ -41,14 +42,16 @@ def _prepare_app(tmp_path, provider) -> tuple[Request, Settings]:
     app = create_app(provider)
     app.state.settings.data_dir = tmp_path
     app.state.chat_store = type(app.state.chat_store)(str(tmp_path / "chat.sqlite3"))
-    app.state.fallback_index = [
+    fallback_index = vectorstore.get_fallback_storage()
+    fallback_index.clear()
+    fallback_index.extend([
         {"file": "doc.txt", "page": 1, "text": "пример", "score": 0.42},
-    ]
+    ])
+    app.state.fallback_index = fallback_index
     app.state.vector_store = None
     app.state.rerank_enabled = False
     app.state.reranker = None
-    request = Request()
-    request.app = app  # type: ignore[attr-defined]
+    request = Request({"app": app})
     settings = app.state.settings
     settings.rerank_enabled = False
     return request, settings
@@ -101,3 +104,34 @@ def test_chat_passes_generation_settings(tmp_path):
     assert context["top_p"] == pytest.approx(0.77)
     assert context["top_k"] == 12
     assert context["max_tokens"] == 222
+
+
+def test_chunks_indexed_when_vector_backend_fails_are_used_in_chat(tmp_path, monkeypatch):
+    provider = DummyProvider()
+    request, _settings = _prepare_app(tmp_path, provider)
+
+    fallback_index = vectorstore.get_fallback_storage()
+    fallback_index.clear()
+
+    class ExplodingVectorStore:
+        def ensure_ready(self) -> None:
+            raise RuntimeError("boom")
+
+        def upsert(self, items):  # pragma: no cover - not invoked after failure
+            raise RuntimeError("boom")
+
+        def search(self, query: str, top_k: int):  # pragma: no cover - not invoked
+            raise RuntimeError("boom")
+
+    monkeypatch.setattr(vectorstore, "_VECTOR_STORE", ExplodingVectorStore())
+
+    chunk = {"file": "note.txt", "page": 1, "text": "вопрос ответ", "score": 0.6}
+    vectorstore.index_chunks([chunk])
+
+    payload = chat(
+        request,
+        ChatIn(user_id="bob", conversation_id=None, message="вопрос"),
+    )
+
+    assert payload["citations"]
+    assert any(citation.get("file") == "note.txt" for citation in payload["citations"])

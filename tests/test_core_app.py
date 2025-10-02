@@ -87,6 +87,9 @@ def core_app(monkeypatch):
     vectorstore_module.__spec__ = ModuleSpec("app.services.vectorstore", loader=None)
     vectorstore_module.get_vector_store = lambda *args, **kwargs: object()
     vectorstore_module.index_chunks = lambda *args, **kwargs: None
+    vectorstore_module.set_fallback_storage = lambda storage: None
+    vectorstore_module.get_fallback_storage = lambda: []
+    vectorstore_module.clear_fallback = lambda: None
     monkeypatch.setitem(sys.modules, "app.services.vectorstore", vectorstore_module)
 
     files_module = types.ModuleType("app.services.files")

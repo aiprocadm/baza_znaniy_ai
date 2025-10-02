@@ -37,6 +37,7 @@ from app.observability.metrics import (
 )
 from app.retriever.rerank import apply_rerank
 from app.api.upload_utils import create_upload_file
+from app.services import vectorstore as vectorstore_service
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -392,6 +393,14 @@ def _coerce_upload_file(value: Any) -> UploadFile:
     raise HTTPException(status.HTTP_400_BAD_REQUEST, "UPLOAD_INVALID_FILE")
 
 
+def _resolve_fallback_index(state) -> list[dict[str, Any]]:
+    fallback_index = getattr(state, "fallback_index", None)
+    if fallback_index is None:
+        fallback_index = vectorstore_service.get_fallback_storage()
+        setattr(state, "fallback_index", fallback_index)
+    return fallback_index
+
+
 def _coerce_bytes(payload: Any) -> bytes:
     if isinstance(payload, bytes):
         return payload
@@ -442,7 +451,7 @@ def _index_chunks(request: Request, chunks: Iterable[dict[str, Any]]) -> int:
     if not items:
         return 0
 
-    fallback_index = getattr(request.app.state, "fallback_index", [])
+    fallback_index = _resolve_fallback_index(request.app.state)
     vector_store = getattr(request.app.state, "vector_store", None)
 
     operation_start = time.perf_counter()
@@ -545,7 +554,7 @@ def chat(request: Request, inp: ChatIn) -> dict[str, Any]:
     vector_store = getattr(request.app.state, "vector_store", None)
     summarizer = request.app.state.summarizer
     memory_store = getattr(request.app.state, "memory_store", None)
-    fallback_index = getattr(request.app.state, "fallback_index", [])
+    fallback_index = _resolve_fallback_index(request.app.state)
     reranker = getattr(request.app.state, "reranker", None)
 
     if llm_provider is None and settings is not None:
