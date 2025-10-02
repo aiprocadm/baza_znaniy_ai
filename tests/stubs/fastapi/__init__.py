@@ -3,22 +3,10 @@
 from __future__ import annotations
 
 import inspect
+import io
 from dataclasses import dataclass
 from datetime import date, datetime
-
 from types import SimpleNamespace
-
-
-
-from tempfile import SpooledTemporaryFile
-
-
-
-from typing import Annotated, Any, Callable, Dict, IO, List, Optional, get_args, get_origin, get_type_hints
-
-
-from tempfile import SpooledTemporaryFile
-
 from typing import (
     Annotated,
     Any,
@@ -35,21 +23,7 @@ from typing import (
     get_type_hints,
 )
 
-
 from tempfile import SpooledTemporaryFile
-
-from io import BytesIO
-
-from typing import Annotated, Any, Callable, Dict, List, Optional, get_args, get_origin, get_type_hints
-
-        main
-        main
-
-
-
-from types import SimpleNamespace
-from typing import Annotated, Any, Callable, Dict, IO, List, Optional, get_args, get_origin, get_type_hints
-
 
 from pydantic import BaseModel
 
@@ -62,9 +36,7 @@ except Exception:  # pragma: no cover - fallback when Starlette is unavailable
     StarletteRequest = None  # type: ignore[assignment]
 
 
-
 T = TypeVar("T")
-
 
 
 class HTTPException(Exception):
@@ -83,7 +55,7 @@ class Request:
         self.scope = scope or {}
 
     @property
-    def app(self) -> Any:
+    def app(self):
         return self.scope.get("app")
 
     @app.setter
@@ -98,38 +70,11 @@ class UploadFile:
         self,
         filename: str | None = None,
         file: IO[bytes] | None = None,
-
         *,
-
-        *,
-        content: bytes | str | None = None,
-        content_type: str | None = None,
-
-        *,
-
-        headers: Any | None = None,
-    ) -> None:
-        self.filename = filename
-        self.content_type = content_type
-        self.headers = headers
-
-        payload: bytes | None
-        if isinstance(content, str):
-            payload = content.encode()
-        else:
-            payload = content
-
-
-        file: Any | None = None,
-        *,
-
-        content: bytes | str | None = None,
-
         content: bytes | None = None,
         content_type: str | None = None,
         headers: Any | None = None,
     ) -> None:
-
         self.filename = filename
         self.content_type = content_type
         self.headers = headers
@@ -142,107 +87,23 @@ class UploadFile:
             file = stream
             self._owns_file = True
         self.file = file
-
-
-        if file is None:
-            stream: IO[bytes] = SpooledTemporaryFile(mode="w+b")
-            if payload:
-                stream.write(payload)
-                stream.seek(0)
-            self.file = stream
-            self._owns_file = True
-        else:
-            self.file = file
-            self._owns_file = False
-            if payload and hasattr(self.file, "write"):
-                if hasattr(self.file, "seek"):
-                    self.file.seek(0)
-                self.file.write(payload)
-                if hasattr(self.file, "seek"):
-                    self.file.seek(0)
-
-
-
-        content_type: str | None = None,
-
-        headers: Any | None = None,
-    ) -> None:
-        self.filename = filename
-        self.content_type = content_type
-        self.headers = headers
-
-        if file is None:
-
-            file = io.BytesIO()
-        self.file: IO[bytes] = file
-
         if hasattr(self.file, "seek"):
             try:
                 self.file.seek(0)
             except Exception:  # pragma: no cover - defensive
                 pass
 
-
     async def read(self, size: int = -1) -> bytes:
         data = self.file.read(size)
         if isinstance(data, str):
-
-
-    async def read(self, size: int = -1) -> bytes:
-        data = self.file.read(size)
-        if isinstance(data, str):
-
-            stream = SpooledTemporaryFile(mode="w+b")
-            if content:
-                data = content.encode() if isinstance(content, str) else bytes(content)
-                stream.write(data)
-            stream.seek(0)
-            file = stream
-
-        self.file = file if file is not None else BytesIO()
-
-        if hasattr(self.file, "seek"):
-            self.file.seek(0)
-
-    async def read(self, size: int = -1) -> bytes:
-        data = self.file.read(size)
-        if isinstance(data, str):
-
-
-
             return data.encode()
         if data is None:
             return b""
         return data
 
-
-
-
-            data = data.encode()
-
-            return data.encode()
-
-        return data or b""
-
-
-
-
     async def close(self) -> None:
         if self._owns_file and hasattr(self.file, "close"):
             self.file.close()
-
-
-
-
-            data = data.encode()
-        return data or b""
-
-
-        main
-        main
-
-
-
 
 
 def Depends(dependency: Callable[..., Any] | None = None) -> Callable[..., Any] | None:
@@ -486,3 +347,7 @@ __all__ = [
     "_serialise",
     "status",
 ]
+
+from .testclient import TestClient  # noqa: E402  # isort:skip
+
+__all__.append("TestClient")
