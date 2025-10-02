@@ -124,17 +124,21 @@ def get_engine(url: Optional[str] = None, *, create_schema: bool = True) -> Engi
     db_url = url or os.getenv("DB_URL", "sqlite+aiosqlite:///./var/data/kb.sqlite")
     dialect = make_url(db_url)
 
+    driver_name = getattr(dialect, "drivername", "") or str(dialect)
+    driver_name = driver_name.split(":", 1)[0].lower()
+    db_url_str = str(db_url)
+
     # Ensure additional SQLModel definitions are imported before metadata creation
     __import__("app.models.entities")
 
-    if dialect.drivername.endswith("+aiosqlite"):
+    if driver_name.endswith("+aiosqlite"):
         async_engine = create_async_engine(db_url, echo=False)
         sync_engine = async_engine.sync_engine
         if create_schema:
             SQLModel.metadata.create_all(sync_engine)
         return sync_engine
 
-    engine = create_engine(db_url, echo=False, connect_args=_connect_args(db_url))
+    engine = create_engine(db_url, echo=False, connect_args=_connect_args(db_url_str))
     if create_schema:
         SQLModel.metadata.create_all(engine)
     return engine
