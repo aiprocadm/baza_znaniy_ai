@@ -10,7 +10,11 @@ from typing import TYPE_CHECKING, Any, Iterable
 from . import HTTPException, UploadFile, _build_call_arguments, _serialise
 from .responses import HTMLResponse, JSONResponse, Response
 
+
+if TYPE_CHECKING:  # pragma: no cover - typing aid only
+
 if TYPE_CHECKING:  # pragma: no cover - used for type checkers only
+
     from . import FastAPI
 
 
@@ -63,8 +67,12 @@ class TestClient:
     ) -> _SimpleResponse:
         if data is not None or files is not None:
             payload: dict[str, Any] = dict(data or {})
-
             if files:
+
+                for key, value in self._iter_files(files):
+                    uploads = self._coerce_files(value)
+                    self._merge_uploads(payload, key, uploads)
+
                 def _iter_files(items: Any) -> Iterable[tuple[str, Any]]:
                     if isinstance(items, dict):
                         return items.items()
@@ -81,6 +89,7 @@ class TestClient:
                         combined = _ensure_list(existing)
                         combined.extend(uploads)
                         payload[key] = combined
+
 
             return self._request("POST", path, body=payload, **options)
 
@@ -111,6 +120,29 @@ class TestClient:
             for key, value in data.items():
                 kwargs.setdefault(key, value)
         if files:
+
+            file_payload: dict[str, Any] = {}
+            for key, value in files.items():
+                uploads = self._coerce_files(value)
+                self._merge_uploads(file_payload, key, uploads)
+            body = dict(body or {})
+            body.update(file_payload)
+
+        kwargs = _build_call_arguments(route.handler, body, params, self.app)
+        result = route.handler(**kwargs)
+        if inspect.iscoroutine(result):
+            result = asyncio.run(result)
+
+        status_code = route.status_code
+        if isinstance(result, Response):
+            return _SimpleResponse(result.status_code, result.content)
+        if isinstance(result, (HTMLResponse, JSONResponse)):
+            return _SimpleResponse(result.status_code, result.content)
+        if isinstance(result, tuple):
+            content, status_code = result if len(result) == 2 else (result[0], status_code)
+            return _SimpleResponse(status_code, _serialise(content))
+        return _SimpleResponse(status_code, _serialise(result))
+
             for key, value in files.items():
                 entries = _normalise_file_entries(value)
                 uploads = [_build_upload_file(entry) for entry in entries]
@@ -135,11 +167,29 @@ class TestClient:
         content = _serialise(result)
         return _SimpleResponse(route.status_code, content)
 
+
     def _run_handler(self, handler: Any) -> None:
         result = handler()
         if inspect.isawaitable(result):
             asyncio.run(result)
 
+    def _iter_files(self, items: Any) -> Iterable[tuple[str, Any]]:
+        if isinstance(items, dict):
+            return items.items()
+        return list(items)
+
+    def _coerce_files(self, value: Any) -> list[UploadFile]:
+        entries = _normalise_file_entries(value)
+        return [_build_upload_file(entry) for entry in entries]
+
+    def _merge_uploads(self, target: dict[str, Any], key: str, uploads: list[UploadFile]) -> None:
+        existing = target.get(key)
+        if existing is None:
+            target[key] = list(uploads)
+        else:
+            combined = _ensure_list(existing)
+            combined.extend(uploads)
+            target[key] = combined
 
 def _normalise_file_entries(value: Any) -> list[Any]:
     if isinstance(value, list):
@@ -189,3 +239,9 @@ def _build_upload_file(entry: Any) -> UploadFile:
     if content_type is not None:
         kwargs["content_type"] = content_type
     return UploadFile(**kwargs)
+
+
+
+__all__ = ["TestClient"]
+
+

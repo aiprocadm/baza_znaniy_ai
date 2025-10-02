@@ -7,7 +7,27 @@ import io
 from dataclasses import dataclass
 from datetime import date, datetime
 from types import SimpleNamespace
+
+from typing import (
+    Annotated,
+    Any,
+    Callable,
+    Dict,
+    IO,
+    Iterable,
+    List,
+    Optional,
+    Tuple,
+    TypeVar,
+    get_args,
+    get_origin,
+    get_type_hints,
+)
+
+from tempfile import SpooledTemporaryFile
+
 from typing import Annotated, Any, Callable, Dict, IO, List, Optional, get_args, get_origin, get_type_hints
+
 
 from pydantic import BaseModel
 
@@ -17,6 +37,13 @@ from .responses import HTMLResponse, JSONResponse
 try:  # pragma: no cover - optional dependency
     from starlette.requests import Request as StarletteRequest
 except Exception:  # pragma: no cover - fallback when Starlette is unavailable
+
+    StarletteRequest = None  # type: ignore[assignment]
+
+
+T = TypeVar("T")
+
+
     StarletteRequest = None
 
 
@@ -36,7 +63,7 @@ class Request:
         self.scope = scope or {}
 
     @property
-    def app(self) -> Any:
+    def app(self):
         return self.scope.get("app")
 
 
@@ -47,16 +74,34 @@ class UploadFile:
         self,
         filename: str | None = None,
         file: IO[bytes] | None = None,
+
+        *,
+        content: bytes | None = None,
+        content_type: str | None = None,
+
         content_type: str | None = None,
         *,
+
         headers: Any | None = None,
     ) -> None:
         self.filename = filename
         self.content_type = content_type
         self.headers = headers
+
+        self._owns_file = False
+        if file is None:
+            stream = SpooledTemporaryFile(mode="w+b")
+            if content:
+                stream.write(content)
+            stream.seek(0)
+            file = stream
+            self._owns_file = True
+        self.file = file
+
         if file is None:
             file = io.BytesIO()
         self.file: IO[bytes] = file
+
         if hasattr(self.file, "seek"):
             try:
                 self.file.seek(0)
