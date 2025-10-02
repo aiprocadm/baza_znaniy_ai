@@ -8,6 +8,7 @@ import mimetypes
 import secrets
 import sys
 from pathlib import Path
+from tempfile import SpooledTemporaryFile
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, File, HTTPException, status
@@ -211,6 +212,72 @@ async def upload_file(
 
 
     coerced = [_coerce_upload_argument(item) for item in uploads]
+
+    upload = next(
+        (
+            item
+            for item in coerced
+            if _normalise_extension((item.filename or "")) in limits.allowed_extensions
+        ),
+        coerced[0],
+    )
+    extension = _normalise_extension(upload.filename or "")
+    if extension not in limits.allowed_extensions:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="UPLOAD_INVALID_EXT")
+
+
+    def _as_bytes(value: object) -> bytes:
+        if isinstance(value, bytes):
+            return value
+        if isinstance(value, bytearray):
+            return bytes(value)
+        if isinstance(value, memoryview):  # pragma: no cover - defensive branch
+            return value.tobytes()
+        if value is None:
+            return b""
+        return str(value).encode()
+
+    def _spooled_file(data: object) -> SpooledTemporaryFile:
+        stream = SpooledTemporaryFile(max_size=max(1, limits.max_size), mode="w+b")
+        payload = _as_bytes(data)
+        if payload:
+            stream.write(payload)
+        stream.seek(0)
+        return stream
+
+
+    def _coerce(item: object) -> UploadFile:
+        if isinstance(item, UploadFile):
+            return item
+
+        if isinstance(item, dict):  # pragma: no cover - compatibility for legacy clients
+            filename = (item.get("filename") or "uploaded").strip() or "uploaded"
+            content_type = item.get("content_type")
+            content = item.get("file")
+            if content is None:
+                content = item.get("content", b"")
+            return create_upload_file(filename, content, content_type)
+
+        if isinstance(item, (list, tuple)):
+            filename = str(item[0]).strip() if item else "uploaded"
+            filename = filename or "uploaded"
+            content = item[1] if len(item) > 1 else b""
+            third = item[2] if len(item) > 2 else None
+            content_type = third if isinstance(third, str) else None
+            return create_upload_file(filename, content, content_type)
+
+        if isinstance(item, str):
+            filename = item.strip() or "uploaded"
+            return create_upload_file(filename, _spooled_file(b""))
+
+        file_like = getattr(item, "read", None)
+        if callable(file_like):
+            return create_upload_file("uploaded", item)
+
+        return create_upload_file("uploaded", _spooled_file(item))
+
+    coerced = [_coerce(item) for item in uploads]
+
 
     selected_extension = ""
     selected_filename: Optional[str] = None
