@@ -1,5 +1,4 @@
 """Minimal Prometheus client stub tailored for unit tests."""
-from __future__ import annotations
 
 from collections import defaultdict
 from typing import Iterable, Mapping, MutableMapping, TypeVar
@@ -22,7 +21,7 @@ class CollectorRegistry:
     """Registry that stores metric instances for lookup during tests."""
 
     def __init__(self) -> None:
-        self._metrics: dict[str, _MetricBase] = {}
+        self._metrics: dict[str, "_MetricBase"] = {}
 
     def register(self, metric: "_MetricBase") -> None:
         self._metrics[metric._name] = metric
@@ -73,7 +72,7 @@ class _MetricBase:
     """Shared behaviour for Counter and Histogram test doubles."""
 
     _type: str = ""
-    _child_type: type[_MetricChild]
+    _child_type: type["_MetricChild"]
 
     def __init__(
         self,
@@ -91,7 +90,7 @@ class _MetricBase:
         registry = registry or _DEFAULT_REGISTRY
         registry.register(self)
 
-    def labels(self, *args: str, **kwargs: str) -> _MetricChild:
+    def labels(self, *args: str, **kwargs: str) -> "_MetricChild":
         if len(args) > len(self._labelnames):  # pragma: no cover - defensive
             raise ValueError("Too many positional label values provided")
         provided = dict(zip(self._labelnames, args))
@@ -125,7 +124,7 @@ class _MetricBase:
 
 
 class _MetricChild:
-    def __init__(self, metric: _MetricBase, label_values: LabelValues) -> None:
+    def __init__(self, metric: "_MetricBase", label_values: LabelValues) -> None:
         self._metric = metric
         self._label_values = label_values
 
