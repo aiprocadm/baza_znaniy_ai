@@ -118,7 +118,7 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("DB_URL", "INGEST_DB_URL"),
     )
     max_upload_mb: int = Field(
-        default=25,
+        default=40,
         validation_alias=AliasChoices("MAX_UPLOAD_MB", "UPLOAD_MAX_MB"),
     )
     cors_allow_origins: list[str] = Field(
