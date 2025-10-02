@@ -69,7 +69,12 @@ class UploadFile(FastAPIUploadFile):
         content_type: str | None = None,
         **_: object,
     ) -> None:
-        super().__init__(file=file, size=size, filename=filename, headers=headers)
+        try:
+            super().__init__(file=file, size=size, filename=filename, headers=headers)
+        except TypeError:
+            super().__init__(file=file, filename=filename, headers=headers)
+        if self.headers is None:
+            self.headers = MutableHeaders()
         if not isinstance(self.headers, MutableHeaders):
             try:
                 raw = list(getattr(self.headers, "raw"))  # type: ignore[attr-defined]
@@ -211,15 +216,15 @@ async def upload_file(
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="UPLOAD_EMPTY")
 
 
-    coerced = [_coerce_upload_argument(item) for item in uploads]
+    initial_candidates = [_coerce_upload_argument(item) for item in uploads]
 
     upload = next(
         (
             item
-            for item in coerced
+            for item in initial_candidates
             if _normalise_extension((item.filename or "")) in limits.allowed_extensions
         ),
-        coerced[0],
+        initial_candidates[0],
     )
     extension = _normalise_extension(upload.filename or "")
     if extension not in limits.allowed_extensions:
@@ -246,9 +251,41 @@ async def upload_file(
         return stream
 
 
+    def _build_upload(
+        filename: str,
+        content: object,
+        content_type: Optional[str] = None,
+    ) -> UploadFile:
+        filename = filename.strip() or "uploaded"
+
+        if hasattr(content, "read"):
+            file_obj = content
+            seek = getattr(file_obj, "seek", None)
+            if callable(seek):
+                try:
+                    seek(0)
+                except Exception:  # pragma: no cover - defensive seek
+                    pass
+        else:
+            file_obj = _spooled_file(content)
+
+        return UploadFile(filename=filename, file=file_obj, content_type=content_type)
+
     def _coerce(item: object) -> UploadFile:
         if isinstance(item, UploadFile):
             return item
+
+        if isinstance(item, FastAPIUploadFile):
+            filename = getattr(item, "filename", "uploaded") or "uploaded"
+            content_type = getattr(item, "content_type", None)
+            file_obj = getattr(item, "file", item)
+            seek = getattr(file_obj, "seek", None)
+            if callable(seek):
+                try:
+                    seek(0)
+                except Exception:  # pragma: no cover - defensive seek
+                    pass
+            return UploadFile(filename=filename, file=file_obj, content_type=content_type)
 
         if isinstance(item, dict):  # pragma: no cover - compatibility for legacy clients
             filename = (item.get("filename") or "uploaded").strip() or "uploaded"
@@ -256,7 +293,7 @@ async def upload_file(
             content = item.get("file")
             if content is None:
                 content = item.get("content", b"")
-            return create_upload_file(filename, content, content_type)
+            return _build_upload(filename, content, content_type)
 
         if isinstance(item, (list, tuple)):
             filename = str(item[0]).strip() if item else "uploaded"
@@ -264,19 +301,24 @@ async def upload_file(
             content = item[1] if len(item) > 1 else b""
             third = item[2] if len(item) > 2 else None
             content_type = third if isinstance(third, str) else None
-            return create_upload_file(filename, content, content_type)
+            return _build_upload(filename, content, content_type)
 
         if isinstance(item, str):
             filename = item.strip() or "uploaded"
-            return create_upload_file(filename, _spooled_file(b""))
+            return _build_upload(filename, b"")
 
         file_like = getattr(item, "read", None)
         if callable(file_like):
-            return create_upload_file("uploaded", item)
+            filename = getattr(item, "name", "uploaded") or "uploaded"
+            return _build_upload(filename, item)
 
-        return create_upload_file("uploaded", _spooled_file(item))
+        return _build_upload("uploaded", item)
 
     coerced = [_coerce(item) for item in uploads]
+    cleanup_targets = list(coerced)
+    for candidate in initial_candidates:
+        if not any(candidate is other for other in coerced):
+            cleanup_targets.append(candidate)
 
 
     selected_extension = ""
@@ -302,7 +344,7 @@ async def upload_file(
 
         payload = await _read_file(upload, limits)
     finally:
-        for item in coerced:
+        for item in cleanup_targets:
             close = getattr(item, "close", None)
             if close is None:
                 continue
@@ -353,7 +395,7 @@ async def upload_file(
 
 
 def _coerce_upload_argument(item: object) -> UploadFile:
-    if isinstance(item, UploadFile):
+    if isinstance(item, (UploadFile, FastAPIUploadFile)):
         return item
 
     filename = "uploaded"
