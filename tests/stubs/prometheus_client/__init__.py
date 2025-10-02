@@ -1,5 +1,4 @@
 """Minimal Prometheus client stub tailored for unit tests."""
-
 from __future__ import annotations
 
 from collections import defaultdict
