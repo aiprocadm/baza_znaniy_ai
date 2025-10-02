@@ -12,8 +12,27 @@ from app.observability.metrics import record_index_operation, record_search_oper
 
 LOGGER = logging.getLogger(__name__)
 
-_FALLBACK_INDEX: List[dict[str, object]] = []
+_DEFAULT_FALLBACK: List[dict[str, object]] = []
+_FALLBACK_STORAGE: List[dict[str, object]] | None = _DEFAULT_FALLBACK
 _VECTOR_STORE: object | None = None
+
+
+def set_fallback_storage(storage: List[dict[str, object]] | None) -> None:
+    """Configure the container used for the in-memory fallback index."""
+
+    global _FALLBACK_STORAGE
+    if storage is None:
+        storage = []
+    _FALLBACK_STORAGE = storage
+
+
+def get_fallback_storage() -> List[dict[str, object]]:
+    """Return the active fallback container, creating one when needed."""
+
+    global _FALLBACK_STORAGE
+    if _FALLBACK_STORAGE is None:
+        _FALLBACK_STORAGE = []
+    return _FALLBACK_STORAGE
 
 
 def _resolve_vector_store():
@@ -41,7 +60,7 @@ def index_chunks(chunks: Iterable[dict[str, object]]) -> int:
         record_index_operation("error", "vector", len(items), duration)
         LOGGER.exception("Falling back to in-memory index")
         fallback_start = time.perf_counter()
-        _FALLBACK_INDEX.extend(items)
+        get_fallback_storage().extend(items)
         record_index_operation(
             "success", "fallback", len(items), time.perf_counter() - fallback_start
         )
@@ -55,7 +74,7 @@ def index_chunks(chunks: Iterable[dict[str, object]]) -> int:
         record_index_operation("error", "vector", len(items), duration)
         LOGGER.exception("Falling back to in-memory index")
         fallback_start = time.perf_counter()
-        _FALLBACK_INDEX.extend(items)
+        get_fallback_storage().extend(items)
         record_index_operation(
             "success", "fallback", len(items), time.perf_counter() - fallback_start
         )
@@ -72,7 +91,7 @@ def _search_fallback(query: str, top_k: int) -> List[dict[str, object]]:
         return []
     hits: List[tuple[float, dict[str, object]]] = []
     needle = query.lower()
-    for chunk in _FALLBACK_INDEX:
+    for chunk in get_fallback_storage():
         text = str(chunk.get("text", ""))
         haystack = text.lower()
         if not haystack:
@@ -114,7 +133,13 @@ def search(query: str, top_k: int = 10) -> List[dict[str, object]]:
 def clear_fallback() -> None:
     """Reset the in-memory fallback index (used in tests)."""
 
-    _FALLBACK_INDEX.clear()
+    get_fallback_storage().clear()
 
 
-__all__ = ["index_chunks", "search", "clear_fallback"]
+__all__ = [
+    "index_chunks",
+    "search",
+    "clear_fallback",
+    "set_fallback_storage",
+    "get_fallback_storage",
+]

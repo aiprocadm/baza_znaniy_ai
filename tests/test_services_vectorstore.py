@@ -50,9 +50,14 @@ class ExplodingVectorStore:
 def clear_fallback_between_tests() -> None:
     """Ensure a clean fallback index for each test."""
 
+    storage: list[dict[str, object]] = []
+    vectorstore.set_fallback_storage(storage)
     vectorstore.clear_fallback()
-    yield
-    vectorstore.clear_fallback()
+    try:
+        yield
+    finally:
+        vectorstore.set_fallback_storage([])
+        vectorstore.clear_fallback()
 
 
 def test_index_chunks_success(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -94,3 +99,18 @@ def test_index_chunks_fallback_and_search_order(monkeypatch: pytest.MonkeyPatch)
 
     vectorstore.clear_fallback()
     assert vectorstore.search("beta", top_k=2) == []
+
+
+def test_configurable_fallback_storage(monkeypatch: pytest.MonkeyPatch) -> None:
+    failing_store = ExplodingVectorStore()
+    monkeypatch.setattr(vectorstore, "_VECTOR_STORE", failing_store)
+
+    shared_storage: list[dict[str, object]] = []
+    vectorstore.set_fallback_storage(shared_storage)
+
+    chunks = [{"id": 11, "text": "shared"}]
+    stored = vectorstore.index_chunks(chunks)
+
+    assert stored == 1
+    assert shared_storage == chunks
+    assert vectorstore.get_fallback_storage() is shared_storage

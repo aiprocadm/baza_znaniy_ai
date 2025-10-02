@@ -19,6 +19,7 @@ from app.llm import LLMProvider, get_cached_provider
 from app.llm.manager import LlamaLoraManager
 from app.retriever import CrossEncoderReranker, get_reranker, get_vector_store
 from app.services.files import FileStore, IngestQueue
+from app.services import vectorstore as vectorstore_service
 from app.ui import router as ui_router
 
 logger = logging.getLogger(__name__)
@@ -100,7 +101,9 @@ def create_app(provider: LLMProvider | None = None) -> FastAPI:
     application.state.ingest_worker_task = None
     application.state.summarizer = summarizer
     application.state.reranker = reranker
-    application.state.fallback_index: list[dict[str, object]] = []
+    fallback_index: list[dict[str, object]] = []
+    vectorstore_service.set_fallback_storage(fallback_index)
+    application.state.fallback_index = fallback_index
     application.state.chat_history_limit = settings.chat_history_limit
     application.state.retrieve_topk = settings.retrieve_topk
     application.state.rerank_topk = settings.rerank_topk
