@@ -14,6 +14,9 @@ __all__ = [
 
 CONTENT_TYPE_LATEST = "text/plain; version=0.0.4; charset=utf-8"
 
+LabelValues = tuple[str, ...]
+MetricSamples = MutableMapping[LabelValues, float]
+
 
 class CollectorRegistry:
     """Registry that stores metric instances for lookup during tests."""
@@ -84,7 +87,7 @@ class _MetricBase:
         self._documentation = documentation
         self._labelnames = tuple(labelnames or ())
         self._registry: CollectorRegistry | None = None
-        self._samples: MutableMapping[tuple[str, ...], float] = defaultdict(float)
+        self._samples: MetricSamples = defaultdict(float)
         registry = registry or _DEFAULT_REGISTRY
         registry.register(self)
 
@@ -96,10 +99,10 @@ class _MetricBase:
         values = tuple(provided.get(name, "") for name in self._labelnames)
         return self._child_type(self, values)
 
-    def _canonicalise(self, labels: Mapping[str, str]) -> tuple[str, ...]:
+    def _canonicalise(self, labels: Mapping[str, str]) -> LabelValues:
         return tuple(labels.get(name, "") for name in self._labelnames)
 
-    def _format_labels(self, values: tuple[str, ...]) -> str:
+    def _format_labels(self, values: LabelValues) -> str:
         if not self._labelnames:
             return ""
         parts = [
@@ -122,7 +125,7 @@ class _MetricBase:
 
 
 class _MetricChild:
-    def __init__(self, metric: _MetricBase, label_values: tuple[str, ...]) -> None:
+    def __init__(self, metric: _MetricBase, label_values: LabelValues) -> None:
         self._metric = metric
         self._label_values = label_values
 
@@ -166,8 +169,8 @@ class Histogram(_MetricBase):
             labelnames=labelnames,
             registry=registry,
         )
-        self._counts: MutableMapping[tuple[str, ...], float] = defaultdict(float)
-        self._sums: MutableMapping[tuple[str, ...], float] = defaultdict(float)
+        self._counts: MetricSamples = defaultdict(float)
+        self._sums: MetricSamples = defaultdict(float)
         self._buckets = tuple(buckets or ())
 
     def labels(self, *args: str, **kwargs: str) -> _HistogramChild:
