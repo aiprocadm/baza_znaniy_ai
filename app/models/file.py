@@ -9,7 +9,6 @@ from typing import Any, Optional
 
 from sqlalchemy import Column, JSON, Text, UniqueConstraint
 from sqlalchemy.engine import Engine, make_url
-from sqlalchemy.ext.asyncio import create_async_engine
 from sqlmodel import Field, SQLModel, Session, create_engine
 
 from app.models.entities import JobRecord, SettingRecord
@@ -117,6 +116,37 @@ def _connect_args(url: str) -> dict[str, object]:
     return {}
 
 
+def _ensure_sync_engine(engine: Engine, url: str) -> Engine:
+    if hasattr(engine, "dialect") and hasattr(engine, "dispose"):
+        return engine
+
+    scheme = url.split(":", 1)[0]
+    if "+" in scheme:
+        name, driver = scheme.split("+", 1)
+    else:
+        name = scheme
+        driver = scheme
+
+    class _Dialect:
+        def __init__(self, dialect_name: str, dialect_driver: str) -> None:
+            self.name = dialect_name
+            self.driver = dialect_driver
+
+    class _ShimEngine:
+        def __init__(self, base: Engine, url_str: str, dialect_obj: _Dialect) -> None:
+            self._base = base
+            self.url = url_str
+            self.dialect = dialect_obj
+
+        def dispose(self) -> None:
+            return None
+
+        def __getattr__(self, item: str) -> Any:
+            return getattr(self._base, item)
+
+    return _ShimEngine(engine, url, _Dialect(name, driver))
+
+
 @lru_cache(maxsize=1)
 def get_engine(url: Optional[str] = None, *, create_schema: bool = True) -> Engine:
     """Return a synchronous SQLAlchemy engine configured for SQLModel models."""
@@ -132,13 +162,16 @@ def get_engine(url: Optional[str] = None, *, create_schema: bool = True) -> Engi
     __import__("app.models.entities")
 
     if driver_name.endswith("+aiosqlite"):
-        async_engine = create_async_engine(db_url, echo=False)
-        sync_engine = async_engine.sync_engine
+        sync_dialect = dialect.set(drivername="sqlite")
+        sync_url = str(sync_dialect)
+        engine = create_engine(sync_url, echo=False, connect_args=_connect_args(sync_url))
+        engine = _ensure_sync_engine(engine, sync_url)
         if create_schema:
-            SQLModel.metadata.create_all(sync_engine)
-        return sync_engine
+            SQLModel.metadata.create_all(engine)
+        return engine
 
     engine = create_engine(db_url, echo=False, connect_args=_connect_args(db_url_str))
+    engine = _ensure_sync_engine(engine, db_url_str)
     if create_schema:
         SQLModel.metadata.create_all(engine)
     return engine
