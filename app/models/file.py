@@ -6,6 +6,7 @@ import os
 from datetime import datetime
 from functools import lru_cache
 from typing import Any, Optional
+from types import MethodType
 
 from sqlalchemy import Column, JSON, Text, UniqueConstraint
 from sqlalchemy.engine import Engine, make_url
@@ -117,7 +118,11 @@ def _connect_args(url: str) -> dict[str, object]:
 
 
 def _ensure_sync_engine(engine: Engine, url: str) -> Engine:
-    if hasattr(engine, "dialect") and hasattr(engine, "dispose"):
+    needs_dialect = not hasattr(engine, "dialect") or getattr(engine, "dialect", None) is None
+    needs_dispose = not hasattr(engine, "dispose") or not callable(getattr(engine, "dispose", None))
+    needs_url = not hasattr(engine, "url")
+
+    if not (needs_dialect or needs_dispose or needs_url):
         return engine
 
     scheme = url.split(":", 1)[0]
@@ -127,24 +132,26 @@ def _ensure_sync_engine(engine: Engine, url: str) -> Engine:
         name = scheme
         driver = scheme
 
-    class _Dialect:
-        def __init__(self, dialect_name: str, dialect_driver: str) -> None:
-            self.name = dialect_name
-            self.driver = dialect_driver
+    if needs_dialect:
+        class _FallbackDialect:
+            __slots__ = ("name", "driver")
 
-    class _ShimEngine:
-        def __init__(self, base: Engine, url_str: str, dialect_obj: _Dialect) -> None:
-            self._base = base
-            self.url = url_str
-            self.dialect = dialect_obj
+            def __init__(self, dialect_name: str, dialect_driver: str) -> None:
+                self.name = dialect_name
+                self.driver = dialect_driver
 
-        def dispose(self) -> None:
+        engine.dialect = _FallbackDialect(name, driver)  # type: ignore[attr-defined]
+
+    if needs_dispose:
+        def _noop_dispose(self: Engine) -> None:
             return None
 
-        def __getattr__(self, item: str) -> Any:
-            return getattr(self._base, item)
+        engine.dispose = MethodType(_noop_dispose, engine)  # type: ignore[attr-defined]
 
-    return _ShimEngine(engine, url, _Dialect(name, driver))
+    if needs_url:
+        engine.url = url  # type: ignore[attr-defined]
+
+    return engine
 
 
 @lru_cache(maxsize=1)
