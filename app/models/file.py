@@ -167,13 +167,17 @@ def get_engine(url: Optional[str] = None, *, create_schema: bool = True) -> Engi
         engine = create_engine(sync_url, echo=False, connect_args=_connect_args(sync_url))
         engine = _ensure_sync_engine(engine, sync_url)
         if create_schema:
-            SQLModel.metadata.create_all(engine)
+            metadata = getattr(SQLModel, "metadata", None)
+            if metadata is not None and hasattr(metadata, "create_all"):
+                metadata.create_all(engine)
         return engine
 
     engine = create_engine(db_url, echo=False, connect_args=_connect_args(db_url_str))
     engine = _ensure_sync_engine(engine, db_url_str)
     if create_schema:
-        SQLModel.metadata.create_all(engine)
+        metadata = getattr(SQLModel, "metadata", None)
+        if metadata is not None and hasattr(metadata, "create_all"):
+            metadata.create_all(engine)
     return engine
 
 
