@@ -5,7 +5,6 @@ from __future__ import annotations
 import os
 from datetime import datetime
 from functools import lru_cache
-from types import MethodType
 from typing import Any, Optional
 
 from sqlalchemy import Column, JSON, Text, UniqueConstraint
@@ -128,32 +127,69 @@ def _ensure_sync_engine(engine: Engine, url: str) -> Engine:
         dialect_name = scheme
         dialect_driver = scheme
 
+    def _try_assign_attr(target: Any, name: str, value: Any) -> bool:
+        try:
+            setattr(target, name, value)
+        except (AttributeError, TypeError):
+            return False
+        return True
+
+    extras: dict[str, Any] = {}
+    needs_wrap = False
+
+    class _FallbackDialect:
+        __slots__ = ("name", "driver")
+
+        def __init__(self, name: str, driver: str) -> None:
+            self.name = name
+            self.driver = driver
+
+    class _DialectProxy:
+        __slots__ = ("_original", "name", "driver")
+
+        def __init__(self, original: Any, name: str, driver: str) -> None:
+            object.__setattr__(self, "_original", original)
+            object.__setattr__(self, "name", getattr(original, "name", name))
+            object.__setattr__(self, "driver", getattr(original, "driver", driver))
+
+        def __getattr__(self, item: str) -> Any:
+            return getattr(object.__getattribute__(self, "_original"), item)
+
     dialect = getattr(engine, "dialect", None)
     if dialect is None:
-
-        class _FallbackDialect:
-            __slots__ = ("name", "driver")
-
-            def __init__(self, name: str, driver: str) -> None:
-                self.name = name
-                self.driver = driver
-
-        engine.dialect = _FallbackDialect(dialect_name, dialect_driver)  # type: ignore[attr-defined]
+        fallback_dialect = _FallbackDialect(dialect_name, dialect_driver)
+        if not _try_assign_attr(engine, "dialect", fallback_dialect):
+            extras["dialect"] = fallback_dialect
+            needs_wrap = True
     else:
-        if not hasattr(dialect, "name"):
-            setattr(dialect, "name", dialect_name)
-        if not hasattr(dialect, "driver"):
-            setattr(dialect, "driver", dialect_driver)
+        missing_name = not hasattr(dialect, "name")
+        missing_driver = not hasattr(dialect, "driver")
+        if missing_name or missing_driver:
+            try:
+                if missing_name:
+                    setattr(dialect, "name", dialect_name)
+                if missing_driver:
+                    setattr(dialect, "driver", dialect_driver)
+            except (AttributeError, TypeError):
+                proxy = _DialectProxy(dialect, dialect_name, dialect_driver)
+                if not _try_assign_attr(engine, "dialect", proxy):
+                    extras["dialect"] = proxy
+                    needs_wrap = True
 
     if not hasattr(engine, "url") or getattr(engine, "url") is None:
-        engine.url = make_url(url_str) if "+" in url_str or "://" in url_str else url_str  # type: ignore[attr-defined]
+        fallback_url = make_url(url_str) if "+" in url_str or "://" in url_str else url_str
+        if not _try_assign_attr(engine, "url", fallback_url):
+            extras["url"] = fallback_url
+            needs_wrap = True
 
     if not hasattr(engine, "dispose") or not callable(getattr(engine, "dispose", None)):
 
-        def _noop_dispose(self: Engine) -> None:
+        def _noop_dispose(*_: Any, **__: Any) -> None:
             return None
 
-        engine.dispose = MethodType(_noop_dispose, engine)  # type: ignore[attr-defined]
+        if not _try_assign_attr(engine, "dispose", _noop_dispose):
+            extras["dispose"] = _noop_dispose
+            needs_wrap = True
 
     if not hasattr(engine, "connect") or not callable(getattr(engine, "connect", None)):
 
@@ -178,12 +214,42 @@ def _ensure_sync_engine(engine: Engine, url: str) -> Engine:
             def execute(self, statement: Any) -> _FallbackResult:
                 return _FallbackResult(statement)
 
-        def _connect(self: Engine) -> _FallbackConnection:
+        def _connect(*_: Any, **__: Any) -> _FallbackConnection:
             return _FallbackConnection()
 
-        engine.connect = MethodType(_connect, engine)  # type: ignore[attr-defined]
+        if not _try_assign_attr(engine, "connect", _connect):
+            extras["connect"] = _connect
+            needs_wrap = True
 
-    return engine
+    if not needs_wrap:
+        return engine
+
+    class _EngineProxy:
+        __slots__ = ("_original", "_extras")
+
+        def __init__(self, original: Any, extras_map: dict[str, Any]) -> None:
+            object.__setattr__(self, "_original", original)
+            object.__setattr__(self, "_extras", dict(extras_map))
+
+        def __getattr__(self, item: str) -> Any:
+            extras_map = object.__getattribute__(self, "_extras")
+            if item in extras_map:
+                return extras_map[item]
+            return getattr(object.__getattribute__(self, "_original"), item)
+
+        def __setattr__(self, key: str, value: Any) -> None:
+            extras_map = object.__getattribute__(self, "_extras")
+            if key in extras_map:
+                extras_map[key] = value
+                return
+            setattr(object.__getattribute__(self, "_original"), key, value)
+
+        def __dir__(self) -> list[str]:  # pragma: no cover - developer ergonomics
+            extras_map = object.__getattribute__(self, "_extras")
+            original = object.__getattribute__(self, "_original")
+            return sorted(set(extras_map.keys()) | set(dir(original)))
+
+    return _EngineProxy(engine, extras)
 
 
 @lru_cache(maxsize=1)
