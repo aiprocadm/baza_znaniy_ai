@@ -7,7 +7,6 @@ from datetime import datetime
 from functools import lru_cache
 from types import MethodType
 from typing import Any, Optional
-from types import MethodType
 
 from sqlalchemy import Column, JSON, Text, UniqueConstraint
 from sqlalchemy.engine import Engine, make_url
@@ -119,105 +118,70 @@ def _connect_args(url: str) -> dict[str, object]:
 
 
 def _ensure_sync_engine(engine: Engine, url: str) -> Engine:
-
-    needs_dialect = not hasattr(engine, "dialect") or getattr(engine, "dialect", None) is None
-    needs_dispose = not hasattr(engine, "dispose") or not callable(getattr(engine, "dispose", None))
-    needs_url = not hasattr(engine, "url")
-
-    if not (needs_dialect or needs_dispose or needs_url):
-        return engine
-
-    """Ensure the engine exposes sync-compatible attributes."""
-
+    """Ensure the provided engine exposes the synchronous SQLAlchemy surface."""
 
     url_str = str(url)
     scheme = url_str.split(":", 1)[0]
     if "+" in scheme:
-        name, driver = scheme.split("+", 1)
+        dialect_name, dialect_driver = scheme.split("+", 1)
     else:
-        name = scheme
-        driver = scheme
+        dialect_name = scheme
+        dialect_driver = scheme
 
+    dialect = getattr(engine, "dialect", None)
+    if dialect is None:
 
-    if needs_dialect:
         class _FallbackDialect:
             __slots__ = ("name", "driver")
 
-            def __init__(self, dialect_name: str, dialect_driver: str) -> None:
-                self.name = dialect_name
-                self.driver = dialect_driver
+            def __init__(self, name: str, driver: str) -> None:
+                self.name = name
+                self.driver = driver
 
-        engine.dialect = _FallbackDialect(name, driver)  # type: ignore[attr-defined]
+        engine.dialect = _FallbackDialect(dialect_name, dialect_driver)  # type: ignore[attr-defined]
+    else:
+        if not hasattr(dialect, "name"):
+            setattr(dialect, "name", dialect_name)
+        if not hasattr(dialect, "driver"):
+            setattr(dialect, "driver", dialect_driver)
 
-    if needs_dispose:
+    if not hasattr(engine, "url") or getattr(engine, "url") is None:
+        engine.url = make_url(url_str) if "+" in url_str or "://" in url_str else url_str  # type: ignore[attr-defined]
+
+    if not hasattr(engine, "dispose") or not callable(getattr(engine, "dispose", None)):
+
         def _noop_dispose(self: Engine) -> None:
             return None
 
         engine.dispose = MethodType(_noop_dispose, engine)  # type: ignore[attr-defined]
 
-    if needs_url:
-        engine.url = url  # type: ignore[attr-defined]
+    if not hasattr(engine, "connect") or not callable(getattr(engine, "connect", None)):
 
-    dialect = getattr(engine, "dialect", None)
-    if dialect is None:
-        class _Dialect:
-            def __init__(self, dialect_name: str, dialect_driver: str) -> None:
-                self.name = dialect_name
-                self.driver = dialect_driver
+        class _FallbackResult:
+            __slots__ = ("_value",)
 
-        dialect = _Dialect(name, driver)
-        setattr(engine, "dialect", dialect)
-    else:
-        if not hasattr(dialect, "name"):
-            setattr(dialect, "name", name)
-        if not hasattr(dialect, "driver"):
-            setattr(dialect, "driver", driver)
-
-    if not hasattr(engine, "url") or getattr(engine, "url") is None:
-        setattr(engine, "url", url_str)
-
-    dispose = getattr(engine, "dispose", None)
-    if not callable(dispose):
-
-        def _noop_dispose(self: Engine) -> None:
-            return None
-
-        setattr(engine, "dispose", MethodType(_noop_dispose, engine))
-
-    connect = getattr(engine, "connect", None)
-    if not callable(connect):
-
-        class _Result:
-            def __init__(self, statement: Any) -> None:
-                self._statement = statement
+            def __init__(self, value: Any) -> None:
+                self._value = value
 
             def scalar(self) -> Any:
-                if isinstance(self._statement, str):
-                    digits = "".join(
-                        ch if ch.isdigit() else " " for ch in self._statement
-                    ).split()
-                    if digits:
-                        try:
-                            return int(digits[-1])
-                        except ValueError:
-                            pass
-                return self._statement
+                return self._value
 
-        class _Connection:
-            def __enter__(self) -> "_Connection":
+        class _FallbackConnection:
+            __slots__ = ()
+
+            def __enter__(self) -> "_FallbackConnection":  # pragma: no cover - mimic SQLAlchemy
                 return self
 
-            def __exit__(self, exc_type, exc, tb) -> bool:
+            def __exit__(self, exc_type, exc, tb) -> bool:  # pragma: no cover - mimic SQLAlchemy
                 return False
 
-            def execute(self, statement: Any) -> _Result:
-                return _Result(statement)
+            def execute(self, statement: Any) -> _FallbackResult:
+                return _FallbackResult(statement)
 
-        def _connect(self: Engine) -> _Connection:
-            return _Connection()
+        def _connect(self: Engine) -> _FallbackConnection:
+            return _FallbackConnection()
 
-        setattr(engine, "connect", MethodType(_connect, engine))
-
+        engine.connect = MethodType(_connect, engine)  # type: ignore[attr-defined]
 
     return engine
 
