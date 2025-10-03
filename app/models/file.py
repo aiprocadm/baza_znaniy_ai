@@ -134,6 +134,17 @@ def _ensure_sync_engine(engine: Engine, url: str) -> Engine:
             return False
         return True
 
+    def _attr_is_readable(target: Any, name: str, *, require_callable: bool = False) -> bool:
+        try:
+            value = getattr(target, name)
+        except Exception:  # pragma: no cover - defensive against exotic descriptors
+            return False
+
+        if require_callable and not callable(value):
+            return False
+
+        return True
+
     extras: dict[str, Any] = {}
     needs_wrap = False
 
@@ -161,6 +172,9 @@ def _ensure_sync_engine(engine: Engine, url: str) -> Engine:
         if not _try_assign_attr(engine, "dialect", fallback_dialect):
             extras["dialect"] = fallback_dialect
             needs_wrap = True
+        elif not _attr_is_readable(engine, "dialect"):
+            extras["dialect"] = fallback_dialect
+            needs_wrap = True
     else:
         missing_name = not hasattr(dialect, "name")
         missing_driver = not hasattr(dialect, "driver")
@@ -175,10 +189,16 @@ def _ensure_sync_engine(engine: Engine, url: str) -> Engine:
                 if not _try_assign_attr(engine, "dialect", proxy):
                     extras["dialect"] = proxy
                     needs_wrap = True
+                elif not _attr_is_readable(engine, "dialect"):
+                    extras["dialect"] = proxy
+                    needs_wrap = True
 
     if not hasattr(engine, "url") or getattr(engine, "url") is None:
         fallback_url = make_url(url_str) if "+" in url_str or "://" in url_str else url_str
         if not _try_assign_attr(engine, "url", fallback_url):
+            extras["url"] = fallback_url
+            needs_wrap = True
+        elif not _attr_is_readable(engine, "url"):
             extras["url"] = fallback_url
             needs_wrap = True
 
@@ -188,6 +208,9 @@ def _ensure_sync_engine(engine: Engine, url: str) -> Engine:
             return None
 
         if not _try_assign_attr(engine, "dispose", _noop_dispose):
+            extras["dispose"] = _noop_dispose
+            needs_wrap = True
+        elif not _attr_is_readable(engine, "dispose", require_callable=True):
             extras["dispose"] = _noop_dispose
             needs_wrap = True
 
@@ -218,6 +241,9 @@ def _ensure_sync_engine(engine: Engine, url: str) -> Engine:
             return _FallbackConnection()
 
         if not _try_assign_attr(engine, "connect", _connect):
+            extras["connect"] = _connect
+            needs_wrap = True
+        elif not _attr_is_readable(engine, "connect", require_callable=True):
             extras["connect"] = _connect
             needs_wrap = True
 
