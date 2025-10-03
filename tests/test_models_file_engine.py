@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from sqlalchemy import text
 
 
@@ -26,3 +28,28 @@ def test_get_engine_handles_missing_create_all(tmp_path) -> None:
     finally:
         file_module.SQLModel.metadata = original_metadata
         file_module.get_engine.cache_clear()
+
+
+def test_get_engine_exposes_sync_attributes(tmp_path, monkeypatch) -> None:
+    """Ensure ``get_engine`` returns an engine with expected sync API."""
+
+    from app.models import file as file_module
+
+    file_module.get_engine.cache_clear()
+    db_path = Path(tmp_path) / "engine.sqlite"
+    monkeypatch.setenv("DB_URL", f"sqlite:///{db_path}")
+
+    engine = file_module.get_engine(create_schema=False)
+
+    try:
+        assert hasattr(engine, "dialect")
+        assert getattr(engine.dialect, "name", None)
+        assert getattr(engine.dialect, "driver", None)
+        assert hasattr(engine, "url")
+        assert str(engine.url).startswith("sqlite")
+        assert callable(engine.dispose)
+    finally:
+        file_module.get_engine.cache_clear()
+        monkeypatch.delenv("DB_URL", raising=False)
+        if db_path.exists():
+            db_path.unlink()
