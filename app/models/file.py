@@ -169,15 +169,15 @@ def _ensure_sync_engine(engine: Engine, url: str) -> Engine:
     dialect = getattr(engine, "dialect", None)
     if dialect is None:
         fallback_dialect = _FallbackDialect(dialect_name, dialect_driver)
-        if not _try_assign_attr(engine, "dialect", fallback_dialect):
-            extras["dialect"] = fallback_dialect
-            needs_wrap = True
-        elif not _attr_is_readable(engine, "dialect"):
+        if not _try_assign_attr(engine, "dialect", fallback_dialect) or not _attr_is_readable(
+            engine, "dialect"
+        ):
             extras["dialect"] = fallback_dialect
             needs_wrap = True
     else:
         missing_name = not hasattr(dialect, "name")
         missing_driver = not hasattr(dialect, "driver")
+        proxy: Any | None = None
         if missing_name or missing_driver:
             try:
                 if missing_name:
@@ -186,64 +186,100 @@ def _ensure_sync_engine(engine: Engine, url: str) -> Engine:
                     setattr(dialect, "driver", dialect_driver)
             except (AttributeError, TypeError):
                 proxy = _DialectProxy(dialect, dialect_name, dialect_driver)
-                if not _try_assign_attr(engine, "dialect", proxy):
-                    extras["dialect"] = proxy
-                    needs_wrap = True
-                elif not _attr_is_readable(engine, "dialect"):
-                    extras["dialect"] = proxy
-                    needs_wrap = True
+        if proxy is None and not _attr_is_readable(engine, "dialect"):
+            proxy = _DialectProxy(dialect, dialect_name, dialect_driver)
+        if proxy is not None:
+            if not _try_assign_attr(engine, "dialect", proxy) or not _attr_is_readable(
+                engine, "dialect"
+            ):
+                extras["dialect"] = proxy
+                needs_wrap = True
 
-    if not hasattr(engine, "url") or getattr(engine, "url") is None:
-        fallback_url = make_url(url_str) if "+" in url_str or "://" in url_str else url_str
-        if not _try_assign_attr(engine, "url", fallback_url):
+    fallback_url = make_url(url_str) if "+" in url_str or "://" in url_str else url_str
+    try:
+        current_url = getattr(engine, "url")
+        has_url = True
+    except Exception:  # pragma: no cover - defensive
+        current_url = None
+        has_url = False
+
+    if not has_url or current_url is None:
+        if not _try_assign_attr(engine, "url", fallback_url) or not _attr_is_readable(
+            engine, "url"
+        ):
             extras["url"] = fallback_url
             needs_wrap = True
-        elif not _attr_is_readable(engine, "url"):
+    elif not _attr_is_readable(engine, "url"):
+        if not _try_assign_attr(engine, "url", fallback_url) or not _attr_is_readable(
+            engine, "url"
+        ):
             extras["url"] = fallback_url
             needs_wrap = True
 
-    if not hasattr(engine, "dispose") or not callable(getattr(engine, "dispose", None)):
+    try:
+        dispose_attr = getattr(engine, "dispose")
+        has_dispose = True
+    except Exception:  # pragma: no cover - defensive
+        dispose_attr = None
+        has_dispose = False
 
-        def _noop_dispose(*_: Any, **__: Any) -> None:
-            return None
+    def _noop_dispose(*_: Any, **__: Any) -> None:
+        return None
 
-        if not _try_assign_attr(engine, "dispose", _noop_dispose):
+    if not has_dispose or not callable(dispose_attr):
+        if not _try_assign_attr(engine, "dispose", _noop_dispose) or not _attr_is_readable(
+            engine, "dispose", require_callable=True
+        ):
             extras["dispose"] = _noop_dispose
             needs_wrap = True
-        elif not _attr_is_readable(engine, "dispose", require_callable=True):
+    elif not _attr_is_readable(engine, "dispose", require_callable=True):
+        if not _try_assign_attr(engine, "dispose", _noop_dispose) or not _attr_is_readable(
+            engine, "dispose", require_callable=True
+        ):
             extras["dispose"] = _noop_dispose
             needs_wrap = True
 
-    if not hasattr(engine, "connect") or not callable(getattr(engine, "connect", None)):
+    try:
+        connect_attr = getattr(engine, "connect")
+        has_connect = True
+    except Exception:  # pragma: no cover - defensive
+        connect_attr = None
+        has_connect = False
 
-        class _FallbackResult:
-            __slots__ = ("_value",)
+    class _FallbackResult:
+        __slots__ = ("_value",)
 
-            def __init__(self, value: Any) -> None:
-                self._value = value
+        def __init__(self, value: Any) -> None:
+            self._value = value
 
-            def scalar(self) -> Any:
-                return self._value
+        def scalar(self) -> Any:
+            return self._value
 
-        class _FallbackConnection:
-            __slots__ = ()
+    class _FallbackConnection:
+        __slots__ = ()
 
-            def __enter__(self) -> "_FallbackConnection":  # pragma: no cover - mimic SQLAlchemy
-                return self
+        def __enter__(self) -> "_FallbackConnection":  # pragma: no cover - mimic SQLAlchemy
+            return self
 
-            def __exit__(self, exc_type, exc, tb) -> bool:  # pragma: no cover - mimic SQLAlchemy
-                return False
+        def __exit__(self, exc_type, exc, tb) -> bool:  # pragma: no cover - mimic SQLAlchemy
+            return False
 
-            def execute(self, statement: Any) -> _FallbackResult:
-                return _FallbackResult(statement)
+        def execute(self, statement: Any) -> _FallbackResult:
+            return _FallbackResult(statement)
 
-        def _connect(*_: Any, **__: Any) -> _FallbackConnection:
-            return _FallbackConnection()
+    def _connect(*_: Any, **__: Any) -> _FallbackConnection:
+        return _FallbackConnection()
 
-        if not _try_assign_attr(engine, "connect", _connect):
+    if not has_connect or not callable(connect_attr):
+        if not _try_assign_attr(engine, "connect", _connect) or not _attr_is_readable(
+            engine, "connect", require_callable=True
+        ):
             extras["connect"] = _connect
             needs_wrap = True
-        elif not _attr_is_readable(engine, "connect", require_callable=True):
+    elif not _attr_is_readable(engine, "connect", require_callable=True):
+        if not _try_assign_attr(engine, "connect", _connect) or not _attr_is_readable(
+            engine, "connect", require_callable=True
+        ):
             extras["connect"] = _connect
             needs_wrap = True
 
