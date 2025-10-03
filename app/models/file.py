@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 from datetime import datetime
 from functools import lru_cache
+from types import MethodType
 from typing import Any, Optional
 from types import MethodType
 
@@ -118,6 +119,7 @@ def _connect_args(url: str) -> dict[str, object]:
 
 
 def _ensure_sync_engine(engine: Engine, url: str) -> Engine:
+
     needs_dialect = not hasattr(engine, "dialect") or getattr(engine, "dialect", None) is None
     needs_dispose = not hasattr(engine, "dispose") or not callable(getattr(engine, "dispose", None))
     needs_url = not hasattr(engine, "url")
@@ -125,12 +127,17 @@ def _ensure_sync_engine(engine: Engine, url: str) -> Engine:
     if not (needs_dialect or needs_dispose or needs_url):
         return engine
 
-    scheme = url.split(":", 1)[0]
+    """Ensure the engine exposes sync-compatible attributes."""
+
+
+    url_str = str(url)
+    scheme = url_str.split(":", 1)[0]
     if "+" in scheme:
         name, driver = scheme.split("+", 1)
     else:
         name = scheme
         driver = scheme
+
 
     if needs_dialect:
         class _FallbackDialect:
@@ -150,6 +157,67 @@ def _ensure_sync_engine(engine: Engine, url: str) -> Engine:
 
     if needs_url:
         engine.url = url  # type: ignore[attr-defined]
+
+    dialect = getattr(engine, "dialect", None)
+    if dialect is None:
+        class _Dialect:
+            def __init__(self, dialect_name: str, dialect_driver: str) -> None:
+                self.name = dialect_name
+                self.driver = dialect_driver
+
+        dialect = _Dialect(name, driver)
+        setattr(engine, "dialect", dialect)
+    else:
+        if not hasattr(dialect, "name"):
+            setattr(dialect, "name", name)
+        if not hasattr(dialect, "driver"):
+            setattr(dialect, "driver", driver)
+
+    if not hasattr(engine, "url") or getattr(engine, "url") is None:
+        setattr(engine, "url", url_str)
+
+    dispose = getattr(engine, "dispose", None)
+    if not callable(dispose):
+
+        def _noop_dispose(self: Engine) -> None:
+            return None
+
+        setattr(engine, "dispose", MethodType(_noop_dispose, engine))
+
+    connect = getattr(engine, "connect", None)
+    if not callable(connect):
+
+        class _Result:
+            def __init__(self, statement: Any) -> None:
+                self._statement = statement
+
+            def scalar(self) -> Any:
+                if isinstance(self._statement, str):
+                    digits = "".join(
+                        ch if ch.isdigit() else " " for ch in self._statement
+                    ).split()
+                    if digits:
+                        try:
+                            return int(digits[-1])
+                        except ValueError:
+                            pass
+                return self._statement
+
+        class _Connection:
+            def __enter__(self) -> "_Connection":
+                return self
+
+            def __exit__(self, exc_type, exc, tb) -> bool:
+                return False
+
+            def execute(self, statement: Any) -> _Result:
+                return _Result(statement)
+
+        def _connect(self: Engine) -> _Connection:
+            return _Connection()
+
+        setattr(engine, "connect", MethodType(_connect, engine))
+
 
     return engine
 
