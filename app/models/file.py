@@ -7,6 +7,7 @@ from datetime import datetime
 from functools import lru_cache
 from types import MethodType
 from typing import Any, Optional
+from types import MethodType
 
 from sqlalchemy import Column, JSON, Text, UniqueConstraint
 from sqlalchemy.engine import Engine, make_url
@@ -118,7 +119,16 @@ def _connect_args(url: str) -> dict[str, object]:
 
 
 def _ensure_sync_engine(engine: Engine, url: str) -> Engine:
+
+    needs_dialect = not hasattr(engine, "dialect") or getattr(engine, "dialect", None) is None
+    needs_dispose = not hasattr(engine, "dispose") or not callable(getattr(engine, "dispose", None))
+    needs_url = not hasattr(engine, "url")
+
+    if not (needs_dialect or needs_dispose or needs_url):
+        return engine
+
     """Ensure the engine exposes sync-compatible attributes."""
+
 
     url_str = str(url)
     scheme = url_str.split(":", 1)[0]
@@ -127,6 +137,26 @@ def _ensure_sync_engine(engine: Engine, url: str) -> Engine:
     else:
         name = scheme
         driver = scheme
+
+
+    if needs_dialect:
+        class _FallbackDialect:
+            __slots__ = ("name", "driver")
+
+            def __init__(self, dialect_name: str, dialect_driver: str) -> None:
+                self.name = dialect_name
+                self.driver = dialect_driver
+
+        engine.dialect = _FallbackDialect(name, driver)  # type: ignore[attr-defined]
+
+    if needs_dispose:
+        def _noop_dispose(self: Engine) -> None:
+            return None
+
+        engine.dispose = MethodType(_noop_dispose, engine)  # type: ignore[attr-defined]
+
+    if needs_url:
+        engine.url = url  # type: ignore[attr-defined]
 
     dialect = getattr(engine, "dialect", None)
     if dialect is None:
@@ -187,6 +217,7 @@ def _ensure_sync_engine(engine: Engine, url: str) -> Engine:
             return _Connection()
 
         setattr(engine, "connect", MethodType(_connect, engine))
+
 
     return engine
 

@@ -6,11 +6,11 @@ from pathlib import Path
 
 from sqlalchemy import text
 
+from app.models import file as file_module
+
 
 def test_get_engine_handles_missing_create_all(tmp_path) -> None:
     """``get_engine`` should ignore metadata without ``create_all``."""
-
-    from app.models import file as file_module
 
     file_module.get_engine.cache_clear()
 
@@ -29,6 +29,31 @@ def test_get_engine_handles_missing_create_all(tmp_path) -> None:
         file_module.SQLModel.metadata = original_metadata
         file_module.get_engine.cache_clear()
 
+
+
+def test_get_engine_exposes_core_engine_attributes(tmp_path, monkeypatch):
+    file_module.get_engine.cache_clear()
+    db_path = tmp_path / "engine.sqlite"
+    db_url = f"sqlite:///{db_path}"
+
+    monkeypatch.setenv("DB_URL", db_url)
+
+    try:
+        engine = file_module.get_engine(create_schema=False)
+
+        assert hasattr(engine, "dialect")
+        assert getattr(engine.dialect, "name") == "sqlite"
+        assert getattr(engine.dialect, "driver") in {"sqlite", "pysqlite"}
+
+        assert hasattr(engine, "url")
+        assert str(engine.url) == db_url
+
+        dispose = getattr(engine, "dispose")
+        assert callable(dispose)
+        dispose()
+    finally:
+        file_module.get_engine.cache_clear()
+        monkeypatch.delenv("DB_URL", raising=False)
 
 def test_get_engine_exposes_sync_attributes(tmp_path, monkeypatch) -> None:
     """Ensure ``get_engine`` returns an engine with expected sync API."""
@@ -53,3 +78,4 @@ def test_get_engine_exposes_sync_attributes(tmp_path, monkeypatch) -> None:
         monkeypatch.delenv("DB_URL", raising=False)
         if db_path.exists():
             db_path.unlink()
+
