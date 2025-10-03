@@ -68,11 +68,20 @@ def test_get_engine_exposes_sync_attributes(tmp_path, monkeypatch) -> None:
 
     try:
         assert hasattr(engine, "dialect")
-        assert getattr(engine.dialect, "name", None)
-        assert getattr(engine.dialect, "driver", None)
+        assert getattr(engine.dialect, "name", None) == "sqlite"
+        assert getattr(engine.dialect, "driver", None) in {"sqlite", "pysqlite"}
         assert hasattr(engine, "url")
         assert str(engine.url).startswith("sqlite")
         assert callable(engine.dispose)
+        assert callable(engine.connect)
+
+        with engine.connect() as connection:
+            execution = connection.execute(text("SELECT 1"))
+            scalar = getattr(execution, "scalar", None)
+            value = scalar() if callable(scalar) else execution
+            assert value in {1, "SELECT 1"}
+
+        engine.dispose()
     finally:
         file_module.get_engine.cache_clear()
         monkeypatch.delenv("DB_URL", raising=False)
