@@ -2,12 +2,22 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 
+class FakeMetaData:
+    """Minimal metadata stub exposing ``create_all``/``drop_all`` as no-ops."""
+
+    def create_all(self, engine: Any) -> None:  # pragma: no cover - trivial no-op
+        return None
+
+    def drop_all(self, engine: Any) -> None:  # pragma: no cover - trivial no-op
+        return None
+
+
 class SQLModel:
-    metadata = None
+    metadata = FakeMetaData()
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
         kwargs.pop("table", None)
@@ -31,12 +41,44 @@ class Session:
         return None
 
 
-def create_engine(*args: Any, **kwargs: Any) -> Any:
-    @dataclass
-    class _Engine:
-        args: tuple[Any, ...]
-        kwargs: dict[str, Any]
+@dataclass
+class _Engine:
+    args: tuple[Any, ...]
+    kwargs: dict[str, Any]
+    name: str = field(init=False)
+    driver: str = field(init=False)
+    dialect: "_Dialect" = field(init=False)
 
+    class _Dialect:
+        __slots__ = ("name", "driver")
+
+        def __init__(self, name: str, driver: str) -> None:
+            self.name = name
+            self.driver = driver
+
+    def __post_init__(self) -> None:
+        url = ""
+        if self.args:
+            url = str(self.args[0])
+        elif "url" in self.kwargs:
+            url = str(self.kwargs["url"])
+
+        scheme = url.split(":", 1)[0] if url else "sqlite"
+        if "+" in scheme:
+            name, driver = scheme.split("+", 1)
+        else:
+            name = scheme
+            driver = scheme
+
+        self.name = name
+        self.driver = driver
+        self.dialect = self._Dialect(name, driver)
+
+    def dispose(self) -> None:  # pragma: no cover - trivial no-op
+        return None
+
+
+def create_engine(*args: Any, **kwargs: Any) -> _Engine:
     return _Engine(args, dict(kwargs))
 
 
