@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import importlib
 import importlib.util
 import sys
 from dataclasses import dataclass, field
@@ -66,16 +67,27 @@ def _load_manager_module() -> ModuleType:
     llm_package.__path__ = [str(repo_root / "app" / "llm")]
     sys.modules["app.llm"] = llm_package
 
-    # Inject a stub ``app.core.config`` module so the manager can import ``Settings``.
-    config_module = ModuleType("app.core.config")
-    config_module.Settings = _DummySettings
-    sys.modules["app.core.config"] = config_module
+    _missing = object()
+    original_config = sys.modules.get("app.core.config", _missing)
 
-    spec = importlib.util.spec_from_file_location("app.llm.manager", manager_path)
-    assert spec and spec.loader
-    module = importlib.util.module_from_spec(spec)
-    sys.modules["app.llm.manager"] = module
-    spec.loader.exec_module(module)
+    try:
+        # Inject a stub ``app.core.config`` module so the manager can import ``Settings``.
+        config_module = ModuleType("app.core.config")
+        config_module.Settings = _DummySettings
+        sys.modules["app.core.config"] = config_module
+
+        spec = importlib.util.spec_from_file_location("app.llm.manager", manager_path)
+        assert spec and spec.loader
+        module = importlib.util.module_from_spec(spec)
+        sys.modules["app.llm.manager"] = module
+        spec.loader.exec_module(module)
+    finally:
+        if original_config is _missing:
+            sys.modules.pop("app.core.config", None)
+        else:
+            sys.modules["app.core.config"] = original_config
+
+    importlib.import_module("app.core.config")
     return module
 
 
