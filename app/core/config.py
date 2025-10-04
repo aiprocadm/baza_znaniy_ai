@@ -38,6 +38,7 @@ except ImportError:  # pragma: no cover - provide light-weight fallbacks
 try:  # pragma: no cover - ``pydantic-settings`` is optional
     from pydantic_settings import BaseSettings as PydanticBaseSettings, SettingsConfigDict
 except ImportError:  # pragma: no cover - minimal shim for tests
+
     PydanticBaseSettings = None  # type: ignore[assignment]
 
 
@@ -141,6 +142,72 @@ def _environment_overrides(
 
 if PydanticBaseSettings is None:
 
+    import os
+
+    def _flatten_aliases(source: object) -> list[str]:
+        """Return a flattened list of alias names from arbitrary structures."""
+
+        if source is None or source is Ellipsis:  # pragma: no cover - defensive guard
+            return []
+        if isinstance(source, AliasChoices):
+            items: list[str] = []
+            iterable: Iterable[object]
+            if isinstance(source, Iterable):
+                iterable = source
+            else:  # pragma: no cover - fallback for unexpected shims
+                iterable = getattr(source, "choices", ())  # type: ignore[attr-defined]
+            for choice in iterable:
+                items.extend(_flatten_aliases(choice))
+            return items
+        if isinstance(source, bytes):
+            try:
+                return [source.decode("utf-8")]
+            except Exception:  # pragma: no cover - defensive guard
+                return [str(source)]
+        if isinstance(source, str):
+            return [source]
+        if isinstance(source, Iterable):
+            items: list[str] = []
+            for item in source:
+                items.extend(_flatten_aliases(item))
+            return items
+        return [str(source)]
+
+    def _candidate_env_names(field_name: str, field: object) -> list[str]:
+        """Return environment variable names to probe for a field."""
+
+        candidates: list[str] = []
+
+        def _add(name: object) -> None:
+            if name is None or name is Ellipsis or name == "":  # pragma: no cover - guard
+                return
+            text = str(name)
+            if text not in candidates:
+                candidates.append(text)
+
+        def _add_all(value: object) -> None:
+            for alias_name in _flatten_aliases(value):
+                _add(alias_name)
+
+        _add(field_name.upper())
+
+        alias_value = getattr(field, "alias", None)
+        if alias_value is None:
+            alias_value = getattr(getattr(field, "metadata", {}), "get", lambda *_: None)(
+                "alias"
+            )
+        _add_all(alias_value)
+
+        validation_alias = getattr(field, "validation_alias", None)
+        if validation_alias is None and hasattr(field, "metadata"):
+            validation_alias = getattr(field.metadata, "get", lambda *_: None)(
+                "validation_alias"
+            )
+        _add_all(validation_alias)
+
+        return candidates
+
+
     class SettingsConfigDict(dict):  # type: ignore[override]
         def __init__(self, **kwargs: object) -> None:
             super().__init__(**kwargs)
@@ -151,6 +218,7 @@ if PydanticBaseSettings is None:
         model_config = SettingsConfigDict()
 
         def __init__(self, **data: object) -> None:
+
             overrides, consumed = _environment_overrides(self.__class__, skip=data.keys())
             merged = {**overrides, **data}
             restored: list[tuple[str, str | None]] = []
@@ -250,6 +318,28 @@ else:
                         os.environ.pop(env_name, None)
                     else:
                         os.environ[env_name] = original
+
+            values: dict[str, object] = {}
+            model_fields = getattr(self.__class__, "model_fields", None)
+            if isinstance(model_fields, dict):
+                for name, field in model_fields.items():
+                    for env_name in _candidate_env_names(name, field):
+                        env_value = os.getenv(env_name)
+                        if env_value is not None:
+                            values[name] = env_value
+                            break
+            else:  # pragma: no cover - fallback for extremely small shims
+                annotations = getattr(self, "__annotations__", {})
+                for name in annotations:
+                    field_info = getattr(self.__class__, name, None)
+                    for env_name in _candidate_env_names(name, field_info):
+                        env_value = os.getenv(env_name)
+                        if env_value is not None:
+                            values[name] = env_value
+                            break
+            values.update(data)
+            super().__init__(**values)
+
 
 
 def _default_app_version() -> str:

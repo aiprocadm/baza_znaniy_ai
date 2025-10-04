@@ -6,6 +6,13 @@ import sys
 from pathlib import Path
 
 
+def _restore_module(name: str, original: object | None) -> None:
+    if original is None:
+        sys.modules.pop(name, None)
+    else:
+        sys.modules[name] = original
+
+
 def test_get_engine_with_sqlmodel_stub(monkeypatch, tmp_path: Path) -> None:
     """Ensure the engine proxy surfaces the sync SQLAlchemy API under the stub."""
 
@@ -56,4 +63,54 @@ def test_get_engine_with_sqlmodel_stub(monkeypatch, tmp_path: Path) -> None:
                 original_file_module.get_engine.cache_clear()
         if original_file_module is None and app_models_pkg is not None and hasattr(app_models_pkg, "file"):
             delattr(app_models_pkg, "file")
+        monkeypatch.delenv("DB_URL", raising=False)
+
+
+def test_get_engine_sqlite_aiosqlite_with_sqlalchemy_stub(monkeypatch) -> None:
+    """The async sqlite URL should fall back to a sync variant when ``set`` is missing."""
+
+    import importlib
+
+    sqlite_async_url = "sqlite+aiosqlite:///./var/data/kb.sqlite"
+
+    app_models_pkg = sys.modules.get("app.models")
+    original_sqlmodel = sys.modules.get("sqlmodel")
+    original_sqlalchemy = sys.modules.get("sqlalchemy")
+    original_file_module = sys.modules.get("app.models.file")
+
+    file_module = None
+
+    try:
+        sqlmodel_stub = importlib.import_module("tests.stubs.sqlmodel")
+        sqlalchemy_stub = importlib.import_module("tests.stubs.sqlalchemy")
+
+        sys.modules["sqlmodel"] = sqlmodel_stub
+        sys.modules["sqlalchemy"] = sqlalchemy_stub
+        sys.modules.pop("app.models.file", None)
+        if app_models_pkg is not None and hasattr(app_models_pkg, "file"):
+            delattr(app_models_pkg, "file")
+
+        monkeypatch.setenv("DB_URL", sqlite_async_url)
+
+        file_module = importlib.import_module("app.models.file")
+        file_module.get_engine.cache_clear()
+
+        engine = file_module.get_engine(create_schema=False)
+
+        assert str(engine.url).startswith("sqlite:")
+        assert engine.dialect.name == "sqlite"
+        assert engine.dialect.driver == "sqlite"
+
+        with engine.connect() as connection:
+            assert connection.execute("SELECT 1").scalar() == "SELECT 1"
+
+        engine.dispose()
+    finally:
+        if file_module is not None:
+            file_module.get_engine.cache_clear()
+        _restore_module("app.models.file", original_file_module)
+        if app_models_pkg is not None and hasattr(app_models_pkg, "file") and original_file_module is None:
+            delattr(app_models_pkg, "file")
+        _restore_module("sqlalchemy", original_sqlalchemy)
+        _restore_module("sqlmodel", original_sqlmodel)
         monkeypatch.delenv("DB_URL", raising=False)

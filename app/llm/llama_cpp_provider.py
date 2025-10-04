@@ -3,11 +3,30 @@
 from __future__ import annotations
 
 import os
+from importlib import import_module
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Mapping, Protocol, TYPE_CHECKING, runtime_checkable, cast
 
-from app.core.config import Settings, get_settings
+if TYPE_CHECKING:  # pragma: no cover - import for static analysis only
+    from app.core.config import Settings as SettingsType
+else:
+
+    @runtime_checkable
+    class SettingsType(Protocol):
+        """Protocol describing the configuration expected by the provider."""
+
+        llm_model_path: str | Path
+        llm_model_name: str
+        llm_ctx: int
+        llm_threads: int
+        llm_gpu_layers: int
+        lora_adapter_path: str | Path | None
+        lora_scaling: float | None
+        llm_temperature: float
+        llm_top_p: float
+        llm_top_k: int
+        llm_max_tokens: int
 from app.llm.exceptions import (
     LLMProviderError,
     LoRAAdapterNotFoundError,
@@ -26,11 +45,22 @@ except Exception:  # pragma: no cover - fall back to a stub for type checking
 _GENERATION_KEYS = {"temperature", "top_p", "top_k", "max_tokens"}
 
 
+def _get_settings() -> SettingsType:
+    """Return application settings without requiring them at import time."""
+
+    config_module = import_module("app.core.config")
+    factory = getattr(config_module, "get_settings", None)
+    if not callable(factory):  # pragma: no cover - defensive programming
+        raise RuntimeError("app.core.config.get_settings is not available")
+    settings = factory()
+    return cast(SettingsType, settings)
+
+
 @dataclass(slots=True)
 class LlamaCppProvider:
     """Wraps :class:`llama_cpp.Llama` with settings-aware helpers."""
 
-    settings: Settings = field(default_factory=get_settings)
+    settings: SettingsType = field(default_factory=_get_settings)
     llama_cls: type[Llama] = Llama
 
     name: str = "llama-cpp"
