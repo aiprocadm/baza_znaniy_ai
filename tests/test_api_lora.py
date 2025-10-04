@@ -3,11 +3,20 @@
 from __future__ import annotations
 
 import asyncio
+
 import math
+
 from importlib import reload
 import asyncio
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Iterator
+
+from unittest.mock import AsyncMock
+
+import pytest
+from fastapi import HTTPException
+
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -17,7 +26,10 @@ from fastapi import HTTPException, status
 
 from fastapi import HTTPException
 
+
 from fastapi.testclient import TestClient
+
+from app.api.v1.lora import load_lora_adapter
 
 from tests.service_stubs import install_service_stubs
 
@@ -146,6 +158,12 @@ def test_unload_without_adapter_returns_conflict(lora_client: TestClient, tmp_pa
 
 
 
+@pytest.mark.parametrize(
+    "invalid_scaling",
+    [-0.5, 0, "not-a-number", 10.00001],
+)
+
+
 def test_scaling_validation_rejects_non_positive(
     lora_client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -211,6 +229,7 @@ def test_scaling_validation_rejects_non_positive(
 
 
 @pytest.mark.parametrize("invalid_scaling", [-0.5, 0, "not-a-number"])
+
 def test_load_adapter_rejects_invalid_scaling(
     lora_client: TestClient, tmp_path: Path, invalid_scaling: object
 ) -> None:
@@ -354,3 +373,21 @@ def test_load_adapter_accepts_valid_scaling(lora_client: TestClient, tmp_path: P
 
     assert response.status_code == 200, response.json()
 
+
+
+@pytest.mark.parametrize(
+    "scaling",
+    [float("nan"), float("inf"), 0.0, -1.0, 10.00001, "invalid"],
+)
+def test_scaling_validation_rejects_non_positive(scaling: object) -> None:
+    payload = SimpleNamespace(path="/tmp/adapter.gguf", scaling=scaling)
+    manager = AsyncMock()
+
+    with pytest.raises(HTTPException) as exc_info:
+        asyncio.run(
+            load_lora_adapter(payload=payload, manager=manager)  # type: ignore[arg-type]
+        )
+
+    assert exc_info.value.status_code == 422
+    assert exc_info.value.detail == "INVALID_SCALING"
+    manager.load_adapter.assert_not_called()
