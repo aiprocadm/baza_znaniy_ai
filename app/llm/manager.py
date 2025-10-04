@@ -30,10 +30,23 @@ def _ensure_llm_package_exports() -> None:
         return
     try:
         from . import cache as _cache
-        from .llama_cpp_provider import LlamaCppProvider
         from .providers import LLMProvider, get_llm_provider
     except Exception:  # pragma: no cover - optional dependencies may be missing
         return
+
+    llama_cpp_provider: type[object] | None
+    try:
+        from .llama_cpp_provider import LlamaCppProvider as _LlamaCppProvider
+    except ImportError as exc:  # pragma: no cover - Settings may be absent in tests
+        missing = getattr(exc, "name", None)
+        if missing in {"Settings", "app.core.config"} or "Settings" in str(exc):
+            llama_cpp_provider = None
+        else:
+            raise
+    except Exception:  # pragma: no cover - optional dependency errors
+        return
+    else:
+        llama_cpp_provider = _LlamaCppProvider
 
     config_module = sys.modules.get("app.core.config")
     if config_module is not None and not hasattr(config_module, "get_settings"):
@@ -50,7 +63,6 @@ def _ensure_llm_package_exports() -> None:
 
     exports = {
         "LLMProvider": LLMProvider,
-        "LlamaCppProvider": LlamaCppProvider,
         "get_llm_provider": get_llm_provider,
         "get_cached_provider": _cache.get_cached_provider,
         "reset_provider_cache": _cache.reset_provider_cache,
@@ -60,6 +72,9 @@ def _ensure_llm_package_exports() -> None:
         "ModelNotReadyError": _cache.ModelNotReadyError,
         "LoRAAdapterNotFoundError": _cache.LoRAAdapterNotFoundError,
     }
+
+    if llama_cpp_provider is not None:
+        exports["LlamaCppProvider"] = llama_cpp_provider
 
     for name, value in exports.items():
         setattr(package, name, value)
@@ -102,8 +117,13 @@ class AdapterNotLoadedError(LoraManagerError):
     """Raised when attempting to operate on a missing adapter."""
 
 
+
 SCALING_MIN = 0.0
 SCALING_MAX = 10.0
+
+class InvalidScalingError(LoraManagerError):
+    """Raised when an invalid scaling factor is supplied."""
+
 
 
 class LlamaLoraManager:
@@ -196,6 +216,7 @@ class LlamaLoraManager:
         return llama
 
     @staticmethod
+
     def validate_scaling(scaling: float) -> float:
         """Return *scaling* as a ``float`` after enforcing documented constraints."""
 
@@ -208,15 +229,36 @@ class LlamaLoraManager:
             raise ValueError("Scaling factor must be greater than zero")
         if value > SCALING_MAX:
             raise ValueError("Scaling factor exceeds maximum supported value")
+
+    def _ensure_valid_scaling(scaling: float) -> float:
+        """Return *scaling* as ``float`` if it is finite and within ``(0, 10]``."""
+
+        try:
+            value = float(scaling)
+        except (TypeError, ValueError) as exc:
+            raise InvalidScalingError("Scaling factor must be numeric") from exc
+
+        if not math.isfinite(value):
+            raise InvalidScalingError("Scaling factor must be finite")
+        if not 0.0 < value <= 10.0:
+            raise InvalidScalingError("Scaling factor must be within (0, 10]")
+
         return value
 
     async def load_adapter(self, path: Path, scaling: float) -> LoraStatus:
         """Load a LoRA adapter with *scaling* and make it active."""
 
+        scaling_value = self._ensure_valid_scaling(scaling)
         candidate = self._normalise_path(path)
         scaling_value = self.validate_scaling(scaling)
         if not candidate.is_file():
             raise FileNotFoundError(str(candidate))
+
+        scaling_value = float(scaling)
+        if math.isnan(scaling_value) or scaling_value <= 0 or scaling_value > 10:
+            raise InvalidScalingError(
+                "Scaling factor must be finite and within the range (0, 10]."
+            )
 
         async with self._lock:
             if self._adapter and candidate == self._adapter.path:
@@ -270,6 +312,7 @@ class LlamaLoraManager:
 __all__ = [
     "AdapterAlreadyLoadedError",
     "AdapterNotLoadedError",
+    "InvalidScalingError",
     "LlamaLoraManager",
     "LoraStatus",
 ]
