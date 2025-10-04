@@ -5,9 +5,18 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable
+from typing import TYPE_CHECKING, Any, Callable, Protocol, runtime_checkable
 
-from app.core.config import Settings
+if TYPE_CHECKING:  # pragma: no cover - import for static analysis only
+    from app.core.config import Settings
+
+
+@runtime_checkable
+class LlamaSettingsProtocol(Protocol):
+    """Protocol describing the minimal configuration needed by the manager."""
+
+    llm_model_name: str
+    llama_cpp_model_path: Path | str | None
 
 
 def _ensure_llm_package_exports() -> None:
@@ -97,7 +106,7 @@ class LlamaLoraManager:
 
     def __init__(
         self,
-        settings: Settings,
+        settings: LlamaSettingsProtocol,
         llama_factory: Callable[[], object] | None = None,
     ) -> None:
         self._settings = settings
@@ -107,10 +116,42 @@ class LlamaLoraManager:
         self._adapter: _AdapterState | None = None
 
     @staticmethod
-    def _build_default_factory(settings: Settings) -> Callable[[], object]:
+    def _resolve_settings_class() -> type[object] | None:
+        """Attempt to import the ``Settings`` class lazily."""
+
+        try:  # pragma: no cover - import failures handled in tests
+            from app.core.config import Settings as SettingsClass  # type: ignore
+        except Exception:  # pragma: no cover - optional dependency missing
+            return None
+        return SettingsClass
+
+    @staticmethod
+    def _require_setting(settings: LlamaSettingsProtocol, attribute: str) -> Any:
+        """Return ``attribute`` from *settings* or raise a helpful ``AttributeError``."""
+
+        try:
+            return getattr(settings, attribute)
+        except AttributeError as exc:  # pragma: no cover - exceptional path
+            settings_cls = LlamaLoraManager._resolve_settings_class()
+            expected = (
+                settings_cls.__name__
+                if settings_cls is not None
+                else "an object matching the Settings interface"
+            )
+            raise AttributeError(
+                "LlamaLoraManager requires settings with attribute "
+                f"'{attribute}', but received {type(settings).__name__!r} without it. "
+                f"Provide {expected}."
+            ) from exc
+
+    @staticmethod
+    def _build_default_factory(settings: LlamaSettingsProtocol) -> Callable[[], object]:
         """Return a callable constructing a new ``llama_cpp.Llama`` instance."""
 
-        model_reference = getattr(settings, "llama_cpp_model_path", None) or settings.llm_model_name
+        override = getattr(settings, "llama_cpp_model_path", None)
+        model_reference = override or LlamaLoraManager._require_setting(
+            settings, "llm_model_name"
+        )
 
         def factory() -> object:
             from llama_cpp import Llama  # imported lazily to keep dependency optional

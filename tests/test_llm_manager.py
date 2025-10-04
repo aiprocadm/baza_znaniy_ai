@@ -9,7 +9,7 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import ModuleType
-from typing import List
+from typing import Any, List
 
 import pytest
 
@@ -52,8 +52,8 @@ class _RecordingLlama:
         self._recorder.unload_adapter_calls.append(adapter_name)
 
 
-def _load_manager_module() -> ModuleType:
-    """Import ``app.llm.manager`` with a stub configuration module."""
+def _load_manager_module(*, include_settings: bool = True) -> ModuleType:
+    """Import ``app.llm.manager`` with a configurable stub configuration module."""
 
     repo_root = Path(__file__).resolve().parents[1]
     manager_path = repo_root / "app" / "llm" / "manager.py"
@@ -73,7 +73,8 @@ def _load_manager_module() -> ModuleType:
     try:
         # Inject a stub ``app.core.config`` module so the manager can import ``Settings``.
         config_module = ModuleType("app.core.config")
-        config_module.Settings = _DummySettings
+        if include_settings:
+            config_module.Settings = _DummySettings
         sys.modules["app.core.config"] = config_module
 
         spec = importlib.util.spec_from_file_location("app.llm.manager", manager_path)
@@ -91,24 +92,62 @@ def _load_manager_module() -> ModuleType:
     return module
 
 
-_MANAGER_MODULE = _load_manager_module()
-AdapterAlreadyLoadedError = _MANAGER_MODULE.AdapterAlreadyLoadedError
-AdapterNotLoadedError = _MANAGER_MODULE.AdapterNotLoadedError
-LlamaLoraManager = _MANAGER_MODULE.LlamaLoraManager
+@pytest.fixture
+def manager_module() -> ModuleType:
+    return _load_manager_module()
 
 
-def _make_manager_with_factory() -> tuple[LlamaLoraManager, _RecordingFactory]:
+def test_manager_imports_without_settings() -> None:
+    module = _load_manager_module(include_settings=False)
+    assert hasattr(module, "LlamaLoraManager")
+
+
+def test_manager_supports_stub_settings_when_settings_missing(tmp_path: Path) -> None:
+    module = _load_manager_module(include_settings=False)
+    adapter_path = tmp_path / "adapter.safetensors"
+    adapter_path.write_text("stub")
+
+    async def scenario() -> None:
+        manager, factory = _make_manager_with_factory(module.LlamaLoraManager)
+        status = await manager.load_adapter(adapter_path, 0.5)
+
+        assert status.loaded is True
+        assert factory.load_adapter_calls == [
+            (str(adapter_path.resolve()), status.adapter_name, 0.5),
+        ]
+        assert factory.set_adapter_calls == [status.adapter_name]
+
+    asyncio.run(scenario())
+
+
+def test_manager_missing_required_attribute_raises_clear_error() -> None:
+    module = _load_manager_module(include_settings=False)
+
+    class _IncompleteSettings:
+        llama_cpp_model_path: Path | None = None
+
+    with pytest.raises(
+        AttributeError,
+        match="requires settings with attribute 'llm_model_name'",
+    ):
+        module.LlamaLoraManager(_IncompleteSettings())
+
+
+def _make_manager_with_factory(manager_cls: type) -> tuple[Any, _RecordingFactory]:
     factory = _RecordingFactory()
-    manager = LlamaLoraManager(_DummySettings(), llama_factory=factory)
+    manager = manager_cls(_DummySettings(), llama_factory=factory)
     return manager, factory
 
 
-def test_load_adapter_returns_status_and_reuses_adapter_name(tmp_path: Path) -> None:
+def test_load_adapter_returns_status_and_reuses_adapter_name(
+    tmp_path: Path, manager_module: ModuleType
+) -> None:
     adapter_path = tmp_path / "My Fancy Adapter.safetensors"
     adapter_path.write_text("stub")
 
     async def scenario() -> None:
-        manager, factory = _make_manager_with_factory()
+        manager_cls = manager_module.LlamaLoraManager
+        manager, factory = _make_manager_with_factory(manager_cls)
 
         scaling = 0.75
         status = await manager.load_adapter(adapter_path, scaling)
@@ -127,7 +166,7 @@ def test_load_adapter_returns_status_and_reuses_adapter_name(tmp_path: Path) -> 
         assert factory.set_adapter_calls == [expected_adapter_name]
         assert len(factory.instances) == 1
 
-        with pytest.raises(AdapterAlreadyLoadedError):
+        with pytest.raises(manager_module.AdapterAlreadyLoadedError):
             await manager.load_adapter(adapter_path, scaling)
 
         # The failed load should not rebuild the llama instance.
@@ -136,9 +175,12 @@ def test_load_adapter_returns_status_and_reuses_adapter_name(tmp_path: Path) -> 
     asyncio.run(scenario())
 
 
-def test_load_adapter_missing_file_raises(tmp_path: Path) -> None:
+def test_load_adapter_missing_file_raises(
+    tmp_path: Path, manager_module: ModuleType
+) -> None:
     async def scenario() -> None:
-        manager, _ = _make_manager_with_factory()
+        manager_cls = manager_module.LlamaLoraManager
+        manager, _ = _make_manager_with_factory(manager_cls)
 
         with pytest.raises(FileNotFoundError):
             await manager.load_adapter(tmp_path / "missing.safetensors", 1.0)
@@ -146,18 +188,21 @@ def test_load_adapter_missing_file_raises(tmp_path: Path) -> None:
     asyncio.run(scenario())
 
 
-def test_unload_adapter_error_conditions(tmp_path: Path) -> None:
+def test_unload_adapter_error_conditions(
+    tmp_path: Path, manager_module: ModuleType
+) -> None:
     async def scenario() -> None:
-        manager, factory = _make_manager_with_factory()
+        manager_cls = manager_module.LlamaLoraManager
+        manager, factory = _make_manager_with_factory(manager_cls)
 
-        with pytest.raises(AdapterNotLoadedError):
+        with pytest.raises(manager_module.AdapterNotLoadedError):
             await manager.unload_adapter()
 
         adapter_path = tmp_path / "adapter.safetensors"
         adapter_path.write_text("data")
         await manager.load_adapter(adapter_path, 0.5)
 
-        with pytest.raises(AdapterNotLoadedError):
+        with pytest.raises(manager_module.AdapterNotLoadedError):
             await manager.unload_adapter(tmp_path / "different.safetensors")
 
         # Ensure the adapter is still active after the failed unload.
@@ -168,9 +213,12 @@ def test_unload_adapter_error_conditions(tmp_path: Path) -> None:
     asyncio.run(scenario())
 
 
-def test_unload_adapter_resets_status_and_rebuilds(tmp_path: Path) -> None:
+def test_unload_adapter_resets_status_and_rebuilds(
+    tmp_path: Path, manager_module: ModuleType
+) -> None:
     async def scenario() -> None:
-        manager, factory = _make_manager_with_factory()
+        manager_cls = manager_module.LlamaLoraManager
+        manager, factory = _make_manager_with_factory(manager_cls)
 
         adapter_path = tmp_path / "adapter.safetensors"
         adapter_path.write_text("data")
