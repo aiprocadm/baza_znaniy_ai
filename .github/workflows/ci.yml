@@ -43,6 +43,19 @@ jobs:
           if [ -f pyproject.toml ]; then pip install -e .; fi
           pip install ruff black mypy
 
+      - name: Restore GGUF cache
+        uses: actions/cache@v4
+        with:
+          path: models/model.gguf
+          key: gguf-${{ hashFiles('models/model_manifest.json') }}
+          restore-keys: |
+            gguf-
+
+      - name: Download GGUF model
+        run: |
+          mkdir -p models
+          python -m scripts.download_model --manifest models/model_manifest.json --output models/model.gguf --allow-missing-hash --max-retries 5
+
       - name: Run database migrations
         env:
           DB_URL: sqlite+aiosqlite:///./var/data/ci.sqlite
