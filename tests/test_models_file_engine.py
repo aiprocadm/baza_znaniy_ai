@@ -353,6 +353,80 @@ def test_get_engine_stub_engine_proxy(tmp_path, monkeypatch) -> None:
 
 
 
+def test_ensure_sync_engine_preserves_sqlalchemy_methods(tmp_path) -> None:
+    """``_ensure_sync_engine`` should preserve existing SQLAlchemy callables."""
+
+    from app.models import file as file_module
+
+    db_path = tmp_path / "preserve.sqlite"
+    url = f"sqlite:///{db_path}"
+
+    class _DummyResult:
+        def __init__(self, value: int) -> None:
+            self._value = value
+
+        def scalar(self) -> int:
+            return self._value
+
+    class _DummyConnection:
+        def __init__(self) -> None:
+            self.closed = False
+
+        def __enter__(self) -> "_DummyConnection":  # pragma: no cover - mirrors SQLAlchemy
+            return self
+
+        def __exit__(self, exc_type, exc, tb) -> bool:  # pragma: no cover - mirrors SQLAlchemy
+            self.close()
+            return False
+
+        def exec_driver_sql(self, statement: str) -> _DummyResult:
+            assert statement == "SELECT 1"
+            return _DummyResult(1)
+
+        def close(self) -> None:
+            self.closed = True
+
+    class EngineWithoutDialect:
+        def __init__(self, target_url: str) -> None:
+            self.url = target_url
+            self._disposed = False
+
+        @property
+        def dialect(self) -> None:  # pragma: no cover - exercised via getattr
+            raise AttributeError("dialect unavailable")
+
+        def connect(self) -> _DummyConnection:
+            return _DummyConnection()
+
+        def dispose(self) -> None:
+            self._disposed = True
+
+    base_engine = EngineWithoutDialect(url)
+
+    original_connect = base_engine.connect
+    original_dispose = base_engine.dispose
+
+    proxied = file_module._ensure_sync_engine(base_engine, url)
+
+    assert proxied is not base_engine
+    assert getattr(proxied.connect, "__self__", None) is base_engine
+    assert getattr(proxied.connect, "__func__", None) is getattr(original_connect, "__func__", None)
+    assert getattr(proxied.dispose, "__self__", None) is base_engine
+    assert getattr(proxied.dispose, "__func__", None) is getattr(original_dispose, "__func__", None)
+
+    with proxied.connect() as connection:
+        execution = connection.exec_driver_sql("SELECT 1")
+        scalar = getattr(execution, "scalar", None)
+        value = scalar() if callable(scalar) else execution
+        assert value in {1, "SELECT 1"}
+
+    proxied.dispose()
+
+    if db_path.exists():
+        db_path.unlink()
+
+
+
 def test_get_engine_aiosqlite_stub_regression(tmp_path) -> None:
     """``get_engine`` should cope with stubbed ``make_url`` lacking ``set``."""
 

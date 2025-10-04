@@ -163,6 +163,9 @@ def _ensure_sync_engine(engine: Engine, url: str) -> Engine:
 
     extras: dict[str, Any] = {}
 
+    preserved_callables: dict[str, Any] = {}
+
+
     originals: dict[str, Any] = {}
 
 
@@ -202,6 +205,10 @@ def _ensure_sync_engine(engine: Engine, url: str) -> Engine:
             needs_wrap = True
 
 
+    def _preserve_callable(name: str, value: Any) -> None:
+        if callable(value):
+            preserved_callables[name] = value
+
     class _FallbackDialect:
         __slots__ = ("name", "driver")
 
@@ -228,6 +235,12 @@ def _ensure_sync_engine(engine: Engine, url: str) -> Engine:
         had_dialect_attr = False
 
     fallback_dialect = _FallbackDialect(dialect_name, dialect_driver)
+
+
+    if not had_dialect_attr:
+        _try_assign_attr(engine, "dialect", fallback_dialect)
+        _register_extra("dialect", fallback_dialect)
+
 
 
     if not had_dialect_attr:
@@ -262,6 +275,12 @@ def _ensure_sync_engine(engine: Engine, url: str) -> Engine:
             proxy = _DialectProxy(dialect, dialect_name, dialect_driver)
         if proxy is not None:
 
+            _try_assign_attr(engine, "dialect", proxy)
+            _register_extra("dialect", proxy)
+
+    fallback_url = make_url(url_str) if "+" in url_str or "://" in url_str else url_str
+
+
             dialect_value = proxy
 
             dialect_extra = proxy
@@ -289,12 +308,18 @@ def _ensure_sync_engine(engine: Engine, url: str) -> Engine:
     prefer_url_fallback = False
 
 
+
     try:
         current_url = getattr(engine, "url")
         has_url = True
     except Exception:  # pragma: no cover - defensive
         current_url = None
         has_url = False
+
+
+    if not has_url or current_url is None or not _attr_is_readable(engine, "url"):
+        _try_assign_attr(engine, "url", fallback_url)
+        _register_extra("url", fallback_url)
 
 
     if not has_url or current_url is None or not _attr_is_readable(engine, "url"):
@@ -323,6 +348,7 @@ def _ensure_sync_engine(engine: Engine, url: str) -> Engine:
         return value is not None
 
 
+
     try:
         dispose_attr = getattr(engine, "dispose")
         has_dispose = True
@@ -332,6 +358,15 @@ def _ensure_sync_engine(engine: Engine, url: str) -> Engine:
 
     def _noop_dispose(*_: Any, **__: Any) -> None:
         return None
+
+
+    if has_dispose and callable(dispose_attr) and _attr_is_readable(
+        engine, "dispose", require_callable=True
+    ):
+        _preserve_callable("dispose", dispose_attr)
+    else:
+        _try_assign_attr(engine, "dispose", _noop_dispose)
+        _register_extra("dispose", _noop_dispose)
 
 
     if not has_dispose or not callable(dispose_attr) or not _attr_is_readable(
@@ -367,6 +402,7 @@ def _ensure_sync_engine(engine: Engine, url: str) -> Engine:
         return callable(value)
 
 
+
     try:
         connect_attr = getattr(engine, "connect")
         has_connect = True
@@ -397,6 +433,15 @@ def _ensure_sync_engine(engine: Engine, url: str) -> Engine:
 
     def _connect(*_: Any, **__: Any) -> _FallbackConnection:
         return _FallbackConnection()
+
+
+    if has_connect and callable(connect_attr) and _attr_is_readable(
+        engine, "connect", require_callable=True
+    ):
+        _preserve_callable("connect", connect_attr)
+    else:
+        _try_assign_attr(engine, "connect", _connect)
+        _register_extra("connect", _connect)
 
 
     if not has_connect or not callable(connect_attr) or not _attr_is_readable(
@@ -484,6 +529,7 @@ def _ensure_sync_engine(engine: Engine, url: str) -> Engine:
             _register_extra(attr_name, _final_fallback(attr_name))
 
 
+
     if not needs_wrap:
         return engine
 
@@ -550,7 +596,10 @@ def _ensure_sync_engine(engine: Engine, url: str) -> Engine:
             original = object.__getattribute__(self, "_original")
             return sorted(set(extras_map.keys()) | set(dir(original)))
 
-    return _EngineProxy(engine, extras)
+    proxy_extras = dict(preserved_callables)
+    proxy_extras.update(extras)
+
+    return _EngineProxy(engine, proxy_extras)
 
 
 def _create_schema_if_possible(engine: Engine) -> None:
