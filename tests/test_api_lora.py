@@ -2,15 +2,23 @@
 
 from __future__ import annotations
 
+import asyncio
+import math
 from importlib import reload
 from pathlib import Path
 from typing import Iterator
 
 import pytest
+from fastapi import HTTPException, status
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
 from tests.service_stubs import install_service_stubs
+
+install_service_stubs()
+
+from app.api.v1 import lora as lora_module
+from app.models.lora import LoraLoadRequest
 
 
 @pytest.fixture()
@@ -72,7 +80,7 @@ def test_load_and_unload_adapter_updates_ready(lora_client: TestClient, tmp_path
     assert load_payload["scaling"] == pytest.approx(0.75)
 
     ready_response = lora_client.get("/ready")
-    assert ready_response.status_code == 200
+    assert ready_response.status_code == 200, ready_response.json()
     ready_payload = ready_response.json()
     lora_details = ready_payload["details"]["lora"]
     assert lora_details["status"] == "ok"
@@ -154,3 +162,39 @@ def test_scaling_validation_rejects_non_finite(lora_client: TestClient, tmp_path
     except ValidationError:
         return
     assert response.status_code == 422
+
+
+class _BypassManager:
+    async def load_adapter(self, path: Path, scaling: float) -> None:  # pragma: no cover - should not run
+        raise AssertionError("load_adapter should not be called when scaling is invalid")
+
+
+def _construct_lora_payload(path: Path, scaling: float) -> LoraLoadRequest:
+    """Instantiate ``LoraLoadRequest`` without running validators."""
+
+    constructor = getattr(LoraLoadRequest, "model_construct", None)
+    if callable(constructor):  # pragma: no cover - exercised when real pydantic v2 installed
+        return constructor(path=path, scaling=scaling)
+
+    payload = object.__new__(LoraLoadRequest)
+    payload.__dict__ = {"path": path, "scaling": scaling}
+    return payload
+
+
+@pytest.mark.parametrize(
+    "bad_scaling",
+    [
+        pytest.param(-1.0, id="negative"),
+        pytest.param(0.0, id="zero"),
+        pytest.param(math.inf, id="infinite"),
+        pytest.param(math.nan, id="nan"),
+    ],
+)
+def test_runtime_scaling_guard_rejects_invalid_values(bad_scaling: float) -> None:
+    payload = _construct_lora_payload(Path("/tmp/ghost.gguf"), bad_scaling)
+
+    with pytest.raises(HTTPException) as excinfo:
+        asyncio.run(lora_module.load_lora_adapter(payload, manager=_BypassManager()))
+
+    expected_status = getattr(status, "HTTP_422_UNPROCESSABLE_ENTITY", 422)
+    assert excinfo.value.status_code == expected_status
