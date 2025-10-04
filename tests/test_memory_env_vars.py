@@ -160,3 +160,25 @@ def test_memory_alias_overrides_default(monkeypatch: pytest.MonkeyPatch, tmp_pat
     assert settings.chat_memory_max_tokens == 4096
 
 
+@pytest.mark.parametrize(
+    ("env_name", "value"),
+    (
+        ("CHAT_MEMORY_MAXTOK", "3141"),
+        ("MEMORY_MAX_TOKENS", "2718"),
+    ),
+)
+def test_memory_alias_env_vars_override_defaults(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, env_name: str, value: str
+) -> None:
+    """All alias choices for max tokens should override the default value."""
+
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    app_main = _load_service_main(tmp_path)
+
+    monkeypatch.setenv("CHAT_MEMORY_ENABLED", "true")
+    monkeypatch.setenv(env_name, value)
+
+    settings = app_main.get_settings()
+
+    assert settings.chat_memory_max_tokens == int(value)
+

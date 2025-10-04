@@ -3,12 +3,27 @@
 from __future__ import annotations
 
 import sys
+
+from typing import TYPE_CHECKING, Callable, Optional, cast
+
+
+from typing import TYPE_CHECKING, Any, Callable, Optional
+
+from app.core.config import get_settings
+
+if TYPE_CHECKING:  # pragma: no cover - used only for static analysis
+    from app.core.config import Settings
+else:  # pragma: no cover - runtime fallback when ``Settings`` is absent
+    Settings = Any
+
 from typing import Any, Callable, Optional, TYPE_CHECKING, cast
+
 
 if TYPE_CHECKING:  # pragma: no cover - import for static analysis only
     from app.core.config import Settings as SettingsType
-else:
-    SettingsType = Any
+else:  # pragma: no cover - ``typing`` fallback used during runtime
+    from typing import Any as SettingsType
+
 
 from .exceptions import (
     LLMProviderError,
