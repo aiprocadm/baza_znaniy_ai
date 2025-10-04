@@ -401,18 +401,24 @@ def _ensure_sync_engine(engine: Engine, url: str) -> Engine:
     return _EngineProxy(engine, extras)
 
 
-def _create_schema_if_possible(engine: Engine) -> None:
+def _create_schema_if_possible(engine: Engine, metadata: Any | None) -> None:
     """Create database schema when ``SQLModel.metadata`` exposes ``create_all``."""
 
-    metadata = getattr(SQLModel, "metadata", None)
     if metadata is None:
         logger.warning("SQLModel.metadata is missing; skipping schema creation")
         return
 
-    create_all = getattr(metadata, "create_all", None)
+    try:
+        create_all = getattr(metadata, "create_all")
+    except AttributeError:
+        logger.warning(
+            "SQLModel.metadata has no 'create_all'; skipping schema creation"
+        )
+        return
+
     if not callable(create_all):
         logger.warning(
-            "SQLModel.metadata.create_all is unavailable; skipping schema creation"
+            "SQLModel.metadata.create_all is not callable; skipping schema creation"
         )
         return
 
@@ -432,6 +438,8 @@ def get_engine(url: Optional[str] = None, *, create_schema: bool = True) -> Engi
 
     # Ensure additional SQLModel definitions are imported before metadata creation
     __import__("app.models.entities")
+
+    metadata = getattr(SQLModel, "metadata", None)
 
     if driver_name.endswith("+aiosqlite"):
         sync_url: str
@@ -472,13 +480,13 @@ def get_engine(url: Optional[str] = None, *, create_schema: bool = True) -> Engi
         engine = create_engine(sync_url, echo=False, connect_args=_connect_args(sync_url))
         engine = _ensure_sync_engine(engine, sync_url)
         if create_schema:
-            _create_schema_if_possible(engine)
+            _create_schema_if_possible(engine, metadata)
         return engine
 
     engine = create_engine(db_url, echo=False, connect_args=_connect_args(db_url_str))
     engine = _ensure_sync_engine(engine, db_url_str)
     if create_schema:
-        _create_schema_if_possible(engine)
+        _create_schema_if_possible(engine, metadata)
     return engine
 
 

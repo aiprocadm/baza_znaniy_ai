@@ -33,6 +33,37 @@ def test_get_engine_handles_missing_create_all(tmp_path) -> None:
         file_module.get_engine.cache_clear()
 
 
+def test_get_engine_logs_when_metadata_lacks_create_all(tmp_path, caplog) -> None:
+    """``get_engine`` should warn and continue when metadata lacks ``create_all``."""
+
+    file_module.get_engine.cache_clear()
+
+    caplog.set_level("WARNING")
+
+    original_metadata = file_module.SQLModel.metadata
+    dummy_metadata = type("DummyMetadata", (), {})()
+    file_module.SQLModel.metadata = dummy_metadata  # type: ignore[assignment]
+    try:
+        engine = file_module.get_engine(
+            f"sqlite:///{tmp_path/'missing-create-all-log.db'}",
+            create_schema=True,
+        )
+
+        assert any(
+            "SQLModel.metadata has no 'create_all'" in message
+            for _, _, message in caplog.record_tuples
+        )
+
+        with engine.connect() as connection:
+            execution = connection.execute(text("SELECT 1"))
+            scalar = getattr(execution, "scalar", None)
+            value = scalar() if callable(scalar) else execution
+            assert value in {1, "SELECT 1"}
+    finally:
+        file_module.SQLModel.metadata = original_metadata
+        file_module.get_engine.cache_clear()
+
+
 
 def test_get_engine_exposes_core_engine_attributes(tmp_path, monkeypatch):
     file_module.get_engine.cache_clear()
