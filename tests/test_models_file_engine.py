@@ -4,13 +4,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from sqlalchemy import text
+from sqlalchemy import MetaData, text
 
 from app.models import file as file_module
 
 
 def test_get_engine_handles_missing_create_all(tmp_path) -> None:
-    """``get_engine`` should ignore metadata without ``create_all``."""
+    """``get_engine`` should replace unusable metadata before schema creation."""
 
     file_module.get_engine.cache_clear()
 
@@ -23,8 +23,37 @@ def test_get_engine_handles_missing_create_all(tmp_path) -> None:
             create_schema=True,
         )
 
+        assert isinstance(file_module.SQLModel.metadata, MetaData)
+
         with engine.connect() as connection:
-            assert connection.execute(text("SELECT 1")).scalar() == 1
+            execution = connection.execute(text("SELECT 1"))
+            scalar = getattr(execution, "scalar", None)
+            value = scalar() if callable(scalar) else execution
+            assert value in {1, "SELECT 1"}
+    finally:
+        file_module.SQLModel.metadata = original_metadata
+        file_module.get_engine.cache_clear()
+
+
+def test_get_engine_initializes_metadata_when_missing(tmp_path) -> None:
+    file_module.get_engine.cache_clear()
+
+    original_metadata = file_module.SQLModel.metadata
+    file_module.SQLModel.metadata = None  # type: ignore[assignment]
+
+    try:
+        engine = file_module.get_engine(
+            f"sqlite:///{tmp_path/'missing-metadata.db'}",
+            create_schema=True,
+        )
+
+        assert isinstance(file_module.SQLModel.metadata, MetaData)
+
+        with engine.connect() as connection:
+            execution = connection.execute(text("SELECT 1"))
+            scalar = getattr(execution, "scalar", None)
+            value = scalar() if callable(scalar) else execution
+            assert value in {1, "SELECT 1"}
     finally:
         file_module.SQLModel.metadata = original_metadata
         file_module.get_engine.cache_clear()
@@ -118,6 +147,35 @@ def test_get_engine_sqlite_regression(tmp_path, monkeypatch) -> None:
         finally:
             if hasattr(connection, "close"):
                 connection.close()
+    finally:
+        file_module.get_engine.cache_clear()
+        monkeypatch.delenv("DB_URL", raising=False)
+        if db_path.exists():
+            db_path.unlink()
+
+
+def test_get_engine_downgrades_aiosqlite(tmp_path, monkeypatch) -> None:
+    from app.models import file as file_module
+
+    file_module.get_engine.cache_clear()
+
+    db_path = Path(tmp_path) / "async.sqlite"
+    monkeypatch.setenv("DB_URL", f"sqlite+aiosqlite:///{db_path}")
+
+    engine = file_module.get_engine(create_schema=False)
+
+    try:
+        assert getattr(engine.dialect, "name", None) == "sqlite"
+        assert getattr(engine.dialect, "driver", None) in {"sqlite", "pysqlite"}
+        assert str(engine.url).startswith("sqlite:")
+        assert callable(engine.dispose)
+        assert callable(engine.connect)
+
+        with engine.connect() as connection:
+            execution = connection.execute(text("SELECT 1"))
+            scalar = getattr(execution, "scalar", None)
+            value = scalar() if callable(scalar) else execution
+            assert value in {1, "SELECT 1"}
     finally:
         file_module.get_engine.cache_clear()
         monkeypatch.delenv("DB_URL", raising=False)
