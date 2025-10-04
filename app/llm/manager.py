@@ -206,9 +206,25 @@ class LlamaLoraManager:
         self._adapter = None
         return llama
 
+    @staticmethod
+    def _ensure_valid_scaling(scaling: float) -> float:
+        """Return *scaling* as ``float`` if it is finite and within ``(0, 10]``."""
+
+        try:
+            value = float(scaling)
+        except (TypeError, ValueError) as exc:
+            raise InvalidScalingError("Scaling factor must be numeric") from exc
+
+        if not math.isfinite(value):
+            raise InvalidScalingError("Scaling factor must be finite")
+        if not 0.0 < value <= 10.0:
+            raise InvalidScalingError("Scaling factor must be within (0, 10]")
+        return value
+
     async def load_adapter(self, path: Path, scaling: float) -> LoraStatus:
         """Load a LoRA adapter with *scaling* and make it active."""
 
+        scaling_value = self._ensure_valid_scaling(scaling)
         candidate = self._normalise_path(path)
         if not candidate.is_file():
             raise FileNotFoundError(str(candidate))
@@ -227,7 +243,9 @@ class LlamaLoraManager:
             adapter_name = self._adapter_name_from_path(candidate)
 
             if hasattr(llama, "load_adapter"):
-                llama.load_adapter(str(candidate), adapter_name=adapter_name, scale=scaling)
+                llama.load_adapter(
+                    str(candidate), adapter_name=adapter_name, scale=scaling_value
+                )
             if hasattr(llama, "set_adapter"):
                 llama.set_adapter(adapter_name)
 
