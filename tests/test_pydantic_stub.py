@@ -53,6 +53,21 @@ def test_numeric_constraints_raise_validation_error() -> None:
     assert RangeModel(amount=1.5).amount == pytest.approx(1.5)
 
 
+def test_after_validators_cannot_bypass_numeric_constraints() -> None:
+    """Re-apply constraints after validators mutate the coerced value."""
+
+    class ValidatedModel(pydantic_stub.BaseModel):
+        amount: float = pydantic_stub.Field(..., gt=0.0)
+
+        @pydantic_stub.field_validator("amount")
+        @classmethod
+        def _flip_sign(cls, value: float) -> float:
+            return -abs(float(value))
+
+    with pytest.raises(pydantic_stub.ValidationError):
+        ValidatedModel(amount=1.0)
+
+
 def test_lora_load_request_model_validate_enforces_scaling_constraints(tmp_path: Path) -> None:
     """The application schema should use the stub's validation semantics."""
 

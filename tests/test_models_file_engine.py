@@ -2,17 +2,52 @@
 
 from __future__ import annotations
 
+import importlib
+import sys
 from pathlib import Path
 
-from sqlalchemy import text
+
+STUBS_PATH = Path(__file__).resolve().parent / "stubs"
+
+if "sqlalchemy" in sys.modules and getattr(
+    sys.modules["sqlalchemy"], "__file__", ""
+).endswith("tests/stubs/sqlalchemy/__init__.py"):
+    sys.modules.pop("sqlalchemy", None)
+    sys.modules.pop("sqlalchemy.engine", None)
+
+removed_stub = False
+if STUBS_PATH.exists():
+    try:
+        sys.path.remove(str(STUBS_PATH))
+    except ValueError:
+        pass
+    else:
+        removed_stub = True
+
+importlib.import_module("sqlalchemy")
+
+if removed_stub:
+    sys.path.insert(0, str(STUBS_PATH))
+
+from sqlalchemy import create_engine, text
+
+from sqlalchemy import MetaData, text
+
 
 from app.models import file as file_module
 
 
-def test_get_engine_handles_missing_create_all(tmp_path) -> None:
+
+def test_get_engine_handles_missing_create_all(tmp_path, monkeypatch) -> None:
     """``get_engine`` should ignore metadata without ``create_all``."""
 
+def test_get_engine_handles_missing_create_all(tmp_path) -> None:
+    """``get_engine`` should replace unusable metadata before schema creation."""
+
+
     file_module.get_engine.cache_clear()
+
+    monkeypatch.setattr(file_module, "create_engine", create_engine)
 
     original_metadata = file_module.SQLModel.metadata
     dummy_metadata = object()
@@ -21,6 +56,39 @@ def test_get_engine_handles_missing_create_all(tmp_path) -> None:
         engine = file_module.get_engine(
             f"sqlite:///{tmp_path/'missing-create-all.db'}",
             create_schema=True,
+        )
+
+        assert isinstance(file_module.SQLModel.metadata, MetaData)
+
+        with engine.connect() as connection:
+            execution = connection.execute(text("SELECT 1"))
+            scalar = getattr(execution, "scalar", None)
+            value = scalar() if callable(scalar) else execution
+            assert value in {1, "SELECT 1"}
+    finally:
+        file_module.SQLModel.metadata = original_metadata
+        file_module.get_engine.cache_clear()
+
+
+def test_get_engine_logs_when_metadata_lacks_create_all(tmp_path, caplog) -> None:
+    """``get_engine`` should warn and continue when metadata lacks ``create_all``."""
+
+    file_module.get_engine.cache_clear()
+
+    caplog.set_level("WARNING")
+
+    original_metadata = file_module.SQLModel.metadata
+    dummy_metadata = type("DummyMetadata", (), {})()
+    file_module.SQLModel.metadata = dummy_metadata  # type: ignore[assignment]
+    try:
+        engine = file_module.get_engine(
+            f"sqlite:///{tmp_path/'missing-create-all-log.db'}",
+            create_schema=True,
+        )
+
+        assert any(
+            "SQLModel.metadata has no 'create_all'" in message
+            for _, _, message in caplog.record_tuples
         )
 
         with engine.connect() as connection:
@@ -34,12 +102,70 @@ def test_get_engine_handles_missing_create_all(tmp_path) -> None:
 
 
 
+def test_get_engine_initializes_metadata_when_missing(tmp_path) -> None:
+    file_module.get_engine.cache_clear()
+
+def test_get_engine_handles_missing_metadata(tmp_path, monkeypatch) -> None:
+    """``get_engine`` should tolerate ``SQLModel.metadata`` being ``None``."""
+
+    file_module.get_engine.cache_clear()
+
+    db_path = Path(tmp_path) / "missing-metadata.sqlite"
+    monkeypatch.setenv("DB_URL", f"sqlite:///{db_path}")
+
+
+    original_metadata = file_module.SQLModel.metadata
+    file_module.SQLModel.metadata = None  # type: ignore[assignment]
+
+    try:
+
+        engine = file_module.get_engine(
+            f"sqlite:///{tmp_path/'missing-metadata.db'}",
+            create_schema=True,
+        )
+
+        assert isinstance(file_module.SQLModel.metadata, MetaData)
+
+        with engine.connect() as connection:
+
+        engine = file_module.get_engine(create_schema=True)
+
+        assert getattr(engine, "dialect", None) is not None
+        assert getattr(engine, "url", None) is not None
+
+        dispose = getattr(engine, "dispose", None)
+        connect = getattr(engine, "connect", None)
+
+        assert callable(dispose)
+        assert callable(connect)
+
+        with connect() as connection:  # type: ignore[operator]
+
+            execution = connection.execute(text("SELECT 1"))
+            scalar = getattr(execution, "scalar", None)
+            value = scalar() if callable(scalar) else execution
+            assert value in {1, "SELECT 1"}
+
+
+
+        dispose()
+
+    finally:
+        file_module.SQLModel.metadata = original_metadata
+        file_module.get_engine.cache_clear()
+        monkeypatch.delenv("DB_URL", raising=False)
+        if db_path.exists():
+            db_path.unlink()
+
+
+
 def test_get_engine_exposes_core_engine_attributes(tmp_path, monkeypatch):
     file_module.get_engine.cache_clear()
     db_path = tmp_path / "engine.sqlite"
     db_url = f"sqlite:///{db_path}"
 
     monkeypatch.setenv("DB_URL", db_url)
+    monkeypatch.setattr(file_module, "create_engine", create_engine)
 
     try:
         engine = file_module.get_engine(create_schema=False)
@@ -58,6 +184,30 @@ def test_get_engine_exposes_core_engine_attributes(tmp_path, monkeypatch):
         file_module.get_engine.cache_clear()
         monkeypatch.delenv("DB_URL", raising=False)
 
+
+def test_get_engine_preserves_sqlalchemy_methods(tmp_path, monkeypatch):
+    file_module.get_engine.cache_clear()
+    db_path = tmp_path / "preserve.sqlite"
+    db_url = f"sqlite:///{db_path}"
+
+    monkeypatch.setenv("DB_URL", db_url)
+    monkeypatch.setattr(file_module, "create_engine", create_engine)
+
+    try:
+        engine = file_module.get_engine(create_schema=False)
+        dispose = engine.dispose
+        connect = engine.connect
+
+        assert callable(dispose)
+        assert callable(connect)
+        assert getattr(dispose, "__name__", "") == "dispose"
+        assert getattr(connect, "__name__", "") == "connect"
+    finally:
+        file_module.get_engine.cache_clear()
+        monkeypatch.delenv("DB_URL", raising=False)
+        if db_path.exists():
+            db_path.unlink()
+
 def test_get_engine_exposes_sync_attributes(tmp_path, monkeypatch) -> None:
     """Ensure ``get_engine`` returns an engine with expected sync API."""
 
@@ -66,6 +216,7 @@ def test_get_engine_exposes_sync_attributes(tmp_path, monkeypatch) -> None:
     file_module.get_engine.cache_clear()
     db_path = Path(tmp_path) / "engine.sqlite"
     monkeypatch.setenv("DB_URL", f"sqlite:///{db_path}")
+    monkeypatch.setattr(file_module, "create_engine", create_engine)
 
     engine = file_module.get_engine(create_schema=False)
 
@@ -101,6 +252,7 @@ def test_get_engine_sqlite_regression(tmp_path, monkeypatch) -> None:
 
     db_path = Path(tmp_path) / "regression.sqlite"
     monkeypatch.setenv("DB_URL", f"sqlite:///{db_path}")
+    monkeypatch.setattr(file_module, "create_engine", create_engine)
 
     engine = file_module.get_engine(create_schema=False)
 
@@ -114,7 +266,7 @@ def test_get_engine_sqlite_regression(tmp_path, monkeypatch) -> None:
 
         connection = engine.connect()
         try:
-            execution = connection.execute("SELECT 1")
+            execution = connection.execute(text("SELECT 1"))
             scalar = getattr(execution, "scalar", None)
             assert callable(scalar)
             assert scalar() in {1, "SELECT 1"}
@@ -129,14 +281,61 @@ def test_get_engine_sqlite_regression(tmp_path, monkeypatch) -> None:
 
 
 
+def test_ensure_sync_engine_proxy_preserves_original_methods(tmp_path) -> None:
+    """When wrapping an engine the proxy should retain SQLAlchemy callables."""
+
+    base_engine = create_engine(f"sqlite:///{tmp_path/'wrapped.sqlite'}")
+
+    class MissingDialectEngine:
+        def __init__(self, original):
+            self._original = original
+            self.dispose = original.dispose
+            self.connect = original.connect
+
+        @property
+        def dialect(self):  # pragma: no cover - exercised indirectly
+            raise AttributeError("dialect unavailable")
+
+        @property
+        def url(self):  # pragma: no cover - exercised indirectly
+            raise AttributeError("url unavailable")
+
+        def __getattr__(self, item):
+            return getattr(self._original, item)
+
+    wrapped = MissingDialectEngine(base_engine)
+    original_dispose = wrapped.dispose
+    original_connect = wrapped.connect
+
+    proxied = file_module._ensure_sync_engine(wrapped, str(base_engine.url))
+
+    try:
+        assert proxied.dispose is original_dispose
+        assert proxied.connect is original_connect
+
+        proxied.dispose()
+
+        with proxied.connect() as connection:
+            assert connection.execute(text("SELECT 1")).scalar() == 1
+    finally:
+        base_engine.dispose()
+
+def test_get_engine_downgrades_aiosqlite(tmp_path, monkeypatch) -> None:
+
+
 def test_get_engine_stub_engine_proxy(tmp_path, monkeypatch) -> None:
     """Regression: ensure the SQLModel stub engine receives fallback attributes."""
 
     from tests.stubs import sqlmodel as sqlmodel_stub
 
+
     from app.models import file as file_module
 
     file_module.get_engine.cache_clear()
+
+
+    db_path = Path(tmp_path) / "async.sqlite"
+    monkeypatch.setenv("DB_URL", f"sqlite+aiosqlite:///{db_path}")
 
     db_path = Path(tmp_path) / "stub-engine.sqlite"
     monkeypatch.setenv("DB_URL", f"sqlite:///{db_path}")
@@ -144,10 +343,23 @@ def test_get_engine_stub_engine_proxy(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(file_module, "create_engine", sqlmodel_stub.create_engine)
     monkeypatch.setattr(file_module, "SQLModel", sqlmodel_stub.SQLModel)
 
+
     engine = file_module.get_engine(create_schema=False)
 
     try:
         assert getattr(engine.dialect, "name", None) == "sqlite"
+
+        assert getattr(engine.dialect, "driver", None) in {"sqlite", "pysqlite"}
+        assert str(engine.url).startswith("sqlite:")
+        assert callable(engine.dispose)
+        assert callable(engine.connect)
+
+        with engine.connect() as connection:
+            execution = connection.execute(text("SELECT 1"))
+            scalar = getattr(execution, "scalar", None)
+            value = scalar() if callable(scalar) else execution
+            assert value in {1, "SELECT 1"}
+
         assert getattr(engine.dialect, "driver", None) == "sqlite"
 
         dispose = getattr(engine, "dispose", None)
@@ -163,11 +375,88 @@ def test_get_engine_stub_engine_proxy(tmp_path, monkeypatch) -> None:
         finally:
             if hasattr(connection, "close"):
                 connection.close()
+
     finally:
         file_module.get_engine.cache_clear()
         monkeypatch.delenv("DB_URL", raising=False)
         if db_path.exists():
             db_path.unlink()
+
+
+
+def test_ensure_sync_engine_preserves_sqlalchemy_methods(tmp_path) -> None:
+    """``_ensure_sync_engine`` should preserve existing SQLAlchemy callables."""
+
+    from app.models import file as file_module
+
+    db_path = tmp_path / "preserve.sqlite"
+    url = f"sqlite:///{db_path}"
+
+    class _DummyResult:
+        def __init__(self, value: int) -> None:
+            self._value = value
+
+        def scalar(self) -> int:
+            return self._value
+
+    class _DummyConnection:
+        def __init__(self) -> None:
+            self.closed = False
+
+        def __enter__(self) -> "_DummyConnection":  # pragma: no cover - mirrors SQLAlchemy
+            return self
+
+        def __exit__(self, exc_type, exc, tb) -> bool:  # pragma: no cover - mirrors SQLAlchemy
+            self.close()
+            return False
+
+        def exec_driver_sql(self, statement: str) -> _DummyResult:
+            assert statement == "SELECT 1"
+            return _DummyResult(1)
+
+        def close(self) -> None:
+            self.closed = True
+
+    class EngineWithoutDialect:
+        def __init__(self, target_url: str) -> None:
+            self.url = target_url
+            self._disposed = False
+
+        @property
+        def dialect(self) -> None:  # pragma: no cover - exercised via getattr
+            raise AttributeError("dialect unavailable")
+
+        def connect(self) -> _DummyConnection:
+            return _DummyConnection()
+
+        def dispose(self) -> None:
+            self._disposed = True
+
+    base_engine = EngineWithoutDialect(url)
+
+    original_connect = base_engine.connect
+    original_dispose = base_engine.dispose
+
+    proxied = file_module._ensure_sync_engine(base_engine, url)
+
+    assert proxied is not base_engine
+    assert getattr(proxied.connect, "__self__", None) is base_engine
+    assert getattr(proxied.connect, "__func__", None) is getattr(original_connect, "__func__", None)
+    assert getattr(proxied.dispose, "__self__", None) is base_engine
+    assert getattr(proxied.dispose, "__func__", None) is getattr(original_dispose, "__func__", None)
+
+    with proxied.connect() as connection:
+        execution = connection.exec_driver_sql("SELECT 1")
+        scalar = getattr(execution, "scalar", None)
+        value = scalar() if callable(scalar) else execution
+        assert value in {1, "SELECT 1"}
+
+    proxied.dispose()
+
+    if db_path.exists():
+        db_path.unlink()
+
+
 
 def test_get_engine_aiosqlite_stub_regression(tmp_path) -> None:
     """``get_engine`` should cope with stubbed ``make_url`` lacking ``set``."""
