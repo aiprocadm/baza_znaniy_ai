@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import math
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Protocol, runtime_checkable
@@ -101,6 +102,10 @@ class AdapterNotLoadedError(LoraManagerError):
     """Raised when attempting to operate on a missing adapter."""
 
 
+class InvalidScalingError(LoraManagerError):
+    """Raised when an invalid scaling factor is supplied."""
+
+
 class LlamaLoraManager:
     """Manage LoRA adapters for a ``llama_cpp.Llama`` instance."""
 
@@ -197,6 +202,12 @@ class LlamaLoraManager:
         if not candidate.is_file():
             raise FileNotFoundError(str(candidate))
 
+        scaling_value = float(scaling)
+        if math.isnan(scaling_value) or scaling_value <= 0 or scaling_value > 10:
+            raise InvalidScalingError(
+                "Scaling factor must be finite and within the range (0, 10]."
+            )
+
         async with self._lock:
             if self._adapter and candidate == self._adapter.path:
                 raise AdapterAlreadyLoadedError(str(candidate))
@@ -211,7 +222,7 @@ class LlamaLoraManager:
 
             self._adapter = _AdapterState(
                 path=candidate,
-                scaling=scaling,
+                scaling=scaling_value,
                 adapter_name=adapter_name,
             )
             return self._current_status()
@@ -247,6 +258,7 @@ class LlamaLoraManager:
 __all__ = [
     "AdapterAlreadyLoadedError",
     "AdapterNotLoadedError",
+    "InvalidScalingError",
     "LlamaLoraManager",
     "LoraStatus",
 ]

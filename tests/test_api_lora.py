@@ -8,7 +8,6 @@ from typing import Iterator
 
 import pytest
 from fastapi.testclient import TestClient
-from pydantic import ValidationError
 
 from tests.service_stubs import install_service_stubs
 
@@ -131,26 +130,21 @@ def test_unload_without_adapter_returns_conflict(lora_client: TestClient, tmp_pa
     assert response.json()["detail"] == "ADAPTER_NOT_LOADED"
 
 
-def test_scaling_validation_rejects_non_positive(lora_client: TestClient, tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    "invalid_scaling",
+    [
+        pytest.param(-0.5, id="negative"),
+        pytest.param(0.0, id="zero"),
+        pytest.param(10.5, id="above-maximum"),
+        pytest.param(float("nan"), id="nan"),
+    ],
+)
+def test_scaling_validation_rejects_non_positive(
+    lora_client: TestClient, tmp_path: Path, invalid_scaling: float
+) -> None:
     adapter_path = _create_adapter(tmp_path, "invalid.gguf")
-    try:
-        response = lora_client.post(
-            "/api/v1/lora/load",
-            json={"path": str(adapter_path), "scaling": -0.5},
-        )
-    except ValidationError:
-        return
-    assert response.status_code == 422
-
-
-def test_scaling_validation_rejects_non_finite(lora_client: TestClient, tmp_path: Path) -> None:
-    adapter_path = _create_adapter(tmp_path, "nan.gguf")
-    payload = {"path": str(adapter_path), "scaling": float("nan")}
-    try:
-        response = lora_client.post(
-            "/api/v1/lora/load",
-            json=payload,
-        )
-    except ValidationError:
-        return
+    response = lora_client.post(
+        "/api/v1/lora/load",
+        json={"path": str(adapter_path), "scaling": invalid_scaling},
+    )
     assert response.status_code == 422
