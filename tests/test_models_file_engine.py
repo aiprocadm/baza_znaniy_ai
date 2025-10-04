@@ -128,6 +128,47 @@ def test_get_engine_sqlite_regression(tmp_path, monkeypatch) -> None:
             db_path.unlink()
 
 
+
+def test_get_engine_stub_engine_proxy(tmp_path, monkeypatch) -> None:
+    """Regression: ensure the SQLModel stub engine receives fallback attributes."""
+
+    from tests.stubs import sqlmodel as sqlmodel_stub
+
+    from app.models import file as file_module
+
+    file_module.get_engine.cache_clear()
+
+    db_path = Path(tmp_path) / "stub-engine.sqlite"
+    monkeypatch.setenv("DB_URL", f"sqlite:///{db_path}")
+
+    monkeypatch.setattr(file_module, "create_engine", sqlmodel_stub.create_engine)
+    monkeypatch.setattr(file_module, "SQLModel", sqlmodel_stub.SQLModel)
+
+    engine = file_module.get_engine(create_schema=False)
+
+    try:
+        assert getattr(engine.dialect, "name", None) == "sqlite"
+        assert getattr(engine.dialect, "driver", None) == "sqlite"
+
+        dispose = getattr(engine, "dispose", None)
+        assert callable(dispose)
+        dispose()
+
+        connection = engine.connect()
+        try:
+            execution = connection.execute("SELECT 1")
+            scalar = getattr(execution, "scalar", None)
+            assert callable(scalar)
+            assert scalar() in {1, "SELECT 1"}
+        finally:
+            if hasattr(connection, "close"):
+                connection.close()
+    finally:
+        file_module.get_engine.cache_clear()
+        monkeypatch.delenv("DB_URL", raising=False)
+        if db_path.exists():
+            db_path.unlink()
+
 def test_get_engine_aiosqlite_stub_regression(tmp_path) -> None:
     """``get_engine`` should cope with stubbed ``make_url`` lacking ``set``."""
 
@@ -197,4 +238,5 @@ def test_get_engine_aiosqlite_stub_regression(tmp_path) -> None:
 
         if original_file_module is not None and hasattr(original_file_module, "get_engine"):
             original_file_module.get_engine.cache_clear()
+
 
