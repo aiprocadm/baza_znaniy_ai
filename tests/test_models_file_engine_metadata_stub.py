@@ -39,3 +39,42 @@ def test_get_engine_warns_when_metadata_has_no_callable_create_all(
     finally:
         file_module.SQLModel.metadata = original_metadata
         file_module.get_engine.cache_clear()
+
+
+def test_get_engine_skips_schema_when_metadata_is_none(tmp_path, monkeypatch) -> None:
+    """``get_engine`` should return an engine with sync API even without metadata."""
+
+    file_module.get_engine.cache_clear()
+
+    original_metadata = file_module.SQLModel.metadata
+    file_module.SQLModel.metadata = None  # type: ignore[assignment]
+
+    db_path = Path(tmp_path) / "metadata-none.sqlite"
+    monkeypatch.setenv("DB_URL", f"sqlite:///{db_path}")
+
+    try:
+        engine = file_module.get_engine(create_schema=True)
+
+        assert hasattr(engine, "dialect")
+        assert getattr(engine.dialect, "name", None) == "sqlite"
+        assert getattr(engine.dialect, "driver", None) in {"sqlite", "pysqlite"}
+
+        assert hasattr(engine, "dispose")
+        dispose = getattr(engine, "dispose")
+        assert callable(dispose)
+        dispose()
+
+        assert hasattr(engine, "connect")
+        connect = getattr(engine, "connect")
+        assert callable(connect)
+        with connect() as connection:
+            execution = connection.execute(text("SELECT 1"))
+            scalar = getattr(execution, "scalar", None)
+            value = scalar() if callable(scalar) else execution
+            assert value in {1, "SELECT 1"}
+    finally:
+        file_module.SQLModel.metadata = original_metadata
+        file_module.get_engine.cache_clear()
+        monkeypatch.delenv("DB_URL", raising=False)
+        if db_path.exists():
+            db_path.unlink(missing_ok=True)

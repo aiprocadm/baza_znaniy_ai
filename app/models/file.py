@@ -201,8 +201,6 @@ def _ensure_sync_engine(engine: Engine, url: str) -> Engine:
 
         nonlocal needs_wrap
         extras[name] = _ProxyEntry(value, prefer_fallback, validator)
-        if prefer_fallback:
-            needs_wrap = True
 
 
     def _preserve_callable(name: str, value: Any) -> None:
@@ -553,6 +551,16 @@ def _ensure_sync_engine(engine: Engine, url: str) -> Engine:
             object.__setattr__(self, "_extras", dict(extras_map))
 
         def __getattribute__(self, item: str) -> Any:
+            if item in {"_original", "_extras", "__setattr__", "__getattribute__", "__dir__", "__repr__"}:
+                return object.__getattribute__(self, item)
+
+            if item == "__class__":
+                original = object.__getattribute__(self, "_original")
+                return type(original)
+
+            if item == "__wrapped__":
+                return object.__getattribute__(self, "_original")
+
             if item in {"_original", "_extras", "__dict__"}:
                 return object.__getattribute__(self, item)
             if item == "__class__":  # pragma: no cover - runtime compatibility
@@ -566,6 +574,7 @@ def _ensure_sync_engine(engine: Engine, url: str) -> Engine:
             extras_map = object.__getattribute__(self, "_extras")
             entry = extras_map.get(item)
             original = object.__getattribute__(self, "_original")
+
             if entry is None:
                 return getattr(original, item)
 
@@ -596,6 +605,11 @@ def _ensure_sync_engine(engine: Engine, url: str) -> Engine:
             original = object.__getattribute__(self, "_original")
             return sorted(set(extras_map.keys()) | set(dir(original)))
 
+        def __repr__(self) -> str:  # pragma: no cover - debugging helper
+            original = object.__getattribute__(self, "_original")
+            return f"EngineProxy({original!r})"
+
+    return _EngineProxy(engine, extras)
     proxy_extras = dict(preserved_callables)
     proxy_extras.update(extras)
 
@@ -635,6 +649,12 @@ def get_engine(url: Optional[str] = None, *, create_schema: bool = True) -> Engi
     __import__("app.models.entities")
 
     if driver_name.endswith("+aiosqlite"):
+        dialect_str = str(dialect) if dialect is not None else ""
+        sync_url = _sqlite_aiosqlite_to_sync_url(db_url_str)
+        if sync_url == db_url_str and "+aiosqlite" in dialect_str:
+            sync_url = _sqlite_aiosqlite_to_sync_url(dialect_str)
+        if "+aiosqlite" in sync_url:
+            sync_url = sync_url.replace("+aiosqlite", "", 1)
 
         sync_url = db_url_str.replace("+aiosqlite", "", 1)
         engine = create_engine(sync_url, echo=False, connect_args=_connect_args(sync_url))
