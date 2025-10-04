@@ -86,6 +86,24 @@ def _ensure_llm_package_exports() -> None:
 _ensure_llm_package_exports()
 
 
+def ensure_valid_scaling(scaling: float) -> float:
+    """Return *scaling* as a float if it is finite and within supported bounds."""
+
+    try:
+        value = float(scaling)
+    except (TypeError, ValueError) as exc:  # pragma: no cover - defensive programming
+        raise ValueError("Scaling factor must be a float") from exc
+
+    if not math.isfinite(value):
+        raise ValueError("Scaling factor must be finite")
+    if value <= 0.0:
+        raise ValueError("Scaling factor must be greater than zero")
+    if value > 10.0:
+        raise ValueError("Scaling factor must not exceed 10.0")
+
+    return value
+
+
 @dataclass(slots=True)
 class LoraStatus:
     """Snapshot describing the currently active adapter."""
@@ -238,6 +256,7 @@ class LlamaLoraManager:
     async def load_adapter(self, path: Path, scaling: float) -> LoraStatus:
         """Load a LoRA adapter with *scaling* and make it active."""
 
+        value = ensure_valid_scaling(scaling)
 
         scaling_value = float(scaling)
         if not math.isfinite(scaling_value) or scaling_value <= 0.0 or scaling_value > 10.0:
@@ -261,6 +280,7 @@ class LlamaLoraManager:
             adapter_name = self._adapter_name_from_path(candidate)
 
             if hasattr(llama, "load_adapter"):
+                llama.load_adapter(str(candidate), adapter_name=adapter_name, scale=value)
                 llama.load_adapter(
                     str(candidate), adapter_name=adapter_name, scale=scaling_value
                 )
@@ -269,6 +289,7 @@ class LlamaLoraManager:
 
             self._adapter = _AdapterState(
                 path=candidate,
+                scaling=value,
                 scaling=scaling_value,
                 adapter_name=adapter_name,
             )
@@ -305,6 +326,7 @@ class LlamaLoraManager:
 __all__ = [
     "AdapterAlreadyLoadedError",
     "AdapterNotLoadedError",
+    "ensure_valid_scaling",
     "InvalidScalingError",
     "LlamaLoraManager",
     "LoraStatus",

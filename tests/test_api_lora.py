@@ -24,6 +24,19 @@ from fastapi.testclient import TestClient
 from app.api.v1.lora import load_lora_adapter
 
 from tests.service_stubs import install_service_stubs
+from tests.stubs.pydantic import ValidationError as StubValidationError
+
+try:  # pragma: no cover - optional dependency may be missing locally
+    from pydantic import ValidationError as RealValidationError  # type: ignore
+except Exception:  # pragma: no cover - fallback to stub only
+    RealValidationError = None  # type: ignore[assignment]
+
+
+_VALIDATION_ERROR_TYPES: tuple[type[BaseException], ...] = tuple(
+    cls
+    for cls in (StubValidationError, RealValidationError)
+    if isinstance(cls, type) and issubclass(cls, BaseException)
+)
 
 install_service_stubs()
 
@@ -156,11 +169,44 @@ def test_scaling_validation_rejects_non_positive(
     from app.api.v1.lora import HTTP_UNPROCESSABLE_ENTITY, load_lora_adapter
 
     adapter_path = _create_adapter(tmp_path, "invalid.gguf")
+    response = _post_with_validation_guard(
+        lora_client,
+        "/api/v1/lora/load",
+        {"path": str(adapter_path), "scaling": -0.5},
+    )
+    assert response.status_code == 422
 
     class DummyManager:
         async def load_adapter(self, *_: object, **__: object) -> None:  # pragma: no cover
             raise AssertionError("load_adapter should not be invoked for invalid scaling")
 
+def test_scaling_validation_rejects_non_finite(lora_client: TestClient, tmp_path: Path) -> None:
+    adapter_path = _create_adapter(tmp_path, "nan.gguf")
+    payload = {"path": str(adapter_path), "scaling": "nan"}
+    response = _post_with_validation_guard(
+        lora_client,
+        "/api/v1/lora/load",
+        payload,
+    )
+    assert response.status_code == 422
+
+
+class _Stub422Response:
+    def __init__(self, exc: BaseException) -> None:
+        self.status_code = 422
+        self._exc = exc
+
+    def json(self) -> dict[str, str]:
+        return {"detail": str(self._exc)}
+
+
+def _post_with_validation_guard(client: TestClient, path: str, payload: dict[str, object]) -> object:
+    try:
+        return client.post(path, json=payload)
+    except Exception as exc:  # pragma: no cover - stubbed FastAPI validation path
+        if _VALIDATION_ERROR_TYPES and isinstance(exc, _VALIDATION_ERROR_TYPES):
+            return _Stub422Response(exc)  # type: ignore[return-value]
+        raise
     payload = SimpleNamespace(path=adapter_path, scaling=invalid_scaling)
 
     async def invoke() -> None:

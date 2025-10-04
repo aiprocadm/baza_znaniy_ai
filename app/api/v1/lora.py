@@ -20,6 +20,7 @@ from app.core.deps import get_lora_manager
 from app.llm.manager import (
     AdapterAlreadyLoadedError,
     AdapterNotLoadedError,
+    ensure_valid_scaling,
     InvalidScalingError,
     LlamaLoraManager,
 )
@@ -81,6 +82,15 @@ async def load_lora_adapter(
     scaling_value = _ensure_scaling_is_valid(payload.scaling)
 
     try:
+        scaling = ensure_valid_scaling(payload.scaling)
+    except ValueError as exc:
+        raise HTTPException(
+            HTTP_UNPROCESSABLE_ENTITY,
+            detail="INVALID_SCALING",
+        ) from exc
+
+    try:
+        adapter_status = await manager.load_adapter(payload.path, scaling)
         adapter_status = await manager.load_adapter(payload.path, scaling_value)
 
 
