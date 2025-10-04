@@ -262,6 +262,12 @@ def _ensure_sync_engine(engine: Engine, url: str) -> Engine:
         if proxy is None and not _attr_is_readable(engine, "dialect"):
             proxy = _DialectProxy(dialect, dialect_name, dialect_driver)
         if proxy is not None:
+            _try_assign_attr(engine, "dialect", proxy)
+            _register_extra("dialect", proxy, prefer_fallback=True)
+
+            dialect_value = proxy
+            dialect_extra = proxy
+
             if not _try_assign_attr(engine, "dialect", proxy):
                 _register_extra("dialect", proxy, prefer_fallback=True)
 
@@ -667,42 +673,37 @@ def _ensure_sync_engine(engine: Engine, url: str) -> Engine:
     return _EngineProxy(engine, proxy_extras, preserved_callables)
 
 
-def _create_schema_if_possible(engine: Engine, metadata: Any | None) -> None:
+def _create_schema_if_possible(engine: Engine, metadata: Any | None) -> Any | None:
     """Create database schema when ``SQLModel.metadata`` exposes ``create_all``."""
 
-    metadata = getattr(SQLModel, "metadata", None)
-    if metadata is None or not hasattr(metadata, "create_all"):
+    meta = metadata if metadata is not None else getattr(SQLModel, "metadata", None)
+
+    if meta is None or not hasattr(meta, "create_all"):
         logger.warning(
             "SQLModel.metadata is missing required API; reinitialising metadata"
         )
         try:
-            metadata = MetaData()
-            setattr(SQLModel, "metadata", metadata)
+            meta = MetaData()
+            setattr(SQLModel, "metadata", meta)
         except Exception:
             logger.exception(
                 "Failed to attach fallback MetaData to SQLModel; skipping schema creation"
             )
-            return
-    if metadata is None:
+            return getattr(SQLModel, "metadata", None)
+
+    if meta is None:
         logger.warning("SQLModel.metadata is missing; skipping schema creation")
-        return
+        return None
 
-    try:
-        create_all = getattr(metadata, "create_all")
-    except AttributeError:
-        logger.warning(
-            "SQLModel.metadata has no 'create_all'; skipping schema creation"
-        )
-        return
-
+    create_all = getattr(meta, "create_all", None)
     if not callable(create_all):
         logger.warning(
-            "SQLModel.metadata.create_all is unavailable even after fallback; skipping schema creation"
             "SQLModel.metadata.create_all is not callable; skipping schema creation"
         )
-        return
+        return meta
 
     create_all(engine)
+    return meta
 
 
 @lru_cache(maxsize=1)
@@ -790,16 +791,17 @@ def get_engine(url: Optional[str] = None, *, create_schema: bool = True) -> Engi
         engine = create_engine(sync_url, echo=False, connect_args=_connect_args(sync_url))
         engine = _ensure_sync_engine(engine, sync_url)
         if create_schema:
-            _create_schema_if_possible(engine, metadata)
+            metadata = _create_schema_if_possible(engine, metadata)
 
-            metadata = getattr(SQLModel, "metadata", None)
+            metadata = getattr(SQLModel, "metadata", metadata)
             if metadata is None or not hasattr(metadata, "create_all"):
                 metadata = MetaData()
                 setattr(SQLModel, "metadata", metadata)
             if hasattr(metadata, "create_all"):
                 metadata.create_all(engine)
 
-            _create_schema_if_possible(engine)
+            metadata = getattr(SQLModel, "metadata", metadata)
+            _create_schema_if_possible(engine, metadata)
 
 
         return engine
@@ -807,9 +809,9 @@ def get_engine(url: Optional[str] = None, *, create_schema: bool = True) -> Engi
     engine = create_engine(db_url, echo=False, connect_args=_connect_args(db_url_str))
     engine = _ensure_sync_engine(engine, db_url_str)
     if create_schema:
-        _create_schema_if_possible(engine, metadata)
+        metadata = _create_schema_if_possible(engine, metadata)
 
-        metadata = getattr(SQLModel, "metadata", None)
+        metadata = getattr(SQLModel, "metadata", metadata)
 
         if metadata is None or not hasattr(metadata, "create_all"):
             metadata = MetaData()
@@ -821,7 +823,8 @@ def get_engine(url: Optional[str] = None, *, create_schema: bool = True) -> Engi
         if callable(create_all):
             create_all(engine)
 
-        _create_schema_if_possible(engine)
+        metadata = getattr(SQLModel, "metadata", metadata)
+        _create_schema_if_possible(engine, metadata)
 
 
     return engine
