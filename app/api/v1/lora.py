@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import math
+
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.core.auth import require_admin_user
@@ -25,6 +27,10 @@ async def load_lora_adapter(
     manager: LlamaLoraManager = Depends(get_lora_manager),
 ) -> LoraStatusResponse:
     """Load a LoRA adapter into the configured llama.cpp instance."""
+
+    scaling = float(payload.scaling)
+    if not math.isfinite(scaling) or scaling <= 0.0 or scaling > 10.0:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, detail="INVALID_SCALING")
 
     try:
         adapter_status = await manager.load_adapter(payload.path, payload.scaling)

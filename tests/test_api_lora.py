@@ -141,6 +141,7 @@ def test_scaling_validation_rejects_non_positive(lora_client: TestClient, tmp_pa
     except ValidationError:
         return
     assert response.status_code == 422
+    assert response.json()["detail"] == "INVALID_SCALING"
 
 
 def test_scaling_validation_rejects_non_finite(lora_client: TestClient, tmp_path: Path) -> None:
@@ -154,3 +155,19 @@ def test_scaling_validation_rejects_non_finite(lora_client: TestClient, tmp_path
     except ValidationError:
         return
     assert response.status_code == 422
+    assert response.json()["detail"] == "INVALID_SCALING"
+
+
+def test_scaling_validation_rejects_above_maximum(
+    lora_client: TestClient, tmp_path: Path
+) -> None:
+    adapter_path = _create_adapter(tmp_path, "too_large.gguf")
+    try:
+        response = lora_client.post(
+            "/api/v1/lora/load",
+            json={"path": str(adapter_path), "scaling": 10.5},
+        )
+    except ValidationError:
+        return
+    assert response.status_code == 422
+    assert response.json()["detail"] == "INVALID_SCALING"
