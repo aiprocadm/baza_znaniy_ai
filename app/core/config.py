@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Sequence
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Iterable, Sequence
+from typing import Any
 
 try:  # pragma: no cover - Python 3.10 compatibility shim
     from importlib import metadata as importlib_metadata
@@ -37,6 +38,51 @@ try:  # pragma: no cover - ``pydantic-settings`` is optional
 except ImportError:  # pragma: no cover - minimal shim for tests
     import os
 
+    def _flatten_aliases(source: object) -> list[str]:
+        """Return a flattened list of alias names from arbitrary structures."""
+
+        if source is None or source is Ellipsis:  # pragma: no cover - defensive guard
+            return []
+        if isinstance(source, AliasChoices):
+            items: list[str] = []
+            for choice in getattr(source, "choices", ()):  # type: ignore[attr-defined]
+                items.extend(_flatten_aliases(choice))
+            return items
+        if isinstance(source, bytes):
+            try:
+                return [source.decode("utf-8")]
+            except Exception:  # pragma: no cover - defensive guard
+                return [str(source)]
+        if isinstance(source, str):
+            return [source]
+        if isinstance(source, Iterable):
+            items: list[str] = []
+            for item in source:
+                items.extend(_flatten_aliases(item))
+            return items
+        return [str(source)]
+
+    def _candidate_env_names(field_name: str, field: object) -> list[str]:
+        """Return environment variable names to probe for a field."""
+
+        candidates: list[str] = []
+
+        def _add(name: object) -> None:
+            if name is None or name is Ellipsis or name == "":  # pragma: no cover - guard
+                return
+            text = str(name)
+            if text not in candidates:
+                candidates.append(text)
+
+        _add(field_name.upper())
+        _add(getattr(field, "alias", None))
+
+        validation_alias = getattr(field, "validation_alias", None)
+        for alias_name in _flatten_aliases(validation_alias):
+            _add(alias_name)
+
+        return candidates
+
     class SettingsConfigDict(dict):  # type: ignore[override]
         def __init__(self, **kwargs: object) -> None:
             super().__init__(**kwargs)
@@ -48,11 +94,20 @@ except ImportError:  # pragma: no cover - minimal shim for tests
 
         def __init__(self, **data: object) -> None:
             values: dict[str, object] = {}
-            for name in getattr(self, "__annotations__", {}):
-                env_name = name.upper()
-                env_value = os.getenv(env_name)
-                if env_value is not None:
-                    values[name] = env_value
+            model_fields = getattr(self.__class__, "model_fields", None)
+            if isinstance(model_fields, dict):
+                for name, field in model_fields.items():
+                    for env_name in _candidate_env_names(name, field):
+                        env_value = os.getenv(env_name)
+                        if env_value is not None:
+                            values[name] = env_value
+                            break
+            else:  # pragma: no cover - fallback for extremely small shims
+                for name in getattr(self, "__annotations__", {}):
+                    env_name = name.upper()
+                    env_value = os.getenv(env_name)
+                    if env_value is not None:
+                        values[name] = env_value
             values.update(data)
             super().__init__(**values)
 
