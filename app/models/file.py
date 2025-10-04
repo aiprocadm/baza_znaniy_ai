@@ -174,7 +174,6 @@ def _ensure_sync_engine(engine: Engine, url: str) -> Engine:
             self.validator = validator
 
     extras: dict[str, _ProxyEntry] = {}
-    needs_wrap = False
 
     def _register_extra(
         name: str,
@@ -185,10 +184,7 @@ def _ensure_sync_engine(engine: Engine, url: str) -> Engine:
     ) -> None:
         """Record a fallback attribute to expose via the proxy."""
 
-        nonlocal needs_wrap
         extras[name] = _ProxyEntry(value, prefer_fallback, validator)
-        if prefer_fallback:
-            needs_wrap = True
 
     class _FallbackDialect:
         __slots__ = ("name", "driver")
@@ -354,9 +350,6 @@ def _ensure_sync_engine(engine: Engine, url: str) -> Engine:
         validator=_callable_validator,
     )
 
-    if not needs_wrap:
-        return engine
-
     class _EngineProxy:
         __slots__ = ("_original", "_extras")
 
@@ -364,10 +357,21 @@ def _ensure_sync_engine(engine: Engine, url: str) -> Engine:
             object.__setattr__(self, "_original", original)
             object.__setattr__(self, "_extras", dict(extras_map))
 
-        def __getattr__(self, item: str) -> Any:
+        def __getattribute__(self, item: str) -> Any:
+            if item in {"_original", "_extras", "__setattr__", "__getattribute__", "__dir__", "__repr__"}:
+                return object.__getattribute__(self, item)
+
+            if item == "__class__":
+                original = object.__getattribute__(self, "_original")
+                return type(original)
+
+            if item == "__wrapped__":
+                return object.__getattribute__(self, "_original")
+
             extras_map = object.__getattribute__(self, "_extras")
             entry = extras_map.get(item)
             original = object.__getattribute__(self, "_original")
+
             if entry is None:
                 return getattr(original, item)
 
@@ -397,6 +401,10 @@ def _ensure_sync_engine(engine: Engine, url: str) -> Engine:
             extras_map = object.__getattribute__(self, "_extras")
             original = object.__getattribute__(self, "_original")
             return sorted(set(extras_map.keys()) | set(dir(original)))
+
+        def __repr__(self) -> str:  # pragma: no cover - debugging helper
+            original = object.__getattribute__(self, "_original")
+            return f"EngineProxy({original!r})"
 
     return _EngineProxy(engine, extras)
 
@@ -434,40 +442,12 @@ def get_engine(url: Optional[str] = None, *, create_schema: bool = True) -> Engi
     __import__("app.models.entities")
 
     if driver_name.endswith("+aiosqlite"):
-        sync_url: str
-
-        set_method = getattr(dialect, "set", None)
-        if callable(set_method):
-            sync_dialect = set_method(drivername="sqlite")
-            sync_url = str(sync_dialect)
-        else:
-
-            # ``sqlalchemy.engine.make_url`` can be stubbed to return a plain
-            # string during tests. Fall back to simple string rewriting so the
-            # synchronous driver is selected even without ``URL.set``.
-            dialect_str = str(dialect) if dialect else ""
-            if "+aiosqlite" in dialect_str:
-                sync_url = dialect_str.replace("+aiosqlite", "", 1)
-            elif "+aiosqlite" in db_url_str:
-                sync_url = db_url_str.replace("+aiosqlite", "", 1)
-            else:
-                fallback_dialect = make_url(db_url_str)
-                fallback_set = getattr(fallback_dialect, "set", None)
-                if callable(fallback_set):
-                    sync_url = str(fallback_set(drivername="sqlite"))
-                else:
-                    prefix, sep, remainder = db_url_str.partition("://")
-                    if sep:
-                        scheme = prefix.split("+", 1)[0]
-                        sync_url = f"{scheme}{sep}{remainder}"
-                    else:
-                        scheme, sep2, rest = db_url_str.partition(":")
-                        if sep2 and "+" in scheme:
-                            sync_url = f"{scheme.split('+', 1)[0]}{sep2}{rest}"
-                        else:
-                            sync_url = db_url_str
-
-            sync_url = _sqlite_aiosqlite_to_sync_url(str(dialect))
+        dialect_str = str(dialect) if dialect is not None else ""
+        sync_url = _sqlite_aiosqlite_to_sync_url(db_url_str)
+        if sync_url == db_url_str and "+aiosqlite" in dialect_str:
+            sync_url = _sqlite_aiosqlite_to_sync_url(dialect_str)
+        if "+aiosqlite" in sync_url:
+            sync_url = sync_url.replace("+aiosqlite", "", 1)
 
         engine = create_engine(sync_url, echo=False, connect_args=_connect_args(sync_url))
         engine = _ensure_sync_engine(engine, sync_url)
