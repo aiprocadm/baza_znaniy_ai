@@ -354,14 +354,10 @@ else:
                 else:
                     annotations = getattr(self.__class__, "__annotations__", {})
                     iterable = (
-                        (name, getattr(self.__class__, name, None)) for name in annotations
+                        (name, getattr(self.__class__, name, None))
+                        for name in annotations
                     )
                 for name, field_info in iterable:
-
-                annotations = getattr(self.__class__, "__annotations__", {})
-                for name in annotations:
-                    field_info = getattr(self.__class__, name, None)
-
                     for env_name in _candidate_env_names(name, field_info):
                         env_value = os.getenv(env_name)
                         if env_value is not None:
