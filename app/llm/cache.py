@@ -3,9 +3,14 @@
 from __future__ import annotations
 
 import sys
-from typing import Callable, Optional
+from typing import TYPE_CHECKING, Any, Callable, Optional
 
-from app.core.config import Settings, get_settings
+from app.core.config import get_settings
+
+if TYPE_CHECKING:  # pragma: no cover - used only for static analysis
+    from app.core.config import Settings
+else:  # pragma: no cover - runtime fallback when ``Settings`` is absent
+    Settings = Any
 
 from .exceptions import (
     LLMProviderError,
