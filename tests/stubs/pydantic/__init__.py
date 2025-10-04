@@ -2,13 +2,24 @@
 
 from __future__ import annotations
 
-from __future__ import annotations
-
 import importlib.util
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field as dataclass_field
 from pathlib import Path
-from typing import Any, Callable, Dict, Optional, Tuple, Type, TypeVar, get_type_hints
+from typing import (
+    Annotated,
+    Any,
+    Callable,
+    Dict,
+    Optional,
+    Tuple,
+    Type,
+    TypeVar,
+    Union,
+    get_args,
+    get_origin,
+    get_type_hints,
+)
 
 
 def _load_real_module() -> object | None:
@@ -51,7 +62,7 @@ else:
     class FieldInfo:
         default: Any = ...
         default_factory: Optional[Callable[[], Any]] = None
-        metadata: Dict[str, Any] | None = None
+        metadata: Dict[str, Any] = dataclass_field(default_factory=dict)
         alias: Any | None = None
 
 
@@ -76,11 +87,17 @@ else:
         alias: Any | None = None,
         **metadata: Any,
     ) -> FieldInfo:
+        meta = dict(metadata)
+        alias_value = alias
+        if alias_value is None:
+            alias_value = meta.get("alias")
+        if alias_value is None and "validation_alias" in meta:
+            alias_value = meta["validation_alias"]
         return FieldInfo(
             default=default,
             default_factory=default_factory,
-            metadata=metadata,
-            alias=alias,
+            metadata=meta,
+            alias=alias_value,
         )
 
 
@@ -99,28 +116,37 @@ else:
 
         def __init__(self, **data: Any) -> None:
             raw_annotations = getattr(self, "__annotations__", {})
-            resolved_annotations = get_type_hints(self.__class__, include_extras=True)
+            module = sys.modules.get(self.__class__.__module__)
+            module_ns = getattr(module, "__dict__", {}) if module is not None else {}
+            resolved_annotations = get_type_hints(
+                self.__class__,
+                globalns=module_ns,
+                localns=module_ns,
+                include_extras=True,
+            )
+
+            values: Dict[str, Any] = {}
+            provided_fields: set[str] = set()
 
             for name, annotation in raw_annotations.items():
                 resolved = resolved_annotations.get(name, annotation)
 
-                if name in data:
-                    value = data[name]
+                value, provided = self._extract_value(name, data)
+                if provided:
+                    provided_fields.add(name)
                 else:
                     value = self._default_for(name)
 
-                if annotation is Path and not isinstance(value, Path):
-                    value = Path(value)
+                coerced = self._coerce_value(value, resolved)
+                if annotation is Path and not isinstance(coerced, Path):
+                    coerced = Path(coerced)
 
-                target = resolved
-                if target is Path and isinstance(value, str):
-                    value = Path(value)
-                elif target is bool and isinstance(value, str):
-                    value = value.lower() in {"1", "true", "yes", "on"}
-                elif target is int and isinstance(value, str):
-                    value = int(value)
+                values[name] = coerced
 
+            for name, value in values.items():
                 setattr(self, name, value)
+
+            self.__pydantic_fields_set__ = set(provided_fields)
 
         @classmethod
         def _default_for(cls, name: str) -> Any:
@@ -135,6 +161,140 @@ else:
                 raise ValueError(f"Field '{name}' is required")
             return field
 
+        @classmethod
+        def _aliases_for(cls, field: Any) -> Tuple[str, ...]:
+            if not isinstance(field, FieldInfo):
+                return tuple()
+
+            def _collect(value: Any, bucket: list[str]) -> None:
+                if value is None:
+                    return
+                if isinstance(value, AliasChoices):
+                    bucket.extend(str(item) for item in value)
+                elif isinstance(value, (tuple, list, set, frozenset)):
+                    bucket.extend(str(item) for item in value)
+                else:
+                    bucket.append(str(value))
+
+            aliases: list[str] = []
+            _collect(field.alias, aliases)
+            for key in ("alias", "validation_alias"):
+                if key in field.metadata:
+                    _collect(field.metadata[key], aliases)
+            # Preserve order while removing duplicates
+            seen: Dict[str, None] = {}
+            for alias in aliases:
+                if alias not in seen:
+                    seen[alias] = None
+            return tuple(seen.keys())
+
+        @classmethod
+        def _resolve_field_name(cls, key: Any) -> str:
+            annotations = getattr(cls, "__annotations__", {})
+            if key in annotations:
+                return key  # type: ignore[return-value]
+            key_text = str(key)
+            if key_text in annotations:
+                return key_text
+            for name in annotations:
+                field = getattr(cls, name, None)
+                if key_text in cls._aliases_for(field):
+                    return name
+            return key_text
+
+        def _extract_value(self, name: str, data: Dict[str, Any]) -> Tuple[Any, bool]:
+            if name in data:
+                return data[name], True
+
+            field = getattr(self.__class__, name, None)
+            for alias in self._aliases_for(field):
+                if alias in data:
+                    return data[alias], True
+            return None, False
+
+        def _coerce_value(self, value: Any, target: Any) -> Any:
+            if value is None:
+                return None
+
+            origin = get_origin(target)
+            if origin is Annotated:
+                args = get_args(target)
+                if args:
+                    return self._coerce_value(value, args[0])
+            if origin is list:
+                args = get_args(target)
+                item_type = args[0] if args else Any
+                return self._coerce_list(value, item_type)
+            if origin is Union:
+                return self._coerce_union(value, get_args(target))
+
+            return self._coerce_simple(value, target)
+
+        def _coerce_simple(self, value: Any, target: Any) -> Any:
+            if value is None or target is None:
+                return value
+
+            if target is Path:
+                if isinstance(value, Path):
+                    return value
+                return Path(value)
+            if target is bool:
+                if isinstance(value, bool):
+                    return value
+                if isinstance(value, str):
+                    lowered = value.strip().lower()
+                    if lowered in {"1", "true", "yes", "on"}:
+                        return True
+                    if lowered in {"0", "false", "no", "off"}:
+                        return False
+                if isinstance(value, (int, float)):
+                    return bool(value)
+                return bool(value)
+            if target is int:
+                if isinstance(value, int) and not isinstance(value, bool):
+                    return value
+                if isinstance(value, (float, str)):
+                    try:
+                        return int(value)
+                    except (TypeError, ValueError):
+                        return value
+            if target is float:
+                if isinstance(value, float):
+                    return value
+                if isinstance(value, (int, str)):
+                    try:
+                        return float(value)
+                    except (TypeError, ValueError):
+                        return value
+            if target is str:
+                return str(value)
+            return value
+
+        def _coerce_list(self, value: Any, item_type: Any) -> list[Any]:
+            if isinstance(value, str) and item_type is str:
+                items = [item.strip() for item in value.split(",")]
+                return [item for item in items if item]
+            if isinstance(value, (list, tuple, set)):
+                return [self._coerce_simple(item, item_type) for item in value]
+            return [self._coerce_simple(value, item_type)]
+
+        def _coerce_union(self, value: Any, args: Tuple[Any, ...]) -> Any:
+            for arg in args:
+                if arg is type(None) and value is None:
+                    return None
+            for arg in args:
+                if arg is type(None):
+                    continue
+                converted = self._coerce_value(value, arg)
+                if converted is not value:
+                    return converted
+                try:
+                    if isinstance(converted, arg):
+                        return converted
+                except TypeError:  # pragma: no cover - non-instantiable typing args
+                    return converted
+            return value
+
         def model_dump(self, mode: str | None = None) -> Dict[str, Any]:
             annotations = getattr(self, "__annotations__", {})
             return {name: getattr(self, name) for name in annotations}
@@ -146,6 +306,26 @@ else:
             if not isinstance(data, dict):
                 raise TypeError("model_validate expects a mapping")
             return cls(**data)
+
+        def model_copy(self: T, *, update: Optional[Dict[str, Any]] = None) -> T:
+            annotations = getattr(self, "__annotations__", {})
+            data = {name: getattr(self, name) for name in annotations}
+            update_fields: Dict[str, Any] = {}
+            if update:
+                for key, value in update.items():
+                    field_name = self._resolve_field_name(key)
+                    update_fields[field_name] = value
+                data.update(update_fields)
+            copied = self.__class__.__new__(self.__class__)
+            BaseModel.__init__(copied, **data)
+            for key, value in self.__dict__.items():
+                if key not in annotations and key != "__pydantic_fields_set__":
+                    setattr(copied, key, value)
+            original_fields = set(getattr(self, "__pydantic_fields_set__", set()))
+            if update:
+                original_fields.update(update_fields.keys())
+            copied.__pydantic_fields_set__ = original_fields
+            return copied
 
         def __repr__(self) -> str:  # pragma: no cover - debugging helper
             values = ", ".join(f"{name}={getattr(self, name)!r}" for name in self.__annotations__)
