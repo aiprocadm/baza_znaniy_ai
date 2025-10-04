@@ -11,6 +11,7 @@ from app.core.deps import get_lora_manager
 from app.llm.manager import (
     AdapterAlreadyLoadedError,
     AdapterNotLoadedError,
+    InvalidScalingError,
     LlamaLoraManager,
 )
 from app.models.lora import LoraLoadRequest, LoraStatusResponse, LoraUnloadRequest
@@ -28,6 +29,11 @@ async def load_lora_adapter(
     manager: LlamaLoraManager = Depends(get_lora_manager),
 ) -> LoraStatusResponse:
     """Load a LoRA adapter into the configured llama.cpp instance."""
+
+
+    scaling = float(payload.scaling)
+    if math.isnan(scaling) or scaling <= 0 or scaling > 10:
+        raise HTTPException(status_code=422, detail="INVALID_SCALING")
 
     scaling = payload.scaling
     # Defensive guard: although the request model validates scaling, runtime callers
@@ -47,12 +53,15 @@ async def load_lora_adapter(
             detail="Scaling factor must be a finite number greater than zero.",
         )
 
+
     try:
         adapter_status = await manager.load_adapter(payload.path, scaling_value)
     except FileNotFoundError as exc:
         raise HTTPException(HTTP_NOT_FOUND, detail="ADAPTER_NOT_FOUND") from exc
     except AdapterAlreadyLoadedError as exc:
         raise HTTPException(HTTP_CONFLICT, detail="ADAPTER_ALREADY_LOADED") from exc
+    except InvalidScalingError as exc:
+        raise HTTPException(status_code=422, detail="INVALID_SCALING") from exc
     except Exception as exc:  # pragma: no cover - defensive guard for unexpected errors
         raise HTTPException(HTTP_SERVER_ERROR, detail="ADAPTER_LOAD_FAILED") from exc
     return LoraStatusResponse.from_status(adapter_status)
