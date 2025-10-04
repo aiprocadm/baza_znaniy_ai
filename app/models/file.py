@@ -163,6 +163,9 @@ def _ensure_sync_engine(engine: Engine, url: str) -> Engine:
 
     extras: dict[str, Any] = {}
 
+    originals: dict[str, Any] = {}
+
+
     class _ProxyEntry:
         __slots__ = ("value", "prefer_fallback", "validator")
 
@@ -177,6 +180,7 @@ def _ensure_sync_engine(engine: Engine, url: str) -> Engine:
             self.validator = validator
 
     extras: dict[str, _ProxyEntry] = {}
+
     needs_wrap = False
 
 
@@ -233,9 +237,15 @@ def _ensure_sync_engine(engine: Engine, url: str) -> Engine:
     prefer_dialect_fallback = False
 
     if not had_dialect_attr:
+
+        dialect_extra = fallback_dialect
+        if not _try_assign_attr(engine, "dialect", fallback_dialect):
+            _register_extra("dialect", fallback_dialect)
+
         prefer_dialect_fallback = True
 
         _try_assign_attr(engine, "dialect", fallback_dialect)
+
     else:
         missing_name = not hasattr(dialect, "name")
         missing_driver = not hasattr(dialect, "driver")
@@ -255,6 +265,10 @@ def _ensure_sync_engine(engine: Engine, url: str) -> Engine:
             dialect_value = proxy
 
             dialect_extra = proxy
+
+            if not _try_assign_attr(engine, "dialect", proxy):
+                _register_extra("dialect", proxy)
+
             prefer_dialect_fallback = True
 
             _try_assign_attr(engine, "dialect", proxy)
@@ -266,6 +280,7 @@ def _ensure_sync_engine(engine: Engine, url: str) -> Engine:
 
     def _dialect_validator(value: Any) -> bool:
         return hasattr(value, "name") and hasattr(value, "driver")
+
 
     fallback_url = make_url(url_str) if "+" in url_str or "://" in url_str else url_str
 
@@ -286,6 +301,15 @@ def _ensure_sync_engine(engine: Engine, url: str) -> Engine:
         url_value = fallback_url
 
     if not has_url or current_url is None:
+
+        url_extra = fallback_url
+        if not _try_assign_attr(engine, "url", fallback_url):
+            _register_extra("url", fallback_url)
+    elif not _attr_is_readable(engine, "url"):
+        url_extra = fallback_url
+        if not _try_assign_attr(engine, "url", fallback_url):
+            _register_extra("url", fallback_url)
+
         prefer_url_fallback = True
         _try_assign_attr(engine, "url", fallback_url)
     elif not _attr_is_readable(engine, "url"):
@@ -297,6 +321,7 @@ def _ensure_sync_engine(engine: Engine, url: str) -> Engine:
 
     def _url_validator(value: Any) -> bool:
         return value is not None
+
 
     try:
         dispose_attr = getattr(engine, "dispose")
@@ -318,6 +343,17 @@ def _ensure_sync_engine(engine: Engine, url: str) -> Engine:
     prefer_dispose_fallback = False
 
     if not has_dispose or not callable(dispose_attr):
+
+        dispose_extra = _noop_dispose
+        if not _try_assign_attr(engine, "dispose", _noop_dispose):
+            _register_extra("dispose", _noop_dispose)
+    elif not _attr_is_readable(engine, "dispose", require_callable=True):
+        dispose_extra = _noop_dispose
+        if not _try_assign_attr(engine, "dispose", _noop_dispose):
+            _register_extra("dispose", _noop_dispose)
+    else:
+        originals["dispose"] = dispose_attr
+
         prefer_dispose_fallback = True
         _try_assign_attr(engine, "dispose", _noop_dispose)
     elif not _attr_is_readable(engine, "dispose", require_callable=True):
@@ -329,6 +365,7 @@ def _ensure_sync_engine(engine: Engine, url: str) -> Engine:
 
     def _callable_validator(value: Any) -> bool:
         return callable(value)
+
 
     try:
         connect_attr = getattr(engine, "connect")
@@ -371,6 +408,17 @@ def _ensure_sync_engine(engine: Engine, url: str) -> Engine:
     prefer_connect_fallback = False
 
     if not has_connect or not callable(connect_attr):
+
+        connect_extra = _connect
+        if not _try_assign_attr(engine, "connect", _connect):
+            _register_extra("connect", _connect)
+    elif not _attr_is_readable(engine, "connect", require_callable=True):
+        connect_extra = _connect
+        if not _try_assign_attr(engine, "connect", _connect):
+            _register_extra("connect", _connect)
+    else:
+        originals["connect"] = connect_attr
+
         prefer_connect_fallback = True
         _try_assign_attr(engine, "connect", _connect)
     elif not _attr_is_readable(engine, "connect", require_callable=True):
@@ -435,8 +483,21 @@ def _ensure_sync_engine(engine: Engine, url: str) -> Engine:
         except Exception:
             _register_extra(attr_name, _final_fallback(attr_name))
 
+
     if not needs_wrap:
         return engine
+
+    if "dialect" not in extras and dialect_extra is not None:
+        extras["dialect"] = dialect_extra
+    if "url" not in extras and url_extra is not None:
+        extras["url"] = url_extra
+    if "dispose" not in extras and dispose_extra is not None:
+        extras["dispose"] = dispose_extra
+    if "connect" not in extras and connect_extra is not None:
+        extras["connect"] = connect_extra
+
+    for name, value in originals.items():
+        extras.setdefault(name, value)
 
     class _EngineProxy:
         __slots__ = ("_original", "_extras")
