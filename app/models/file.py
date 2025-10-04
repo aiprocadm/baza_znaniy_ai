@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from datetime import datetime
 from functools import lru_cache
@@ -12,6 +13,9 @@ from sqlalchemy.engine import Engine, make_url
 from sqlmodel import Field, SQLModel, Session, create_engine
 
 from app.models.entities import JobRecord, SettingRecord
+
+
+logger = logging.getLogger(__name__)
 
 
 class FileStatus(str):
@@ -114,6 +118,17 @@ def _connect_args(url: str) -> dict[str, object]:
     if url.startswith("sqlite"):
         return {"check_same_thread": False}
     return {}
+
+
+def _sqlite_aiosqlite_to_sync_url(async_url: str) -> str:
+    """Downgrade an async ``sqlite+aiosqlite`` URL to its sync counterpart."""
+
+    scheme, separator, remainder = async_url.partition("://")
+    if not scheme:
+        return async_url.replace("+aiosqlite", "", 1)
+
+    sync_scheme = scheme.replace("+aiosqlite", "", 1)
+    return f"{sync_scheme}{separator}{remainder}"
 
 
 def _ensure_sync_engine(engine: Engine, url: str) -> Engine:
@@ -386,6 +401,24 @@ def _ensure_sync_engine(engine: Engine, url: str) -> Engine:
     return _EngineProxy(engine, extras)
 
 
+def _create_schema_if_possible(engine: Engine) -> None:
+    """Create database schema when ``SQLModel.metadata`` exposes ``create_all``."""
+
+    metadata = getattr(SQLModel, "metadata", None)
+    if metadata is None:
+        logger.warning("SQLModel.metadata is missing; skipping schema creation")
+        return
+
+    create_all = getattr(metadata, "create_all", None)
+    if not callable(create_all):
+        logger.warning(
+            "SQLModel.metadata.create_all is unavailable; skipping schema creation"
+        )
+        return
+
+    create_all(engine)
+
+
 @lru_cache(maxsize=1)
 def get_engine(url: Optional[str] = None, *, create_schema: bool = True) -> Engine:
     """Return a synchronous SQLAlchemy engine configured for SQLModel models."""
@@ -401,22 +434,51 @@ def get_engine(url: Optional[str] = None, *, create_schema: bool = True) -> Engi
     __import__("app.models.entities")
 
     if driver_name.endswith("+aiosqlite"):
-        sync_dialect = dialect.set(drivername="sqlite")
-        sync_url = str(sync_dialect)
+        sync_url: str
+
+        set_method = getattr(dialect, "set", None)
+        if callable(set_method):
+            sync_dialect = set_method(drivername="sqlite")
+            sync_url = str(sync_dialect)
+        else:
+
+            # ``sqlalchemy.engine.make_url`` can be stubbed to return a plain
+            # string during tests. Fall back to simple string rewriting so the
+            # synchronous driver is selected even without ``URL.set``.
+            dialect_str = str(dialect) if dialect else ""
+            if "+aiosqlite" in dialect_str:
+                sync_url = dialect_str.replace("+aiosqlite", "", 1)
+            elif "+aiosqlite" in db_url_str:
+                sync_url = db_url_str.replace("+aiosqlite", "", 1)
+            else:
+                fallback_dialect = make_url(db_url_str)
+                fallback_set = getattr(fallback_dialect, "set", None)
+                if callable(fallback_set):
+                    sync_url = str(fallback_set(drivername="sqlite"))
+                else:
+                    prefix, sep, remainder = db_url_str.partition("://")
+                    if sep:
+                        scheme = prefix.split("+", 1)[0]
+                        sync_url = f"{scheme}{sep}{remainder}"
+                    else:
+                        scheme, sep2, rest = db_url_str.partition(":")
+                        if sep2 and "+" in scheme:
+                            sync_url = f"{scheme.split('+', 1)[0]}{sep2}{rest}"
+                        else:
+                            sync_url = db_url_str
+
+            sync_url = _sqlite_aiosqlite_to_sync_url(str(dialect))
+
         engine = create_engine(sync_url, echo=False, connect_args=_connect_args(sync_url))
         engine = _ensure_sync_engine(engine, sync_url)
         if create_schema:
-            metadata = getattr(SQLModel, "metadata", None)
-            if metadata is not None and hasattr(metadata, "create_all"):
-                metadata.create_all(engine)
+            _create_schema_if_possible(engine)
         return engine
 
     engine = create_engine(db_url, echo=False, connect_args=_connect_args(db_url_str))
     engine = _ensure_sync_engine(engine, db_url_str)
     if create_schema:
-        metadata = getattr(SQLModel, "metadata", None)
-        if metadata is not None and hasattr(metadata, "create_all"):
-            metadata.create_all(engine)
+        _create_schema_if_possible(engine)
     return engine
 
 

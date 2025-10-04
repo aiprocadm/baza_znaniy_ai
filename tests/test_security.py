@@ -59,6 +59,7 @@ def test_create_access_token_includes_expiry(security):
 
     payload = security.decode_token(token)
     assert payload["sub"] == "user-123"
+    assert isinstance(payload["exp"], (int, float))
 
     expires_at = datetime.fromtimestamp(payload["exp"], tz=timezone.utc)
     assert timedelta(seconds=0) <= expires_at - now <= timedelta(minutes=1, seconds=5)
@@ -75,6 +76,7 @@ def test_create_access_token_uses_default_expiry(monkeypatch, security):
 
     payload = security.decode_token(token)
     assert payload["sub"] == "user"
+    assert isinstance(payload["exp"], (int, float))
 
     expires_at = datetime.fromtimestamp(payload["exp"], tz=timezone.utc)
     assert timedelta(seconds=0) <= expires_at - now <= timedelta(
@@ -99,5 +101,6 @@ def test_create_access_token_allows_none_payload(security):
     payload = security.decode_token(token)
 
     assert set(payload.keys()) == {"exp"}
+    assert isinstance(payload["exp"], (int, float))
     assert payload["exp"] > datetime.now(timezone.utc).timestamp()
 

@@ -2,14 +2,12 @@
 
 from __future__ import annotations
 
-from typing import (
-    Any,
-    Mapping,
-    Protocol,
-    runtime_checkable,
-)
+from typing import Any, Mapping, Optional, Protocol, TYPE_CHECKING, runtime_checkable, cast
 
-from app.core.config import Settings, get_settings
+if TYPE_CHECKING:  # pragma: no cover - import for static analysis only
+    from app.core.config import Settings as SettingsType
+else:
+    SettingsType = Any
 
 from .llama_cpp_provider import LlamaCppProvider
 
@@ -32,10 +30,17 @@ class LLMProvider(Protocol):
         """Generate a completion for *prompt*."""
 
 
-def get_llm_provider(settings: Settings | None = None) -> LLMProvider:
+def _get_settings() -> SettingsType:
+    from app.core.config import get_settings as _get_settings
+
+    settings = _get_settings()
+    return cast(SettingsType, settings)
+
+
+def get_llm_provider(settings: Optional[SettingsType] = None) -> LLMProvider:
     """Factory returning an LLM provider according to *settings*."""
 
-    resolved_settings = settings or get_settings()
+    resolved_settings = settings or _get_settings()
     provider_name = (resolved_settings.llm_provider or "llama-cpp").lower()
     if provider_name in {"llama", "llama-cpp", "llama_cpp", "llamacpp"}:
         return LlamaCppProvider(resolved_settings)
