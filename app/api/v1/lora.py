@@ -59,6 +59,9 @@ def _ensure_scaling_is_valid(raw_scaling: object) -> float:
     return scaling_value
 
 
+SCALING_VALIDATION_ERROR = "Scaling factor must be a finite number greater than zero."
+
+
 @router.post("/load", response_model=LoraStatusResponse)
 async def load_lora_adapter(
     payload: LoraLoadRequest,
@@ -122,6 +125,16 @@ async def load_lora_adapter(
 
         scaling_value = float(scaling)
     except (TypeError, ValueError) as exc:
+        raise HTTPException(
+            HTTP_UNPROCESSABLE_ENTITY,
+            detail=SCALING_VALIDATION_ERROR,
+        ) from exc
+
+    if not math.isfinite(scaling_value) or scaling_value <= 0.0:
+        raise HTTPException(
+            HTTP_UNPROCESSABLE_ENTITY,
+            detail=SCALING_VALIDATION_ERROR,
+        )
         raise HTTPException(HTTP_UNPROCESSABLE_ENTITY, detail="INVALID_SCALING") from exc
 
     if not math.isfinite(scaling_value) or not (0.0 < scaling_value <= 10.0):

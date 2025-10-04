@@ -162,12 +162,34 @@ def test_unload_without_adapter_returns_conflict(lora_client: TestClient, tmp_pa
     assert response.json()["detail"] == "ADAPTER_NOT_LOADED"
 
 
+@pytest.mark.parametrize("invalid_scaling", [-0.5, 0, "not-a-number"])
+def test_load_adapter_rejects_invalid_scaling(
+    lora_client: TestClient,
+    tmp_path: Path,
+    invalid_scaling: object,
+    monkeypatch: pytest.MonkeyPatch,
 @pytest.mark.parametrize("invalid_scaling", [-0.5, 0.0, 10.5, float("nan")])
 def test_scaling_validation_rejects_non_positive(
     tmp_path: Path, invalid_scaling: float
 ) -> None:
     from app.api.v1.lora import HTTP_UNPROCESSABLE_ENTITY, load_lora_adapter
 
+    from app.api.v1 import lora as lora_api
+
+    def _passthrough_model_validate(
+        cls: type[lora_api.LoraLoadRequest], data: dict, /, *_, **__
+    ) -> object:
+        # Simulate a caller bypassing Pydantic validation so that we can exercise the
+        # runtime scaling guard implemented in the API router.
+        return SimpleNamespace(path=Path(data["path"]), scaling=data.get("scaling"))
+
+    monkeypatch.setattr(
+        lora_api.LoraLoadRequest,
+        "model_validate",
+        classmethod(_passthrough_model_validate),
+    )
+
+    response = lora_client.post(
     adapter_path = _create_adapter(tmp_path, "invalid.gguf")
     response = _post_with_validation_guard(
         lora_client,
@@ -189,6 +211,7 @@ def test_scaling_validation_rejects_non_finite(lora_client: TestClient, tmp_path
         payload,
     )
     assert response.status_code == 422
+    assert response.json()["detail"] == "Scaling factor must be a finite number greater than zero."
 
 
 class _Stub422Response:
