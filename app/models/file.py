@@ -116,6 +116,17 @@ def _connect_args(url: str) -> dict[str, object]:
     return {}
 
 
+def _sqlite_aiosqlite_to_sync_url(async_url: str) -> str:
+    """Downgrade an async ``sqlite+aiosqlite`` URL to its sync counterpart."""
+
+    scheme, separator, remainder = async_url.partition("://")
+    if not scheme:
+        return async_url.replace("+aiosqlite", "", 1)
+
+    sync_scheme = scheme.replace("+aiosqlite", "", 1)
+    return f"{sync_scheme}{separator}{remainder}"
+
+
 def _ensure_sync_engine(engine: Engine, url: str) -> Engine:
     """Ensure the provided engine exposes the synchronous SQLAlchemy surface."""
 
@@ -356,8 +367,15 @@ def get_engine(url: Optional[str] = None, *, create_schema: bool = True) -> Engi
     __import__("app.models.entities")
 
     if driver_name.endswith("+aiosqlite"):
-        sync_dialect = dialect.set(drivername="sqlite")
-        sync_url = str(sync_dialect)
+        sync_url: str
+
+        set_method = getattr(dialect, "set", None)
+        if callable(set_method):
+            sync_dialect = set_method(drivername="sqlite")
+            sync_url = str(sync_dialect)
+        else:
+            sync_url = _sqlite_aiosqlite_to_sync_url(str(dialect))
+
         engine = create_engine(sync_url, echo=False, connect_args=_connect_args(sync_url))
         engine = _ensure_sync_engine(engine, sync_url)
         if create_schema:
