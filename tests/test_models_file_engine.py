@@ -4,13 +4,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from sqlalchemy import text
+from sqlalchemy import MetaData, text
 
 from app.models import file as file_module
 
 
 def test_get_engine_handles_missing_create_all(tmp_path) -> None:
-    """``get_engine`` should ignore metadata without ``create_all``."""
+    """``get_engine`` should replace unusable metadata before schema creation."""
 
     file_module.get_engine.cache_clear()
 
@@ -23,6 +23,8 @@ def test_get_engine_handles_missing_create_all(tmp_path) -> None:
             create_schema=True,
         )
 
+        assert isinstance(file_module.SQLModel.metadata, MetaData)
+
         with engine.connect() as connection:
             execution = connection.execute(text("SELECT 1"))
             scalar = getattr(execution, "scalar", None)
@@ -33,6 +35,10 @@ def test_get_engine_handles_missing_create_all(tmp_path) -> None:
         file_module.get_engine.cache_clear()
 
 
+
+def test_get_engine_initializes_metadata_when_missing(tmp_path) -> None:
+    file_module.get_engine.cache_clear()
+
 def test_get_engine_handles_missing_metadata(tmp_path, monkeypatch) -> None:
     """``get_engine`` should tolerate ``SQLModel.metadata`` being ``None``."""
 
@@ -41,10 +47,21 @@ def test_get_engine_handles_missing_metadata(tmp_path, monkeypatch) -> None:
     db_path = Path(tmp_path) / "missing-metadata.sqlite"
     monkeypatch.setenv("DB_URL", f"sqlite:///{db_path}")
 
+
     original_metadata = file_module.SQLModel.metadata
     file_module.SQLModel.metadata = None  # type: ignore[assignment]
 
     try:
+
+        engine = file_module.get_engine(
+            f"sqlite:///{tmp_path/'missing-metadata.db'}",
+            create_schema=True,
+        )
+
+        assert isinstance(file_module.SQLModel.metadata, MetaData)
+
+        with engine.connect() as connection:
+
         engine = file_module.get_engine(create_schema=True)
 
         assert getattr(engine, "dialect", None) is not None
@@ -57,12 +74,16 @@ def test_get_engine_handles_missing_metadata(tmp_path, monkeypatch) -> None:
         assert callable(connect)
 
         with connect() as connection:  # type: ignore[operator]
+
             execution = connection.execute(text("SELECT 1"))
             scalar = getattr(execution, "scalar", None)
             value = scalar() if callable(scalar) else execution
             assert value in {1, "SELECT 1"}
 
+
+
         dispose()
+
     finally:
         file_module.SQLModel.metadata = original_metadata
         file_module.get_engine.cache_clear()
@@ -167,14 +188,22 @@ def test_get_engine_sqlite_regression(tmp_path, monkeypatch) -> None:
 
 
 
+def test_get_engine_downgrades_aiosqlite(tmp_path, monkeypatch) -> None:
+
+
 def test_get_engine_stub_engine_proxy(tmp_path, monkeypatch) -> None:
     """Regression: ensure the SQLModel stub engine receives fallback attributes."""
 
     from tests.stubs import sqlmodel as sqlmodel_stub
 
+
     from app.models import file as file_module
 
     file_module.get_engine.cache_clear()
+
+
+    db_path = Path(tmp_path) / "async.sqlite"
+    monkeypatch.setenv("DB_URL", f"sqlite+aiosqlite:///{db_path}")
 
     db_path = Path(tmp_path) / "stub-engine.sqlite"
     monkeypatch.setenv("DB_URL", f"sqlite:///{db_path}")
@@ -182,10 +211,23 @@ def test_get_engine_stub_engine_proxy(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(file_module, "create_engine", sqlmodel_stub.create_engine)
     monkeypatch.setattr(file_module, "SQLModel", sqlmodel_stub.SQLModel)
 
+
     engine = file_module.get_engine(create_schema=False)
 
     try:
         assert getattr(engine.dialect, "name", None) == "sqlite"
+
+        assert getattr(engine.dialect, "driver", None) in {"sqlite", "pysqlite"}
+        assert str(engine.url).startswith("sqlite:")
+        assert callable(engine.dispose)
+        assert callable(engine.connect)
+
+        with engine.connect() as connection:
+            execution = connection.execute(text("SELECT 1"))
+            scalar = getattr(execution, "scalar", None)
+            value = scalar() if callable(scalar) else execution
+            assert value in {1, "SELECT 1"}
+
         assert getattr(engine.dialect, "driver", None) == "sqlite"
 
         dispose = getattr(engine, "dispose", None)
@@ -201,11 +243,14 @@ def test_get_engine_stub_engine_proxy(tmp_path, monkeypatch) -> None:
         finally:
             if hasattr(connection, "close"):
                 connection.close()
+
     finally:
         file_module.get_engine.cache_clear()
         monkeypatch.delenv("DB_URL", raising=False)
         if db_path.exists():
             db_path.unlink()
+
+
 
 def test_get_engine_aiosqlite_stub_regression(tmp_path) -> None:
     """``get_engine`` should cope with stubbed ``make_url`` lacking ``set``."""
@@ -276,5 +321,6 @@ def test_get_engine_aiosqlite_stub_regression(tmp_path) -> None:
 
         if original_file_module is not None and hasattr(original_file_module, "get_engine"):
             original_file_module.get_engine.cache_clear()
+
 
 

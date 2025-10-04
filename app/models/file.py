@@ -8,7 +8,7 @@ from datetime import datetime
 from functools import lru_cache
 from typing import Any, Callable, Optional
 
-from sqlalchemy import Column, JSON, Text, UniqueConstraint
+from sqlalchemy import Column, JSON, MetaData, Text, UniqueConstraint
 from sqlalchemy.engine import Engine, make_url
 from sqlmodel import Field, SQLModel, Session, create_engine
 
@@ -411,6 +411,30 @@ def _ensure_sync_engine(engine: Engine, url: str) -> Engine:
         validator=_callable_validator,
     )
 
+    def _final_fallback(name: str) -> Any:
+        return {
+            "dialect": dialect_extra or fallback_dialect,
+            "url": url_extra or fallback_url,
+            "dispose": dispose_extra or _noop_dispose,
+            "connect": connect_extra or _connect,
+        }[name]
+
+    for attr_name, require_callable in (
+        ("dialect", False),
+        ("url", False),
+        ("dispose", True),
+        ("connect", True),
+    ):
+        try:
+            attr_value = getattr(engine, attr_name)
+            if require_callable and not callable(attr_value):
+                raise TypeError(attr_name)
+            if attr_name == "dialect":
+                getattr(attr_value, "name")
+                getattr(attr_value, "driver")
+        except Exception:
+            _register_extra(attr_name, _final_fallback(attr_name))
+
     if not needs_wrap:
         return engine
 
@@ -549,7 +573,16 @@ def get_engine(url: Optional[str] = None, *, create_schema: bool = True) -> Engi
         engine = create_engine(sync_url, echo=False, connect_args=_connect_args(sync_url))
         engine = _ensure_sync_engine(engine, sync_url)
         if create_schema:
+
+            metadata = getattr(SQLModel, "metadata", None)
+            if metadata is None or not hasattr(metadata, "create_all"):
+                metadata = MetaData()
+                setattr(SQLModel, "metadata", metadata)
+            if hasattr(metadata, "create_all"):
+                metadata.create_all(engine)
+
             _create_schema_if_possible(engine)
+
 
         return engine
 
@@ -558,11 +591,19 @@ def get_engine(url: Optional[str] = None, *, create_schema: bool = True) -> Engi
     if create_schema:
 
         metadata = getattr(SQLModel, "metadata", None)
+
+        if metadata is None or not hasattr(metadata, "create_all"):
+            metadata = MetaData()
+            setattr(SQLModel, "metadata", metadata)
+        if hasattr(metadata, "create_all"):
+            metadata.create_all(engine)
+
         create_all = getattr(metadata, "create_all", None) if metadata is not None else None
         if callable(create_all):
             create_all(engine)
 
         _create_schema_if_possible(engine)
+
 
     return engine
 
