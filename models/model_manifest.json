@@ -1,0 +1,10 @@
+{
+  "default": {
+    "model_id": "bartowski/TinyLlama-1.1B-Chat-v1.0-GGUF",
+    "filename": "TinyLlama-1.1B-Chat-v1.0.Q4_K_M.gguf",
+    "sha256": null,
+    "license": "Apache-2.0",
+    "url": "https://huggingface.co/bartowski/TinyLlama-1.1B-Chat-v1.0-GGUF/resolve/main/TinyLlama-1.1B-Chat-v1.0.Q4_K_M.gguf",
+    "description": "TinyLlama 1.1B Chat v1.0 quantized to Q4_K_M (~625 MB) for llama.cpp-compatible inference."
+  }
+}

@@ -6,6 +6,13 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
+ARG HUGGINGFACE_HUB_TOKEN=""
+ARG DOWNLOAD_MODEL=1
+ARG LLM_MODEL_TARGET=default
+ARG LLM_MODEL_OUTPUT=models/model.gguf
+
+ENV HUGGINGFACE_HUB_TOKEN=${HUGGINGFACE_HUB_TOKEN}
+
 COPY requirements.txt ./
 RUN pip install --no-cache-dir --upgrade pip \
     && pip install --no-cache-dir -r requirements.txt
@@ -13,9 +20,11 @@ RUN pip install --no-cache-dir --upgrade pip \
 COPY app ./app
 COPY data ./data
 COPY docx ./docx
+COPY scripts ./scripts
+COPY models ./models
 COPY pyproject.toml README.md ./
 
-RUN mkdir -p var/data
+RUN mkdir -p models var/data
 
 RUN python - <<'PY'
 import os
@@ -36,6 +45,14 @@ def main() -> None:
 if __name__ == "__main__":
     main()
 PY
+
+RUN if [ "${DOWNLOAD_MODEL}" = "1" ]; then \
+        python -m scripts.download_model --manifest ./models/model_manifest.json \
+            --target "${LLM_MODEL_TARGET}" --output "${LLM_MODEL_OUTPUT}" \
+            --allow-missing-hash --max-retries 5; \
+    else \
+        echo "Skipping GGUF download during build"; \
+    fi
 
 EXPOSE 8000
 
