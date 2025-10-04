@@ -357,6 +357,7 @@ def _ensure_sync_engine(engine: Engine, url: str) -> Engine:
     def _noop_dispose(*_: Any, **__: Any) -> None:
         return None
 
+    dispose_extra: Any | None = None
 
     if has_dispose and callable(dispose_attr) and _attr_is_readable(
         engine, "dispose", require_callable=True
@@ -388,9 +389,11 @@ def _ensure_sync_engine(engine: Engine, url: str) -> Engine:
         originals["dispose"] = dispose_attr
 
         prefer_dispose_fallback = True
+        dispose_extra = _noop_dispose
         _try_assign_attr(engine, "dispose", _noop_dispose)
     elif not _attr_is_readable(engine, "dispose", require_callable=True):
         prefer_dispose_fallback = True
+        dispose_extra = _noop_dispose
 
         _try_assign_attr(engine, "dispose", _noop_dispose)
     else:
@@ -432,6 +435,7 @@ def _ensure_sync_engine(engine: Engine, url: str) -> Engine:
     def _connect(*_: Any, **__: Any) -> _FallbackConnection:
         return _FallbackConnection()
 
+    connect_extra: Any | None = None
 
     if has_connect and callable(connect_attr) and _attr_is_readable(
         engine, "connect", require_callable=True
@@ -463,9 +467,11 @@ def _ensure_sync_engine(engine: Engine, url: str) -> Engine:
         originals["connect"] = connect_attr
 
         prefer_connect_fallback = True
+        connect_extra = _connect
         _try_assign_attr(engine, "connect", _connect)
     elif not _attr_is_readable(engine, "connect", require_callable=True):
         prefer_connect_fallback = True
+        connect_extra = _connect
 
         _try_assign_attr(engine, "connect", _connect)
     else:
@@ -489,18 +495,20 @@ def _ensure_sync_engine(engine: Engine, url: str) -> Engine:
         prefer_fallback=prefer_url_fallback,
         validator=_url_validator,
     )
-    _register_extra(
-        "dispose",
-        dispose_extra,
-        prefer_fallback=prefer_dispose_fallback,
-        validator=_callable_validator,
-    )
-    _register_extra(
-        "connect",
-        connect_extra,
-        prefer_fallback=prefer_connect_fallback,
-        validator=_callable_validator,
-    )
+    if dispose_extra is not None:
+        _register_extra(
+            "dispose",
+            dispose_extra,
+            prefer_fallback=prefer_dispose_fallback,
+            validator=_callable_validator,
+        )
+    if connect_extra is not None:
+        _register_extra(
+            "connect",
+            connect_extra,
+            prefer_fallback=prefer_connect_fallback,
+            validator=_callable_validator,
+        )
 
     def _final_fallback(name: str) -> Any:
         return {
@@ -572,11 +580,13 @@ def _ensure_sync_engine(engine: Engine, url: str) -> Engine:
 
         def __getattr__(self, item: str) -> Any:
             extras_map = object.__getattribute__(self, "_extras")
-            entry = extras_map.get(item)
             original = object.__getattribute__(self, "_original")
+            if item not in extras_map:
 
             if entry is None:
                 return getattr(original, item)
+
+            entry = extras_map[item]
 
             if entry.prefer_fallback:
                 return entry.value
