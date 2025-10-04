@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 from importlib import reload
+import asyncio
 from pathlib import Path
 from typing import Iterator
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
@@ -154,3 +158,25 @@ def test_scaling_validation_rejects_non_finite(lora_client: TestClient, tmp_path
     except ValidationError:
         return
     assert response.status_code == 422
+
+
+@pytest.mark.parametrize(
+    "invalid_scaling",
+    (-0.1, 0.0, float("inf"), float("nan")),
+)
+def test_load_endpoint_rejects_invalid_scaling_when_bypassed(
+    invalid_scaling: float, tmp_path: Path
+) -> None:
+    from app.api.v1 import lora as lora_module
+
+    dummy_manager = SimpleNamespace(load_adapter=AsyncMock())
+    payload = SimpleNamespace(path=tmp_path / "adapter.gguf", scaling=invalid_scaling)
+
+    async def _invoke() -> None:
+        await lora_module.load_lora_adapter(payload, dummy_manager)
+
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(_invoke())
+
+    assert exc.value.status_code == 422
+    dummy_manager.load_adapter.assert_not_awaited()

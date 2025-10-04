@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from math import isfinite
+
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.core.auth import require_admin_user
@@ -9,6 +11,7 @@ from app.core.deps import get_lora_manager
 from app.llm.manager import (
     AdapterAlreadyLoadedError,
     AdapterNotLoadedError,
+    InvalidScalingError,
     LlamaLoraManager,
 )
 from app.models.lora import LoraLoadRequest, LoraStatusResponse, LoraUnloadRequest
@@ -17,7 +20,15 @@ router = APIRouter(prefix="/lora", tags=["lora"], dependencies=[Depends(require_
 
 HTTP_NOT_FOUND = getattr(status, "HTTP_404_NOT_FOUND", 404)
 HTTP_CONFLICT = getattr(status, "HTTP_409_CONFLICT", 409)
+HTTP_UNPROCESSABLE_ENTITY = getattr(status, "HTTP_422_UNPROCESSABLE_ENTITY", 422)
 HTTP_SERVER_ERROR = getattr(status, "HTTP_500_INTERNAL_SERVER_ERROR", 500)
+
+
+def _assert_valid_scaling(scaling: float) -> None:
+    """Raise ``HTTPException`` if *scaling* is outside the accepted range."""
+
+    if not isfinite(float(scaling)) or not (0.0 < float(scaling) <= 10.0):
+        raise HTTPException(HTTP_UNPROCESSABLE_ENTITY, detail="INVALID_SCALING")
 
 @router.post("/load", response_model=LoraStatusResponse)
 async def load_lora_adapter(
@@ -26,12 +37,16 @@ async def load_lora_adapter(
 ) -> LoraStatusResponse:
     """Load a LoRA adapter into the configured llama.cpp instance."""
 
+    _assert_valid_scaling(payload.scaling)
+
     try:
         adapter_status = await manager.load_adapter(payload.path, payload.scaling)
     except FileNotFoundError as exc:
         raise HTTPException(HTTP_NOT_FOUND, detail="ADAPTER_NOT_FOUND") from exc
     except AdapterAlreadyLoadedError as exc:
         raise HTTPException(HTTP_CONFLICT, detail="ADAPTER_ALREADY_LOADED") from exc
+    except InvalidScalingError as exc:
+        raise HTTPException(HTTP_UNPROCESSABLE_ENTITY, detail="INVALID_SCALING") from exc
     except Exception as exc:  # pragma: no cover - defensive guard for unexpected errors
         raise HTTPException(HTTP_SERVER_ERROR, detail="ADAPTER_LOAD_FAILED") from exc
     return LoraStatusResponse.from_status(adapter_status)
