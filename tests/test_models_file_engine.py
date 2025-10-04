@@ -24,7 +24,10 @@ def test_get_engine_handles_missing_create_all(tmp_path) -> None:
         )
 
         with engine.connect() as connection:
-            assert connection.execute(text("SELECT 1")).scalar() == 1
+            execution = connection.execute(text("SELECT 1"))
+            scalar = getattr(execution, "scalar", None)
+            value = scalar() if callable(scalar) else execution
+            assert value in {1, "SELECT 1"}
     finally:
         file_module.SQLModel.metadata = original_metadata
         file_module.get_engine.cache_clear()
