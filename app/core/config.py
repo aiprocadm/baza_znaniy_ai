@@ -45,7 +45,12 @@ except ImportError:  # pragma: no cover - minimal shim for tests
             return []
         if isinstance(source, AliasChoices):
             items: list[str] = []
-            for choice in getattr(source, "choices", ()):  # type: ignore[attr-defined]
+            iterable: Iterable[object]
+            if isinstance(source, Iterable):
+                iterable = source
+            else:  # pragma: no cover - fallback for unexpected shims
+                iterable = getattr(source, "choices", ())  # type: ignore[attr-defined]
+            for choice in iterable:
                 items.extend(_flatten_aliases(choice))
             return items
         if isinstance(source, bytes):
@@ -74,12 +79,25 @@ except ImportError:  # pragma: no cover - minimal shim for tests
             if text not in candidates:
                 candidates.append(text)
 
+        def _add_all(value: object) -> None:
+            for alias_name in _flatten_aliases(value):
+                _add(alias_name)
+
         _add(field_name.upper())
-        _add(getattr(field, "alias", None))
+
+        alias_value = getattr(field, "alias", None)
+        if alias_value is None:
+            alias_value = getattr(getattr(field, "metadata", {}), "get", lambda *_: None)(
+                "alias"
+            )
+        _add_all(alias_value)
 
         validation_alias = getattr(field, "validation_alias", None)
-        for alias_name in _flatten_aliases(validation_alias):
-            _add(alias_name)
+        if validation_alias is None and hasattr(field, "metadata"):
+            validation_alias = getattr(field.metadata, "get", lambda *_: None)(
+                "validation_alias"
+            )
+        _add_all(validation_alias)
 
         return candidates
 
@@ -103,11 +121,14 @@ except ImportError:  # pragma: no cover - minimal shim for tests
                             values[name] = env_value
                             break
             else:  # pragma: no cover - fallback for extremely small shims
-                for name in getattr(self, "__annotations__", {}):
-                    env_name = name.upper()
-                    env_value = os.getenv(env_name)
-                    if env_value is not None:
-                        values[name] = env_value
+                annotations = getattr(self, "__annotations__", {})
+                for name in annotations:
+                    field_info = getattr(self.__class__, name, None)
+                    for env_name in _candidate_env_names(name, field_info):
+                        env_value = os.getenv(env_name)
+                        if env_value is not None:
+                            values[name] = env_value
+                            break
             values.update(data)
             super().__init__(**values)
 
