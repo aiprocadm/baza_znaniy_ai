@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+
 from math import isfinite
+
+import math
+
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
@@ -37,16 +41,52 @@ async def load_lora_adapter(
 ) -> LoraStatusResponse:
     """Load a LoRA adapter into the configured llama.cpp instance."""
 
+
     _assert_valid_scaling(payload.scaling)
 
+
+    scaling = float(payload.scaling)
+    if not math.isfinite(scaling) or scaling <= 0.0 or scaling > 10.0:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, detail="INVALID_SCALING")
+
+
+    scaling = float(payload.scaling)
+    if math.isnan(scaling) or scaling <= 0 or scaling > 10:
+        raise HTTPException(status_code=422, detail="INVALID_SCALING")
+
+    scaling = payload.scaling
+    # Defensive guard: although the request model validates scaling, runtime callers
+    # may bypass Pydantic and supply unexpected values. We normalise to ``float`` and
+    # ensure the number is finite and strictly positive before invoking llama.cpp.
     try:
-        adapter_status = await manager.load_adapter(payload.path, payload.scaling)
+        scaling_value = float(scaling)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(
+            HTTP_UNPROCESSABLE_ENTITY,
+            detail="Scaling factor must be a finite number greater than zero.",
+        ) from exc
+
+    if not math.isfinite(scaling_value) or scaling_value <= 0.0:
+        raise HTTPException(
+            HTTP_UNPROCESSABLE_ENTITY,
+            detail="Scaling factor must be a finite number greater than zero.",
+        )
+
+
+
+
+    try:
+        adapter_status = await manager.load_adapter(payload.path, scaling_value)
     except FileNotFoundError as exc:
         raise HTTPException(HTTP_NOT_FOUND, detail="ADAPTER_NOT_FOUND") from exc
     except AdapterAlreadyLoadedError as exc:
         raise HTTPException(HTTP_CONFLICT, detail="ADAPTER_ALREADY_LOADED") from exc
     except InvalidScalingError as exc:
+
         raise HTTPException(HTTP_UNPROCESSABLE_ENTITY, detail="INVALID_SCALING") from exc
+
+        raise HTTPException(status_code=422, detail="INVALID_SCALING") from exc
+
     except Exception as exc:  # pragma: no cover - defensive guard for unexpected errors
         raise HTTPException(HTTP_SERVER_ERROR, detail="ADAPTER_LOAD_FAILED") from exc
     return LoraStatusResponse.from_status(adapter_status)

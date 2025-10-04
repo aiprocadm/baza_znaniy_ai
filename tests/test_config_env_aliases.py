@@ -64,3 +64,18 @@ def test_primary_environment_variable_takes_precedence(monkeypatch: pytest.Monke
 
     settings = get_settings()
     assert settings.chat_memory_max_tokens == 1234
+
+
+def test_secondary_alias_option_is_respected(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Alias choices beyond the first entry must be considered."""
+
+    _prepare_environment(monkeypatch)
+    _reload_settings_module()
+
+    monkeypatch.setenv("MEMORY_MAX_TOKENS", "2468")
+
+    from app.core.config import get_settings
+
+    settings = get_settings()
+    assert settings.chat_memory_max_tokens == 2468
+    assert isinstance(settings.chat_memory_max_tokens, int)
