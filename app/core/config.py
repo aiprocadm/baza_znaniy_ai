@@ -49,7 +49,12 @@ def _flatten_aliases(source: object) -> list[str]:
         return []
     if isinstance(source, AliasChoices):
         items: list[str] = []
-        for choice in getattr(source, "choices", ()):  # type: ignore[attr-defined]
+        iterable: Iterable[object]
+        try:
+            iterable = source  # ``AliasChoices`` behaves like a tuple of options.
+        except TypeError:  # pragma: no cover - defensive compatibility guard
+            iterable = getattr(source, "choices", ())  # type: ignore[attr-defined]
+        for choice in iterable:
             items.extend(_flatten_aliases(choice))
         return items
     if isinstance(source, bytes):
@@ -129,7 +134,8 @@ def _environment_overrides(
         for name in getattr(model_cls, "__annotations__", {}):
             if name in excluded:
                 continue
-            candidates = [name, name.upper()]
+            field_info = getattr(model_cls, name, None)
+            candidates = _candidate_env_names(name, field_info)
             for env_name in candidates:
                 env_value = os.getenv(env_name)
                 if env_value is not None:
