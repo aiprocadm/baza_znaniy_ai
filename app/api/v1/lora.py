@@ -32,20 +32,15 @@ async def load_lora_adapter(
     scaling = payload.scaling
     # Defensive guard: although the request model validates scaling, runtime callers
     # may bypass Pydantic and supply unexpected values. We normalise to ``float`` and
-    # ensure the number is finite and strictly positive before invoking llama.cpp.
+    # ensure the number is finite, strictly positive, and does not exceed the
+    # configured maximum before invoking llama.cpp.
     try:
         scaling_value = float(scaling)
     except (TypeError, ValueError) as exc:
-        raise HTTPException(
-            HTTP_UNPROCESSABLE_ENTITY,
-            detail="Scaling factor must be a finite number greater than zero.",
-        ) from exc
+        raise HTTPException(HTTP_UNPROCESSABLE_ENTITY, detail="INVALID_SCALING") from exc
 
-    if not math.isfinite(scaling_value) or scaling_value <= 0.0:
-        raise HTTPException(
-            HTTP_UNPROCESSABLE_ENTITY,
-            detail="Scaling factor must be a finite number greater than zero.",
-        )
+    if not math.isfinite(scaling_value) or not (0.0 < scaling_value <= 10.0):
+        raise HTTPException(HTTP_UNPROCESSABLE_ENTITY, detail="INVALID_SCALING")
 
     try:
         adapter_status = await manager.load_adapter(payload.path, scaling_value)
