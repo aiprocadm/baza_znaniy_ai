@@ -29,10 +29,19 @@ def _ensure_llm_package_exports() -> None:
         return
     try:
         from . import cache as _cache
-        from .llama_cpp_provider import LlamaCppProvider
         from .providers import LLMProvider, get_llm_provider
     except Exception:  # pragma: no cover - optional dependencies may be missing
         return
+
+    llama_cpp_provider: type[object] | None
+    try:
+        from .llama_cpp_provider import LlamaCppProvider as _LlamaCppProvider
+    except ImportError:  # pragma: no cover - Settings may be absent in tests
+        llama_cpp_provider = None
+    except Exception:  # pragma: no cover - optional dependency errors
+        return
+    else:
+        llama_cpp_provider = _LlamaCppProvider
 
     config_module = sys.modules.get("app.core.config")
     if config_module is not None and not hasattr(config_module, "get_settings"):
@@ -49,7 +58,6 @@ def _ensure_llm_package_exports() -> None:
 
     exports = {
         "LLMProvider": LLMProvider,
-        "LlamaCppProvider": LlamaCppProvider,
         "get_llm_provider": get_llm_provider,
         "get_cached_provider": _cache.get_cached_provider,
         "reset_provider_cache": _cache.reset_provider_cache,
@@ -59,6 +67,9 @@ def _ensure_llm_package_exports() -> None:
         "ModelNotReadyError": _cache.ModelNotReadyError,
         "LoRAAdapterNotFoundError": _cache.LoRAAdapterNotFoundError,
     }
+
+    if llama_cpp_provider is not None:
+        exports["LlamaCppProvider"] = llama_cpp_provider
 
     for name, value in exports.items():
         setattr(package, name, value)
