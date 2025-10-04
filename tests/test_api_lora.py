@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from importlib import reload
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Iterator
 
 import pytest
@@ -132,9 +133,27 @@ def test_unload_without_adapter_returns_conflict(lora_client: TestClient, tmp_pa
 
 @pytest.mark.parametrize("invalid_scaling", [-0.5, 0, "not-a-number"])
 def test_load_adapter_rejects_invalid_scaling(
-    lora_client: TestClient, tmp_path: Path, invalid_scaling: object
+    lora_client: TestClient,
+    tmp_path: Path,
+    invalid_scaling: object,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     adapter_path = _create_adapter(tmp_path, "invalid.gguf")
+
+    from app.api.v1 import lora as lora_api
+
+    def _passthrough_model_validate(
+        cls: type[lora_api.LoraLoadRequest], data: dict, /, *_, **__
+    ) -> object:
+        # Simulate a caller bypassing Pydantic validation so that we can exercise the
+        # runtime scaling guard implemented in the API router.
+        return SimpleNamespace(path=Path(data["path"]), scaling=data.get("scaling"))
+
+    monkeypatch.setattr(
+        lora_api.LoraLoadRequest,
+        "model_validate",
+        classmethod(_passthrough_model_validate),
+    )
 
     response = lora_client.post(
         "/api/v1/lora/load",
@@ -142,6 +161,7 @@ def test_load_adapter_rejects_invalid_scaling(
     )
 
     assert response.status_code == 422
+    assert response.json()["detail"] == "Scaling factor must be a finite number greater than zero."
 
 
 def test_load_adapter_accepts_valid_scaling(lora_client: TestClient, tmp_path: Path) -> None:

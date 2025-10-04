@@ -22,6 +22,9 @@ HTTP_CONFLICT = getattr(status, "HTTP_409_CONFLICT", 409)
 HTTP_UNPROCESSABLE_ENTITY = getattr(status, "HTTP_422_UNPROCESSABLE_ENTITY", 422)
 HTTP_SERVER_ERROR = getattr(status, "HTTP_500_INTERNAL_SERVER_ERROR", 500)
 
+SCALING_VALIDATION_ERROR = "Scaling factor must be a finite number greater than zero."
+
+
 @router.post("/load", response_model=LoraStatusResponse)
 async def load_lora_adapter(
     payload: LoraLoadRequest,
@@ -38,13 +41,13 @@ async def load_lora_adapter(
     except (TypeError, ValueError) as exc:
         raise HTTPException(
             HTTP_UNPROCESSABLE_ENTITY,
-            detail="Scaling factor must be a finite number greater than zero.",
+            detail=SCALING_VALIDATION_ERROR,
         ) from exc
 
     if not math.isfinite(scaling_value) or scaling_value <= 0.0:
         raise HTTPException(
             HTTP_UNPROCESSABLE_ENTITY,
-            detail="Scaling factor must be a finite number greater than zero.",
+            detail=SCALING_VALIDATION_ERROR,
         )
 
     try:
