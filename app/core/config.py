@@ -329,7 +329,7 @@ else:
                             values[name] = env_value
                             break
             else:  # pragma: no cover - fallback for extremely small shims
-                annotations = getattr(self, "__annotations__", {})
+                annotations = getattr(self.__class__, "__annotations__", {})
                 for name in annotations:
                     field_info = getattr(self.__class__, name, None)
                     for env_name in _candidate_env_names(name, field_info):
