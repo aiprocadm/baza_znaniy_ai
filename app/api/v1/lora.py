@@ -26,6 +26,7 @@ HTTP_NOT_FOUND = getattr(status, "HTTP_404_NOT_FOUND", 404)
 HTTP_CONFLICT = getattr(status, "HTTP_409_CONFLICT", 409)
 HTTP_UNPROCESSABLE_ENTITY = getattr(status, "HTTP_422_UNPROCESSABLE_ENTITY", 422)
 HTTP_SERVER_ERROR = getattr(status, "HTTP_500_INTERNAL_SERVER_ERROR", 500)
+HTTP_UNPROCESSABLE_ENTITY = getattr(status, "HTTP_422_UNPROCESSABLE_ENTITY", 422)
 
 
 def _assert_valid_scaling(scaling: float) -> None:
@@ -59,6 +60,14 @@ async def load_lora_adapter(
     # may bypass Pydantic and supply unexpected values. We normalise to ``float`` and
     # ensure the number is finite and strictly positive before invoking llama.cpp.
     try:
+
+        scaling = manager.validate_scaling(payload.scaling)
+    except ValueError as exc:
+        raise HTTPException(HTTP_UNPROCESSABLE_ENTITY, detail="INVALID_SCALING") from exc
+
+    try:
+        adapter_status = await manager.load_adapter(payload.path, scaling)
+
         scaling_value = float(scaling)
     except (TypeError, ValueError) as exc:
         raise HTTPException(
@@ -77,6 +86,7 @@ async def load_lora_adapter(
 
     try:
         adapter_status = await manager.load_adapter(payload.path, scaling_value)
+
     except FileNotFoundError as exc:
         raise HTTPException(HTTP_NOT_FOUND, detail="ADAPTER_NOT_FOUND") from exc
     except AdapterAlreadyLoadedError as exc:
