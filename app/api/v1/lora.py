@@ -3,9 +3,14 @@
 from __future__ import annotations
 
 
+import math
+
+
+
 from math import isfinite
 
 import math
+
 
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -35,12 +40,36 @@ def _assert_valid_scaling(scaling: float) -> None:
     if not isfinite(float(scaling)) or not (0.0 < float(scaling) <= 10.0):
         raise HTTPException(HTTP_UNPROCESSABLE_ENTITY, detail="INVALID_SCALING")
 
+HTTP_UNPROCESSABLE = getattr(status, "HTTP_422_UNPROCESSABLE_ENTITY", 422)
+
+
+def _ensure_scaling_is_valid(raw_scaling: object) -> float:
+    """Return *raw_scaling* as a validated ``float`` suitable for llama.cpp."""
+
+    try:
+        scaling_value = float(raw_scaling)
+    except (TypeError, ValueError) as exc:  # pragma: no cover - defensive guard
+        raise HTTPException(HTTP_UNPROCESSABLE, detail="INVALID_SCALING") from exc
+
+    if not math.isfinite(scaling_value):
+        raise HTTPException(HTTP_UNPROCESSABLE, detail="INVALID_SCALING")
+    if scaling_value <= 0.0 or scaling_value > 10.0:
+        raise HTTPException(HTTP_UNPROCESSABLE, detail="INVALID_SCALING")
+    return scaling_value
+
+
 @router.post("/load", response_model=LoraStatusResponse)
 async def load_lora_adapter(
     payload: LoraLoadRequest,
     manager: LlamaLoraManager = Depends(get_lora_manager),
 ) -> LoraStatusResponse:
     """Load a LoRA adapter into the configured llama.cpp instance."""
+
+
+    scaling_value = _ensure_scaling_is_valid(payload.scaling)
+
+    try:
+        adapter_status = await manager.load_adapter(payload.path, scaling_value)
 
 
     _assert_valid_scaling(payload.scaling)
@@ -91,6 +120,10 @@ async def load_lora_adapter(
         raise HTTPException(HTTP_NOT_FOUND, detail="ADAPTER_NOT_FOUND") from exc
     except AdapterAlreadyLoadedError as exc:
         raise HTTPException(HTTP_CONFLICT, detail="ADAPTER_ALREADY_LOADED") from exc
+
+    except ValueError as exc:
+        raise HTTPException(HTTP_UNPROCESSABLE, detail="INVALID_SCALING") from exc
+
     except InvalidScalingError as exc:
 
         raise HTTPException(HTTP_UNPROCESSABLE_ENTITY, detail="INVALID_SCALING") from exc

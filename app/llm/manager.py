@@ -248,7 +248,14 @@ class LlamaLoraManager:
     async def load_adapter(self, path: Path, scaling: float) -> LoraStatus:
         """Load a LoRA adapter with *scaling* and make it active."""
 
+
+        scaling_value = float(scaling)
+        if not math.isfinite(scaling_value) or scaling_value <= 0.0 or scaling_value > 10.0:
+            raise ValueError("Scaling factor must be finite and within (0, 10]")
+
+
         scaling_value = self._ensure_valid_scaling(scaling)
+
         candidate = self._normalise_path(path)
         scaling_value = self.validate_scaling(scaling)
         if not candidate.is_file():
