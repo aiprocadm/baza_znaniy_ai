@@ -104,3 +104,19 @@ def test_create_access_token_allows_none_payload(security):
     assert isinstance(payload["exp"], (int, float))
     assert payload["exp"] > datetime.now(timezone.utc).timestamp()
 
+
+def test_decode_token_normalizes_datetime_exp(security):
+    expire_at = datetime.now(timezone.utc) + timedelta(minutes=5)
+    token = security.jwt.encode(
+        {"sub": "legacy", "exp": expire_at},
+        security.SECRET_KEY,
+        algorithm=security.ALGORITHM,
+    )
+
+    payload = security.decode_token(token)
+
+    assert payload["sub"] == "legacy"
+    assert isinstance(payload["exp"], (int, float))
+    decoded_exp = datetime.fromtimestamp(payload["exp"], tz=timezone.utc)
+    assert abs((decoded_exp - expire_at).total_seconds()) <= 1
+

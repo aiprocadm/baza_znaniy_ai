@@ -97,6 +97,8 @@ def test_get_engine_sqlite_aiosqlite_with_sqlalchemy_stub(monkeypatch) -> None:
 
         engine = file_module.get_engine(create_schema=False)
 
+        assert hasattr(engine, "dialect")
+        assert hasattr(engine, "url")
         assert str(engine.url).startswith("sqlite:")
         assert engine.dialect.name == "sqlite"
         assert engine.dialect.driver == "sqlite"
