@@ -529,4 +529,75 @@ def test_get_engine_aiosqlite_stub_regression(tmp_path) -> None:
             original_file_module.get_engine.cache_clear()
 
 
+def test_get_engine_aiosqlite_default_env_stub(monkeypatch, tmp_path) -> None:
+    """Ensure the default async SQLite URL works with SQLAlchemy stubs."""
+
+    import importlib
+    import sys
+
+    from pathlib import Path
+
+    from tests.stubs import sqlalchemy as sqlalchemy_stub
+    from tests.stubs import sqlmodel as sqlmodel_stub
+
+    default_url = "sqlite+aiosqlite:///./var/data/kb.sqlite"
+
+    original_sqlalchemy = sys.modules.get("sqlalchemy")
+    original_sqlalchemy_engine = sys.modules.get("sqlalchemy.engine")
+    original_sqlmodel = sys.modules.get("sqlmodel")
+    original_file_module = sys.modules.get("app.models.file")
+    app_models_pkg = sys.modules.get("app.models")
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("DB_URL", default_url)
+    Path("var/data").mkdir(parents=True, exist_ok=True)
+
+    file_module = None
+
+    try:
+        sys.modules["sqlalchemy"] = sqlalchemy_stub
+        if hasattr(sqlalchemy_stub, "engine_module"):
+            sys.modules["sqlalchemy.engine"] = sqlalchemy_stub.engine_module
+        sys.modules["sqlmodel"] = sqlmodel_stub
+        sys.modules.pop("app.models.file", None)
+
+        file_module = importlib.import_module("app.models.file")
+        file_module.get_engine.cache_clear()
+
+        engine = file_module.get_engine(create_schema=False)
+
+        assert hasattr(engine, "dialect")
+        assert getattr(engine.dialect, "name", None) == "sqlite"
+        assert getattr(engine.dialect, "driver", None) == "sqlite"
+
+        assert hasattr(engine, "url")
+        assert str(engine.url).startswith("sqlite:///")
+    finally:
+        sys.modules.pop("app.models.file", None)
+        if file_module is not None:
+            file_module.get_engine.cache_clear()
+        if original_file_module is not None:
+            sys.modules["app.models.file"] = original_file_module
+            if app_models_pkg is not None:
+                setattr(app_models_pkg, "file", original_file_module)
+        elif app_models_pkg is not None and hasattr(app_models_pkg, "file"):
+            delattr(app_models_pkg, "file")
+
+        if original_sqlalchemy is None:
+            sys.modules.pop("sqlalchemy", None)
+        else:
+            sys.modules["sqlalchemy"] = original_sqlalchemy
+
+        if original_sqlalchemy_engine is None:
+            sys.modules.pop("sqlalchemy.engine", None)
+        else:
+            sys.modules["sqlalchemy.engine"] = original_sqlalchemy_engine
+
+        if original_sqlmodel is None:
+            sys.modules.pop("sqlmodel", None)
+        else:
+            sys.modules["sqlmodel"] = original_sqlmodel
+
+        if original_file_module is not None and hasattr(original_file_module, "get_engine"):
+            original_file_module.get_engine.cache_clear()
 
