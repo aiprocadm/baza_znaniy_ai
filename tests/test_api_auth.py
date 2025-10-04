@@ -74,10 +74,14 @@ def auth_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Tes
         config_module.get_settings.cache_clear()
 
 
-def test_get_engine_sync_sqlite(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("db_scheme", ["sqlite", "sqlite+aiosqlite"])
+def test_get_engine_sync_sqlite(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, db_scheme: str
+) -> None:
     from app.models import file as file_models
 
-    monkeypatch.setenv("DB_URL", f"sqlite:///{tmp_path / 'auth.db'}")
+    db_path = tmp_path / f"auth-{db_scheme.replace('+', '-')}.db"
+    monkeypatch.setenv("DB_URL", f"{db_scheme}:///{db_path}")
     file_models.get_engine.cache_clear()
 
     engine = file_models.get_engine(create_schema=False)

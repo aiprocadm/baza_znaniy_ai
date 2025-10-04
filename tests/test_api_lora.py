@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 from importlib import reload
+import asyncio
 from pathlib import Path
 from typing import Iterator
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
-from pydantic import ValidationError
 
 from tests.service_stubs import install_service_stubs
 
@@ -131,8 +134,21 @@ def test_unload_without_adapter_returns_conflict(lora_client: TestClient, tmp_pa
     assert response.json()["detail"] == "ADAPTER_NOT_LOADED"
 
 
-def test_scaling_validation_rejects_non_positive(lora_client: TestClient, tmp_path: Path) -> None:
+
+@pytest.mark.parametrize(
+    "invalid_scaling",
+    [
+        pytest.param(-0.5, id="negative"),
+        pytest.param(0.0, id="zero"),
+        pytest.param(10.5, id="above-maximum"),
+        pytest.param(float("nan"), id="nan"),
+    ],
+)
+def test_scaling_validation_rejects_non_positive(
+    lora_client: TestClient, tmp_path: Path, invalid_scaling: float
+) -> None:
     adapter_path = _create_adapter(tmp_path, "invalid.gguf")
+
     try:
         response = lora_client.post(
             "/api/v1/lora/load",
@@ -141,16 +157,75 @@ def test_scaling_validation_rejects_non_positive(lora_client: TestClient, tmp_pa
     except ValidationError:
         return
     assert response.status_code == 422
+    assert response.json()["detail"] == "INVALID_SCALING"
 
 
-def test_scaling_validation_rejects_non_finite(lora_client: TestClient, tmp_path: Path) -> None:
-    adapter_path = _create_adapter(tmp_path, "nan.gguf")
-    payload = {"path": str(adapter_path), "scaling": float("nan")}
+@pytest.mark.parametrize("invalid_scaling", [-0.5, 0, "not-a-number"])
+def test_load_adapter_rejects_invalid_scaling(
+    lora_client: TestClient, tmp_path: Path, invalid_scaling: object
+) -> None:
+    adapter_path = _create_adapter(tmp_path, "invalid.gguf")
+
+
+    response = lora_client.post(
+        "/api/v1/lora/load",
+        json={"path": str(adapter_path), "scaling": invalid_scaling},
+    )
+
+
+
+
+    assert response.status_code == 422
+
+    assert response.json()["detail"] == "INVALID_SCALING"
+
+
+def test_scaling_validation_rejects_above_maximum(
+    lora_client: TestClient, tmp_path: Path
+) -> None:
+    adapter_path = _create_adapter(tmp_path, "too_large.gguf")
     try:
         response = lora_client.post(
             "/api/v1/lora/load",
-            json=payload,
+            json={"path": str(adapter_path), "scaling": 10.5},
         )
     except ValidationError:
         return
     assert response.status_code == 422
+
+
+
+@pytest.mark.parametrize(
+    "invalid_scaling",
+    (-0.1, 0.0, float("inf"), float("nan")),
+)
+def test_load_endpoint_rejects_invalid_scaling_when_bypassed(
+    invalid_scaling: float, tmp_path: Path
+) -> None:
+    from app.api.v1 import lora as lora_module
+
+    dummy_manager = SimpleNamespace(load_adapter=AsyncMock())
+    payload = SimpleNamespace(path=tmp_path / "adapter.gguf", scaling=invalid_scaling)
+
+    async def _invoke() -> None:
+        await lora_module.load_lora_adapter(payload, dummy_manager)
+
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(_invoke())
+
+    assert exc.value.status_code == 422
+    dummy_manager.load_adapter.assert_not_awaited()
+
+    assert response.json()["detail"] == "INVALID_SCALING"
+
+
+def test_load_adapter_accepts_valid_scaling(lora_client: TestClient, tmp_path: Path) -> None:
+    adapter_path = _create_adapter(tmp_path, "valid.gguf")
+
+    response = lora_client.post(
+        "/api/v1/lora/load",
+        json={"path": str(adapter_path), "scaling": 0.25},
+    )
+
+    assert response.status_code == 200, response.json()
+
