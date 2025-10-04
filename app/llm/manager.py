@@ -148,12 +148,12 @@ class LlamaLoraManager:
     def _build_default_factory(settings: LlamaSettingsProtocol) -> Callable[[], object]:
         """Return a callable constructing a new ``llama_cpp.Llama`` instance."""
 
-        override = getattr(settings, "llama_cpp_model_path", None)
-        model_reference = override or LlamaLoraManager._require_setting(
-            settings, "llm_model_name"
-        )
-
         def factory() -> object:
+            override = getattr(settings, "llama_cpp_model_path", None)
+            model_reference = override or LlamaLoraManager._require_setting(
+                settings, "llm_model_name"
+            )
+
             from llama_cpp import Llama  # imported lazily to keep dependency optional
 
             return Llama(model_path=str(model_reference))
