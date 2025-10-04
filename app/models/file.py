@@ -160,6 +160,9 @@ def _ensure_sync_engine(engine: Engine, url: str) -> Engine:
 
         return True
 
+
+    extras: dict[str, Any] = {}
+
     class _ProxyEntry:
         __slots__ = ("value", "prefer_fallback", "validator")
 
@@ -176,6 +179,7 @@ def _ensure_sync_engine(engine: Engine, url: str) -> Engine:
     extras: dict[str, _ProxyEntry] = {}
     needs_wrap = False
 
+
     def _register_extra(
         name: str,
         value: Any,
@@ -185,10 +189,14 @@ def _ensure_sync_engine(engine: Engine, url: str) -> Engine:
     ) -> None:
         """Record a fallback attribute to expose via the proxy."""
 
+
+        extras[name] = value
+
         nonlocal needs_wrap
         extras[name] = _ProxyEntry(value, prefer_fallback, validator)
         if prefer_fallback:
             needs_wrap = True
+
 
     class _FallbackDialect:
         __slots__ = ("name", "driver")
@@ -216,11 +224,17 @@ def _ensure_sync_engine(engine: Engine, url: str) -> Engine:
         had_dialect_attr = False
 
     fallback_dialect = _FallbackDialect(dialect_name, dialect_driver)
+
+
+    if not had_dialect_attr:
+        dialect_value: Any = fallback_dialect
+
     dialect_extra: Any = fallback_dialect
     prefer_dialect_fallback = False
 
     if not had_dialect_attr:
         prefer_dialect_fallback = True
+
         _try_assign_attr(engine, "dialect", fallback_dialect)
     else:
         missing_name = not hasattr(dialect, "name")
@@ -237,16 +251,28 @@ def _ensure_sync_engine(engine: Engine, url: str) -> Engine:
         if proxy is None and not _attr_is_readable(engine, "dialect"):
             proxy = _DialectProxy(dialect, dialect_name, dialect_driver)
         if proxy is not None:
+
+            dialect_value = proxy
+
             dialect_extra = proxy
             prefer_dialect_fallback = True
+
             _try_assign_attr(engine, "dialect", proxy)
+        else:
+            dialect_value = dialect
+
+    if "dialect_value" not in locals():  # pragma: no cover - defensive fallback
+        dialect_value = fallback_dialect
 
     def _dialect_validator(value: Any) -> bool:
         return hasattr(value, "name") and hasattr(value, "driver")
 
     fallback_url = make_url(url_str) if "+" in url_str or "://" in url_str else url_str
+
+
     url_extra: Any = fallback_url
     prefer_url_fallback = False
+
 
     try:
         current_url = getattr(engine, "url")
@@ -255,12 +281,19 @@ def _ensure_sync_engine(engine: Engine, url: str) -> Engine:
         current_url = None
         has_url = False
 
+
+    if not has_url or current_url is None or not _attr_is_readable(engine, "url"):
+        url_value = fallback_url
+
     if not has_url or current_url is None:
         prefer_url_fallback = True
         _try_assign_attr(engine, "url", fallback_url)
     elif not _attr_is_readable(engine, "url"):
         prefer_url_fallback = True
+
         _try_assign_attr(engine, "url", fallback_url)
+    else:
+        url_value = current_url
 
     def _url_validator(value: Any) -> bool:
         return value is not None
@@ -275,6 +308,12 @@ def _ensure_sync_engine(engine: Engine, url: str) -> Engine:
     def _noop_dispose(*_: Any, **__: Any) -> None:
         return None
 
+
+    if not has_dispose or not callable(dispose_attr) or not _attr_is_readable(
+        engine, "dispose", require_callable=True
+    ):
+        dispose_value = _noop_dispose
+
     dispose_extra: Any = _noop_dispose
     prefer_dispose_fallback = False
 
@@ -283,7 +322,10 @@ def _ensure_sync_engine(engine: Engine, url: str) -> Engine:
         _try_assign_attr(engine, "dispose", _noop_dispose)
     elif not _attr_is_readable(engine, "dispose", require_callable=True):
         prefer_dispose_fallback = True
+
         _try_assign_attr(engine, "dispose", _noop_dispose)
+    else:
+        dispose_value = dispose_attr
 
     def _callable_validator(value: Any) -> bool:
         return callable(value)
@@ -319,6 +361,12 @@ def _ensure_sync_engine(engine: Engine, url: str) -> Engine:
     def _connect(*_: Any, **__: Any) -> _FallbackConnection:
         return _FallbackConnection()
 
+
+    if not has_connect or not callable(connect_attr) or not _attr_is_readable(
+        engine, "connect", require_callable=True
+    ):
+        connect_value = _connect
+
     connect_extra: Any = _connect
     prefer_connect_fallback = False
 
@@ -327,7 +375,16 @@ def _ensure_sync_engine(engine: Engine, url: str) -> Engine:
         _try_assign_attr(engine, "connect", _connect)
     elif not _attr_is_readable(engine, "connect", require_callable=True):
         prefer_connect_fallback = True
+
         _try_assign_attr(engine, "connect", _connect)
+    else:
+        connect_value = connect_attr
+
+
+    _register_extra("dialect", dialect_value)
+    _register_extra("url", url_value)
+    _register_extra("dispose", dispose_value)
+    _register_extra("connect", connect_value)
 
     _register_extra(
         "dialect",
@@ -363,6 +420,16 @@ def _ensure_sync_engine(engine: Engine, url: str) -> Engine:
         def __init__(self, original: Any, extras_map: dict[str, _ProxyEntry]) -> None:
             object.__setattr__(self, "_original", original)
             object.__setattr__(self, "_extras", dict(extras_map))
+
+        def __getattribute__(self, item: str) -> Any:
+            if item in {"_original", "_extras", "__dict__"}:
+                return object.__getattribute__(self, item)
+            if item == "__class__":  # pragma: no cover - runtime compatibility
+                return object.__getattribute__(self, "_original").__class__
+            extras_map = object.__getattribute__(self, "_extras")
+            if item in extras_map:
+                return extras_map[item]
+            return getattr(object.__getattribute__(self, "_original"), item)
 
         def __getattr__(self, item: str) -> Any:
             extras_map = object.__getattribute__(self, "_extras")
@@ -434,6 +501,16 @@ def get_engine(url: Optional[str] = None, *, create_schema: bool = True) -> Engi
     __import__("app.models.entities")
 
     if driver_name.endswith("+aiosqlite"):
+
+        sync_url = db_url_str.replace("+aiosqlite", "", 1)
+        engine = create_engine(sync_url, echo=False, connect_args=_connect_args(sync_url))
+        engine = _ensure_sync_engine(engine, sync_url)
+        if create_schema:
+            metadata = getattr(SQLModel, "metadata", None)
+            create_all = getattr(metadata, "create_all", None) if metadata is not None else None
+            if callable(create_all):
+                create_all(engine)
+
         sync_url: str
 
         set_method = getattr(dialect, "set", None)
@@ -473,12 +550,20 @@ def get_engine(url: Optional[str] = None, *, create_schema: bool = True) -> Engi
         engine = _ensure_sync_engine(engine, sync_url)
         if create_schema:
             _create_schema_if_possible(engine)
+
         return engine
 
     engine = create_engine(db_url, echo=False, connect_args=_connect_args(db_url_str))
     engine = _ensure_sync_engine(engine, db_url_str)
     if create_schema:
+
+        metadata = getattr(SQLModel, "metadata", None)
+        create_all = getattr(metadata, "create_all", None) if metadata is not None else None
+        if callable(create_all):
+            create_all(engine)
+
         _create_schema_if_possible(engine)
+
     return engine
 
 
