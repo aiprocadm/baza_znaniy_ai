@@ -88,3 +88,39 @@ def test_get_engine_exposes_sync_attributes(tmp_path, monkeypatch) -> None:
         if db_path.exists():
             db_path.unlink()
 
+
+def test_get_engine_sqlite_regression(tmp_path, monkeypatch) -> None:
+    """Regression: the fallback engine proxy exposes the sync SQLAlchemy API."""
+
+    from app.models import file as file_module
+
+    file_module.get_engine.cache_clear()
+
+    db_path = Path(tmp_path) / "regression.sqlite"
+    monkeypatch.setenv("DB_URL", f"sqlite:///{db_path}")
+
+    engine = file_module.get_engine(create_schema=False)
+
+    try:
+        assert getattr(engine.dialect, "name", None) == "sqlite"
+        assert getattr(engine.dialect, "driver", None) in {"sqlite", "pysqlite"}
+
+        dispose = getattr(engine, "dispose", None)
+        assert callable(dispose)
+        dispose()
+
+        connection = engine.connect()
+        try:
+            execution = connection.execute("SELECT 1")
+            scalar = getattr(execution, "scalar", None)
+            assert callable(scalar)
+            assert scalar() in {1, "SELECT 1"}
+        finally:
+            if hasattr(connection, "close"):
+                connection.close()
+    finally:
+        file_module.get_engine.cache_clear()
+        monkeypatch.delenv("DB_URL", raising=False)
+        if db_path.exists():
+            db_path.unlink()
+
