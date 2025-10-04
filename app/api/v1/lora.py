@@ -18,6 +18,7 @@ router = APIRouter(prefix="/lora", tags=["lora"], dependencies=[Depends(require_
 HTTP_NOT_FOUND = getattr(status, "HTTP_404_NOT_FOUND", 404)
 HTTP_CONFLICT = getattr(status, "HTTP_409_CONFLICT", 409)
 HTTP_SERVER_ERROR = getattr(status, "HTTP_500_INTERNAL_SERVER_ERROR", 500)
+HTTP_UNPROCESSABLE_ENTITY = getattr(status, "HTTP_422_UNPROCESSABLE_ENTITY", 422)
 
 @router.post("/load", response_model=LoraStatusResponse)
 async def load_lora_adapter(
@@ -27,7 +28,12 @@ async def load_lora_adapter(
     """Load a LoRA adapter into the configured llama.cpp instance."""
 
     try:
-        adapter_status = await manager.load_adapter(payload.path, payload.scaling)
+        scaling = manager.validate_scaling(payload.scaling)
+    except ValueError as exc:
+        raise HTTPException(HTTP_UNPROCESSABLE_ENTITY, detail="INVALID_SCALING") from exc
+
+    try:
+        adapter_status = await manager.load_adapter(payload.path, scaling)
     except FileNotFoundError as exc:
         raise HTTPException(HTTP_NOT_FOUND, detail="ADAPTER_NOT_FOUND") from exc
     except AdapterAlreadyLoadedError as exc:

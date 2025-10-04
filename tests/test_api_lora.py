@@ -8,7 +8,6 @@ from typing import Iterator
 
 import pytest
 from fastapi.testclient import TestClient
-from pydantic import ValidationError
 
 from tests.service_stubs import install_service_stubs
 
@@ -131,26 +130,80 @@ def test_unload_without_adapter_returns_conflict(lora_client: TestClient, tmp_pa
     assert response.json()["detail"] == "ADAPTER_NOT_LOADED"
 
 
-def test_scaling_validation_rejects_non_positive(lora_client: TestClient, tmp_path: Path) -> None:
+def test_scaling_validation_rejects_non_positive(
+    lora_client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     adapter_path = _create_adapter(tmp_path, "invalid.gguf")
-    try:
-        response = lora_client.post(
-            "/api/v1/lora/load",
-            json={"path": str(adapter_path), "scaling": -0.5},
-        )
-    except ValidationError:
-        return
+    from app.api.v1 import lora as lora_module
+
+    from pydantic import BaseModel
+
+    class _BypassLoadRequest(BaseModel):
+        path: Path
+        scaling: float
+
+        def __init__(self, *, path: str | Path, scaling: float) -> None:  # type: ignore[override]
+            object.__setattr__(self, "path", Path(path))
+            object.__setattr__(self, "scaling", scaling)
+            object.__setattr__(self, "__pydantic_fields_set__", {"path", "scaling"})
+
+        @classmethod
+        def model_validate(cls, data: dict[str, object]) -> "_BypassLoadRequest":
+            value = cls.__new__(cls)
+            cls.__init__(
+                value,
+                path=data.get("path"),
+                scaling=data.get("scaling"),
+            )
+            return value
+
+    monkeypatch.setattr(lora_module, "LoraLoadRequest", _BypassLoadRequest)
+    monkeypatch.setitem(
+        lora_module.load_lora_adapter.__annotations__, "payload", _BypassLoadRequest
+    )
+
+    response = lora_client.post(
+        "/api/v1/lora/load",
+        json={"path": str(adapter_path), "scaling": -0.5},
+    )
     assert response.status_code == 422
 
 
-def test_scaling_validation_rejects_non_finite(lora_client: TestClient, tmp_path: Path) -> None:
+def test_scaling_validation_rejects_non_finite(
+    lora_client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     adapter_path = _create_adapter(tmp_path, "nan.gguf")
     payload = {"path": str(adapter_path), "scaling": float("nan")}
-    try:
-        response = lora_client.post(
-            "/api/v1/lora/load",
-            json=payload,
-        )
-    except ValidationError:
-        return
+    from app.api.v1 import lora as lora_module
+
+    from pydantic import BaseModel
+
+    class _BypassLoadRequest(BaseModel):
+        path: Path
+        scaling: float
+
+        def __init__(self, *, path: str | Path, scaling: float) -> None:  # type: ignore[override]
+            object.__setattr__(self, "path", Path(path))
+            object.__setattr__(self, "scaling", scaling)
+            object.__setattr__(self, "__pydantic_fields_set__", {"path", "scaling"})
+
+        @classmethod
+        def model_validate(cls, data: dict[str, object]) -> "_BypassLoadRequest":
+            value = cls.__new__(cls)
+            cls.__init__(
+                value,
+                path=data.get("path"),
+                scaling=data.get("scaling"),
+            )
+            return value
+
+    monkeypatch.setattr(lora_module, "LoraLoadRequest", _BypassLoadRequest)
+    monkeypatch.setitem(
+        lora_module.load_lora_adapter.__annotations__, "payload", _BypassLoadRequest
+    )
+
+    response = lora_client.post(
+        "/api/v1/lora/load",
+        json=payload,
+    )
     assert response.status_code == 422

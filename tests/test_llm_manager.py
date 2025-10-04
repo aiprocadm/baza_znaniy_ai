@@ -211,6 +211,23 @@ def test_load_adapter_missing_file_raises(
     asyncio.run(scenario())
 
 
+def test_load_adapter_rejects_invalid_scaling(
+    tmp_path: Path, manager_module: ModuleType
+) -> None:
+    adapter_path = tmp_path / "invalid.gguf"
+    adapter_path.write_text("stub")
+
+    async def scenario() -> None:
+        manager_cls = manager_module.LlamaLoraManager
+        manager, _ = _make_manager_with_factory(manager_cls)
+
+        for value in (-0.5, float("nan"), 20.0):
+            with pytest.raises(ValueError):
+                await manager.load_adapter(adapter_path, value)
+
+    asyncio.run(scenario())
+
+
 def test_unload_adapter_error_conditions(
     tmp_path: Path, manager_module: ModuleType
 ) -> None:
