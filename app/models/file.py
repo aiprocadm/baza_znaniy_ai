@@ -237,7 +237,7 @@ def _ensure_sync_engine(engine: Engine, url: str) -> Engine:
 
     if not had_dialect_attr:
         _try_assign_attr(engine, "dialect", fallback_dialect)
-        _register_extra("dialect", fallback_dialect)
+        _register_extra("dialect", fallback_dialect, prefer_fallback=True)
 
 
 
@@ -251,7 +251,7 @@ def _ensure_sync_engine(engine: Engine, url: str) -> Engine:
 
         dialect_extra = fallback_dialect
         if not _try_assign_attr(engine, "dialect", fallback_dialect):
-            _register_extra("dialect", fallback_dialect)
+            _register_extra("dialect", fallback_dialect, prefer_fallback=True)
 
         prefer_dialect_fallback = True
 
@@ -274,7 +274,7 @@ def _ensure_sync_engine(engine: Engine, url: str) -> Engine:
         if proxy is not None:
 
             _try_assign_attr(engine, "dialect", proxy)
-            _register_extra("dialect", proxy)
+            _register_extra("dialect", proxy, prefer_fallback=True)
 
     fallback_url = make_url(url_str) if "+" in url_str or "://" in url_str else url_str
 
@@ -284,7 +284,7 @@ def _ensure_sync_engine(engine: Engine, url: str) -> Engine:
             dialect_extra = proxy
 
             if not _try_assign_attr(engine, "dialect", proxy):
-                _register_extra("dialect", proxy)
+                _register_extra("dialect", proxy, prefer_fallback=True)
 
             prefer_dialect_fallback = True
 
@@ -317,7 +317,7 @@ def _ensure_sync_engine(engine: Engine, url: str) -> Engine:
 
     if not has_url or current_url is None or not _attr_is_readable(engine, "url"):
         _try_assign_attr(engine, "url", fallback_url)
-        _register_extra("url", fallback_url)
+        _register_extra("url", fallback_url, prefer_fallback=True)
 
 
     if not has_url or current_url is None or not _attr_is_readable(engine, "url"):
@@ -327,11 +327,11 @@ def _ensure_sync_engine(engine: Engine, url: str) -> Engine:
 
         url_extra = fallback_url
         if not _try_assign_attr(engine, "url", fallback_url):
-            _register_extra("url", fallback_url)
+            _register_extra("url", fallback_url, prefer_fallback=True)
     elif not _attr_is_readable(engine, "url"):
         url_extra = fallback_url
         if not _try_assign_attr(engine, "url", fallback_url):
-            _register_extra("url", fallback_url)
+            _register_extra("url", fallback_url, prefer_fallback=True)
 
         prefer_url_fallback = True
         _try_assign_attr(engine, "url", fallback_url)
@@ -365,7 +365,7 @@ def _ensure_sync_engine(engine: Engine, url: str) -> Engine:
         _preserve_callable("dispose", dispose_attr)
     else:
         _try_assign_attr(engine, "dispose", _noop_dispose)
-        _register_extra("dispose", _noop_dispose)
+        _register_extra("dispose", _noop_dispose, prefer_fallback=True)
 
 
     if not has_dispose or not callable(dispose_attr) or not _attr_is_readable(
@@ -380,11 +380,11 @@ def _ensure_sync_engine(engine: Engine, url: str) -> Engine:
 
         dispose_extra = _noop_dispose
         if not _try_assign_attr(engine, "dispose", _noop_dispose):
-            _register_extra("dispose", _noop_dispose)
+            _register_extra("dispose", _noop_dispose, prefer_fallback=True)
     elif not _attr_is_readable(engine, "dispose", require_callable=True):
         dispose_extra = _noop_dispose
         if not _try_assign_attr(engine, "dispose", _noop_dispose):
-            _register_extra("dispose", _noop_dispose)
+            _register_extra("dispose", _noop_dispose, prefer_fallback=True)
     else:
         originals["dispose"] = dispose_attr
 
@@ -443,7 +443,7 @@ def _ensure_sync_engine(engine: Engine, url: str) -> Engine:
         _preserve_callable("connect", connect_attr)
     else:
         _try_assign_attr(engine, "connect", _connect)
-        _register_extra("connect", _connect)
+        _register_extra("connect", _connect, prefer_fallback=True)
 
 
     if not has_connect or not callable(connect_attr) or not _attr_is_readable(
@@ -458,11 +458,11 @@ def _ensure_sync_engine(engine: Engine, url: str) -> Engine:
 
         connect_extra = _connect
         if not _try_assign_attr(engine, "connect", _connect):
-            _register_extra("connect", _connect)
+            _register_extra("connect", _connect, prefer_fallback=True)
     elif not _attr_is_readable(engine, "connect", require_callable=True):
         connect_extra = _connect
         if not _try_assign_attr(engine, "connect", _connect):
-            _register_extra("connect", _connect)
+            _register_extra("connect", _connect, prefer_fallback=True)
     else:
         originals["connect"] = connect_attr
 
@@ -478,10 +478,30 @@ def _ensure_sync_engine(engine: Engine, url: str) -> Engine:
         connect_value = connect_attr
 
 
-    _register_extra("dialect", dialect_value)
-    _register_extra("url", url_value)
-    _register_extra("dispose", dispose_value)
-    _register_extra("connect", connect_value)
+    _register_extra(
+        "dialect",
+        dialect_value,
+        prefer_fallback=False,
+        validator=_dialect_validator,
+    )
+    _register_extra(
+        "url",
+        url_value,
+        prefer_fallback=False,
+        validator=_url_validator,
+    )
+    _register_extra(
+        "dispose",
+        dispose_value,
+        prefer_fallback=False,
+        validator=_callable_validator,
+    )
+    _register_extra(
+        "connect",
+        connect_value,
+        prefer_fallback=False,
+        validator=_callable_validator,
+    )
 
     _register_extra(
         "dialect",
@@ -550,7 +570,18 @@ def _ensure_sync_engine(engine: Engine, url: str) -> Engine:
                 getattr(attr_value, "name")
                 getattr(attr_value, "driver")
         except Exception:
-            _register_extra(attr_name, _final_fallback(attr_name))
+            _register_extra(
+                attr_name,
+                _final_fallback(attr_name),
+                prefer_fallback=True,
+                validator=(
+                    _dialect_validator
+                    if attr_name == "dialect"
+                    else _url_validator
+                    if attr_name == "url"
+                    else _callable_validator
+                ),
+            )
 
 
 
