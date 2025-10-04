@@ -37,8 +37,12 @@ def _ensure_llm_package_exports() -> None:
     llama_cpp_provider: type[object] | None
     try:
         from .llama_cpp_provider import LlamaCppProvider as _LlamaCppProvider
-    except ImportError:  # pragma: no cover - Settings may be absent in tests
-        llama_cpp_provider = None
+    except ImportError as exc:  # pragma: no cover - Settings may be absent in tests
+        missing = getattr(exc, "name", None)
+        if missing in {"Settings", "app.core.config"} or "Settings" in str(exc):
+            llama_cpp_provider = None
+        else:
+            raise
     except Exception:  # pragma: no cover - optional dependency errors
         return
     else:
