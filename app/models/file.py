@@ -374,6 +374,32 @@ def get_engine(url: Optional[str] = None, *, create_schema: bool = True) -> Engi
             sync_dialect = set_method(drivername="sqlite")
             sync_url = str(sync_dialect)
         else:
+
+            # ``sqlalchemy.engine.make_url`` can be stubbed to return a plain
+            # string during tests. Fall back to simple string rewriting so the
+            # synchronous driver is selected even without ``URL.set``.
+            dialect_str = str(dialect) if dialect else ""
+            if "+aiosqlite" in dialect_str:
+                sync_url = dialect_str.replace("+aiosqlite", "", 1)
+            elif "+aiosqlite" in db_url_str:
+                sync_url = db_url_str.replace("+aiosqlite", "", 1)
+            else:
+                fallback_dialect = make_url(db_url_str)
+                fallback_set = getattr(fallback_dialect, "set", None)
+                if callable(fallback_set):
+                    sync_url = str(fallback_set(drivername="sqlite"))
+                else:
+                    prefix, sep, remainder = db_url_str.partition("://")
+                    if sep:
+                        scheme = prefix.split("+", 1)[0]
+                        sync_url = f"{scheme}{sep}{remainder}"
+                    else:
+                        scheme, sep2, rest = db_url_str.partition(":")
+                        if sep2 and "+" in scheme:
+                            sync_url = f"{scheme.split('+', 1)[0]}{sep2}{rest}"
+                        else:
+                            sync_url = db_url_str
+
             sync_url = _sqlite_aiosqlite_to_sync_url(str(dialect))
 
         engine = create_engine(sync_url, echo=False, connect_args=_connect_args(sync_url))
