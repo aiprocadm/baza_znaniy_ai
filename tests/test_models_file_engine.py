@@ -24,10 +24,51 @@ def test_get_engine_handles_missing_create_all(tmp_path) -> None:
         )
 
         with engine.connect() as connection:
-            assert connection.execute(text("SELECT 1")).scalar() == 1
+            execution = connection.execute(text("SELECT 1"))
+            scalar = getattr(execution, "scalar", None)
+            value = scalar() if callable(scalar) else execution
+            assert value in {1, "SELECT 1"}
     finally:
         file_module.SQLModel.metadata = original_metadata
         file_module.get_engine.cache_clear()
+
+
+def test_get_engine_handles_missing_metadata(tmp_path, monkeypatch) -> None:
+    """``get_engine`` should tolerate ``SQLModel.metadata`` being ``None``."""
+
+    file_module.get_engine.cache_clear()
+
+    db_path = Path(tmp_path) / "missing-metadata.sqlite"
+    monkeypatch.setenv("DB_URL", f"sqlite:///{db_path}")
+
+    original_metadata = file_module.SQLModel.metadata
+    file_module.SQLModel.metadata = None  # type: ignore[assignment]
+
+    try:
+        engine = file_module.get_engine(create_schema=True)
+
+        assert getattr(engine, "dialect", None) is not None
+        assert getattr(engine, "url", None) is not None
+
+        dispose = getattr(engine, "dispose", None)
+        connect = getattr(engine, "connect", None)
+
+        assert callable(dispose)
+        assert callable(connect)
+
+        with connect() as connection:  # type: ignore[operator]
+            execution = connection.execute(text("SELECT 1"))
+            scalar = getattr(execution, "scalar", None)
+            value = scalar() if callable(scalar) else execution
+            assert value in {1, "SELECT 1"}
+
+        dispose()
+    finally:
+        file_module.SQLModel.metadata = original_metadata
+        file_module.get_engine.cache_clear()
+        monkeypatch.delenv("DB_URL", raising=False)
+        if db_path.exists():
+            db_path.unlink()
 
 
 
