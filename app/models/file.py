@@ -690,6 +690,22 @@ def get_engine(url: Optional[str] = None, *, create_schema: bool = True) -> Engi
             # overrides. When available, it provides the canonical sync URL.
             sync_url = str(dialect.set(drivername="sqlite"))
         else:
+            # ``make_url`` may be stubbed to return a string without ``set``.
+            # Fall back to string rewriting and retry URL reconstruction so a
+            # synchronous driver is always selected.
+            dialect_str = str(dialect) if dialect is not None else ""
+            sync_url = _sqlite_aiosqlite_to_sync_url(dialect_str)
+            if not sync_url or sync_url == dialect_str:
+                sync_url = _sqlite_aiosqlite_to_sync_url(db_url_str)
+
+            try:
+                rebuilt_dialect = make_url(sync_url)
+            except Exception:  # pragma: no cover - defensive against bad URLs
+                rebuilt_dialect = None
+            else:
+                rebuilt_set = getattr(rebuilt_dialect, "set", None)
+                if callable(rebuilt_set):
+                    sync_url = str(rebuilt_set(drivername="sqlite"))
             # ``sqlalchemy.engine.make_url`` may be stubbed to return a simple
             # string that lacks the ``set`` method. Fall back to rewriting the
             # URL manually so that we always select the synchronous driver.
