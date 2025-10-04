@@ -235,27 +235,17 @@ def _ensure_sync_engine(engine: Engine, url: str) -> Engine:
     fallback_dialect = _FallbackDialect(dialect_name, dialect_driver)
 
 
-    if not had_dialect_attr:
-        _try_assign_attr(engine, "dialect", fallback_dialect)
-        _register_extra("dialect", fallback_dialect, prefer_fallback=True)
-
-
-
-    if not had_dialect_attr:
-        dialect_value: Any = fallback_dialect
-
+    dialect_value: Any
     dialect_extra: Any = fallback_dialect
     prefer_dialect_fallback = False
 
     if not had_dialect_attr:
-
-        dialect_extra = fallback_dialect
         if not _try_assign_attr(engine, "dialect", fallback_dialect):
             _register_extra("dialect", fallback_dialect, prefer_fallback=True)
 
+        dialect_value = fallback_dialect
+        dialect_extra = fallback_dialect
         prefer_dialect_fallback = True
-
-        _try_assign_attr(engine, "dialect", fallback_dialect)
 
     else:
         missing_name = not hasattr(dialect, "name")
@@ -281,21 +271,20 @@ def _ensure_sync_engine(engine: Engine, url: str) -> Engine:
             if not _try_assign_attr(engine, "dialect", proxy):
                 _register_extra("dialect", proxy, prefer_fallback=True)
 
+            dialect_value = proxy
+            dialect_extra = proxy
             prefer_dialect_fallback = True
-
-            _try_assign_attr(engine, "dialect", proxy)
         else:
-            dialect_value = dialect
+            dialect_value = dialect if dialect is not None else fallback_dialect
+            dialect_extra = dialect_value
+
+    fallback_url = make_url(url_str) if "+" in url_str or "://" in url_str else url_str
 
     if "dialect_value" not in locals():  # pragma: no cover - defensive fallback
         dialect_value = fallback_dialect
 
     def _dialect_validator(value: Any) -> bool:
         return hasattr(value, "name") and hasattr(value, "driver")
-
-
-    fallback_url = make_url(url_str) if "+" in url_str or "://" in url_str else url_str
-
 
     url_extra: Any = fallback_url
     prefer_url_fallback = False
@@ -353,46 +342,31 @@ def _ensure_sync_engine(engine: Engine, url: str) -> Engine:
         return None
 
     dispose_extra: Any | None = None
+    prefer_dispose_fallback = False
 
     if has_dispose and callable(dispose_attr) and _attr_is_readable(
         engine, "dispose", require_callable=True
     ):
+        dispose_value = dispose_attr
+        dispose_extra = dispose_attr
         _preserve_callable("dispose", dispose_attr)
+        originals["dispose"] = dispose_attr
     else:
-        _try_assign_attr(engine, "dispose", _noop_dispose)
-        _register_extra("dispose", _noop_dispose, prefer_fallback=True)
-
-
-    if not has_dispose or not callable(dispose_attr) or not _attr_is_readable(
-        engine, "dispose", require_callable=True
-    ):
         dispose_value = _noop_dispose
 
-    dispose_extra: Any = _noop_dispose
-    prefer_dispose_fallback = False
-
     if not has_dispose or not callable(dispose_attr):
-
-        dispose_extra = _noop_dispose
         if not _try_assign_attr(engine, "dispose", _noop_dispose):
             _register_extra("dispose", _noop_dispose, prefer_fallback=True)
-    elif not _attr_is_readable(engine, "dispose", require_callable=True):
         dispose_extra = _noop_dispose
+        prefer_dispose_fallback = True
+    elif not _attr_is_readable(engine, "dispose", require_callable=True):
         if not _try_assign_attr(engine, "dispose", _noop_dispose):
             _register_extra("dispose", _noop_dispose, prefer_fallback=True)
-    else:
-        originals["dispose"] = dispose_attr
-
-        prefer_dispose_fallback = True
         dispose_extra = _noop_dispose
-        _try_assign_attr(engine, "dispose", _noop_dispose)
-    elif not _attr_is_readable(engine, "dispose", require_callable=True):
         prefer_dispose_fallback = True
-        dispose_extra = _noop_dispose
 
-        _try_assign_attr(engine, "dispose", _noop_dispose)
-    else:
-        dispose_value = dispose_attr
+    if dispose_extra is None:
+        dispose_extra = dispose_value
 
     def _callable_validator(value: Any) -> bool:
         return callable(value)
@@ -431,46 +405,31 @@ def _ensure_sync_engine(engine: Engine, url: str) -> Engine:
         return _FallbackConnection()
 
     connect_extra: Any | None = None
+    prefer_connect_fallback = False
 
     if has_connect and callable(connect_attr) and _attr_is_readable(
         engine, "connect", require_callable=True
     ):
+        connect_value = connect_attr
+        connect_extra = connect_attr
         _preserve_callable("connect", connect_attr)
+        originals["connect"] = connect_attr
     else:
-        _try_assign_attr(engine, "connect", _connect)
-        _register_extra("connect", _connect, prefer_fallback=True)
-
-
-    if not has_connect or not callable(connect_attr) or not _attr_is_readable(
-        engine, "connect", require_callable=True
-    ):
         connect_value = _connect
 
-    connect_extra: Any = _connect
-    prefer_connect_fallback = False
-
     if not has_connect or not callable(connect_attr):
-
-        connect_extra = _connect
         if not _try_assign_attr(engine, "connect", _connect):
             _register_extra("connect", _connect, prefer_fallback=True)
-    elif not _attr_is_readable(engine, "connect", require_callable=True):
         connect_extra = _connect
+        prefer_connect_fallback = True
+    elif not _attr_is_readable(engine, "connect", require_callable=True):
         if not _try_assign_attr(engine, "connect", _connect):
             _register_extra("connect", _connect, prefer_fallback=True)
-    else:
-        originals["connect"] = connect_attr
-
-        prefer_connect_fallback = True
         connect_extra = _connect
-        _try_assign_attr(engine, "connect", _connect)
-    elif not _attr_is_readable(engine, "connect", require_callable=True):
         prefer_connect_fallback = True
-        connect_extra = _connect
 
-        _try_assign_attr(engine, "connect", _connect)
-    else:
-        connect_value = connect_attr
+    if connect_extra is None:
+        connect_extra = connect_value
 
 
     _register_extra(
