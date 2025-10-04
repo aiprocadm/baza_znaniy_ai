@@ -66,6 +66,18 @@ async def load_lora_adapter(
     """Load a LoRA adapter into the configured llama.cpp instance."""
 
 
+    try:
+        scaling_value = float(payload.scaling)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(HTTP_UNPROCESSABLE_ENTITY, detail="INVALID_SCALING") from exc
+
+    if math.isnan(scaling_value) or not math.isfinite(scaling_value):
+        raise HTTPException(HTTP_UNPROCESSABLE_ENTITY, detail="INVALID_SCALING")
+
+    if scaling_value <= 0.0 or scaling_value > 10.0:
+        raise HTTPException(HTTP_UNPROCESSABLE_ENTITY, detail="INVALID_SCALING")
+
+
     scaling_value = _ensure_scaling_is_valid(payload.scaling)
 
     try:
@@ -107,6 +119,7 @@ async def load_lora_adapter(
 
 
 
+>
 
     try:
         adapter_status = await manager.load_adapter(payload.path, scaling_value)
