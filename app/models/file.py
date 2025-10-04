@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from datetime import datetime
 from functools import lru_cache
@@ -12,6 +13,9 @@ from sqlalchemy.engine import Engine, make_url
 from sqlmodel import Field, SQLModel, Session, create_engine
 
 from app.models.entities import JobRecord, SettingRecord
+
+
+logger = logging.getLogger(__name__)
 
 
 class FileStatus(str):
@@ -352,6 +356,24 @@ def _ensure_sync_engine(engine: Engine, url: str) -> Engine:
     return _EngineProxy(engine, extras)
 
 
+def _create_schema_if_possible(engine: Engine) -> None:
+    """Create database schema when ``SQLModel.metadata`` exposes ``create_all``."""
+
+    metadata = getattr(SQLModel, "metadata", None)
+    if metadata is None:
+        logger.warning("SQLModel.metadata is missing; skipping schema creation")
+        return
+
+    create_all = getattr(metadata, "create_all", None)
+    if not callable(create_all):
+        logger.warning(
+            "SQLModel.metadata.create_all is unavailable; skipping schema creation"
+        )
+        return
+
+    create_all(engine)
+
+
 @lru_cache(maxsize=1)
 def get_engine(url: Optional[str] = None, *, create_schema: bool = True) -> Engine:
     """Return a synchronous SQLAlchemy engine configured for SQLModel models."""
@@ -405,17 +427,13 @@ def get_engine(url: Optional[str] = None, *, create_schema: bool = True) -> Engi
         engine = create_engine(sync_url, echo=False, connect_args=_connect_args(sync_url))
         engine = _ensure_sync_engine(engine, sync_url)
         if create_schema:
-            metadata = getattr(SQLModel, "metadata", None)
-            if metadata is not None and hasattr(metadata, "create_all"):
-                metadata.create_all(engine)
+            _create_schema_if_possible(engine)
         return engine
 
     engine = create_engine(db_url, echo=False, connect_args=_connect_args(db_url_str))
     engine = _ensure_sync_engine(engine, db_url_str)
     if create_schema:
-        metadata = getattr(SQLModel, "metadata", None)
-        if metadata is not None and hasattr(metadata, "create_all"):
-            metadata.create_all(engine)
+        _create_schema_if_possible(engine)
     return engine
 
 
