@@ -23,6 +23,28 @@ class InvalidTokenError(Exception):
     """Raised when a JWT cannot be decoded or validated."""
 
 
+def _coerce_exp_to_numeric(value: Any) -> int | float:
+    """Convert an ``exp`` claim into a numeric timestamp."""
+
+    if isinstance(value, datetime):
+        timestamp = value.timestamp()
+    elif isinstance(value, (int, float)):
+        timestamp = float(value)
+    elif isinstance(value, str):
+        try:
+            timestamp = float(value)
+        except ValueError:
+            try:
+                timestamp = datetime.fromisoformat(value).timestamp()
+            except ValueError as exc:
+                raise InvalidTokenError("Could not validate credentials") from exc
+    else:
+        raise InvalidTokenError("Could not validate credentials")
+
+    numeric = float(timestamp)
+    return int(numeric) if numeric.is_integer() else numeric
+
+
 def hash_password(password: str) -> str:
     """Hash a plaintext password using argon2."""
 
@@ -52,8 +74,7 @@ def create_access_token(
     expire_minutes = globals().get("ACCESS_TOKEN_EXPIRE_MINUTES", settings.access_token_expire_minutes)
     expire_delta = expires_delta or timedelta(minutes=expire_minutes)
     expire = datetime.now(timezone.utc) + expire_delta
-    exp_ts = expire.timestamp()
-    to_encode.update({"exp": int(exp_ts) if exp_ts.is_integer() else exp_ts})
+    to_encode["exp"] = _coerce_exp_to_numeric(expire)
     secret = globals().get("SECRET_KEY", settings.secret_key)
     algorithm = globals().get("ALGORITHM", settings.jwt_algorithm)
     return jwt.encode(to_encode, secret, algorithm=algorithm)
@@ -68,9 +89,8 @@ def decode_token(token: str) -> Dict[str, Any]:
         algorithm = globals().get("ALGORITHM", settings.jwt_algorithm)
         payload = jwt.decode(token, secret, algorithms=[algorithm])
         exp_value = payload.get("exp")
-        if isinstance(exp_value, datetime):
-            timestamp = exp_value.timestamp()
-            payload["exp"] = int(timestamp) if timestamp.is_integer() else timestamp
+        if exp_value is not None:
+            payload["exp"] = _coerce_exp_to_numeric(exp_value)
         return payload
     except JWTError as exc:
         raise InvalidTokenError("Could not validate credentials") from exc

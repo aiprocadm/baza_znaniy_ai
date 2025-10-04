@@ -1,11 +1,14 @@
 """Tests for the synchronous engine helpers in ``app.models.file``."""
 
 from __future__ import annotations
+from contextlib import contextmanager
 
 import importlib
 import sys
 from pathlib import Path
+from typing import Iterator
 
+from sqlalchemy import create_engine, text
 
 STUBS_PATH = Path(__file__).resolve().parent / "stubs"
 
@@ -37,6 +40,71 @@ from sqlalchemy import MetaData, text
 from app.models import file as file_module
 
 
+@contextmanager
+def _stubbed_file_module() -> Iterator[object]:
+    """Temporarily reload ``app.models.file`` with SQLAlchemy/SQLModel stubs."""
+
+    import importlib
+    import sys
+
+    from tests.stubs import sqlalchemy as sqlalchemy_stub
+    from tests.stubs import sqlmodel as sqlmodel_stub
+
+    original_sqlalchemy = sys.modules.get("sqlalchemy")
+    original_sqlalchemy_engine = sys.modules.get("sqlalchemy.engine")
+    original_sqlmodel = sys.modules.get("sqlmodel")
+    original_file_module = sys.modules.get("app.models.file")
+    app_models_pkg = sys.modules.get("app.models")
+
+    stubbed_module = None
+    try:
+        sys.modules["sqlalchemy"] = sqlalchemy_stub
+        if hasattr(sqlalchemy_stub, "engine_module"):
+            sys.modules["sqlalchemy.engine"] = sqlalchemy_stub.engine_module
+        sys.modules["sqlmodel"] = sqlmodel_stub
+
+        sys.modules.pop("app.models.file", None)
+        if app_models_pkg is not None and hasattr(app_models_pkg, "file"):
+            delattr(app_models_pkg, "file")
+
+        stubbed_module = importlib.import_module("app.models.file")
+        if app_models_pkg is not None:
+            setattr(app_models_pkg, "file", stubbed_module)
+
+        stubbed_module.get_engine.cache_clear()
+        yield stubbed_module
+    finally:
+        if stubbed_module is not None:
+            stubbed_module.get_engine.cache_clear()
+
+        sys.modules.pop("app.models.file", None)
+        if original_file_module is not None:
+            sys.modules["app.models.file"] = original_file_module
+            if app_models_pkg is not None:
+                setattr(app_models_pkg, "file", original_file_module)
+        elif app_models_pkg is not None and hasattr(app_models_pkg, "file"):
+            delattr(app_models_pkg, "file")
+
+        if original_sqlalchemy is None:
+            sys.modules.pop("sqlalchemy", None)
+        else:
+            sys.modules["sqlalchemy"] = original_sqlalchemy
+
+        if original_sqlalchemy_engine is None:
+            sys.modules.pop("sqlalchemy.engine", None)
+        else:
+            sys.modules["sqlalchemy.engine"] = original_sqlalchemy_engine
+
+        if original_sqlmodel is None:
+            sys.modules.pop("sqlmodel", None)
+        else:
+            sys.modules["sqlmodel"] = original_sqlmodel
+
+        if original_file_module is not None and hasattr(original_file_module, "get_engine"):
+            original_file_module.get_engine.cache_clear()
+
+
+def test_get_engine_handles_missing_create_all(tmp_path) -> None:
 
 def test_get_engine_handles_missing_create_all(tmp_path) -> None:
     """``get_engine`` should rebuild metadata when ``create_all`` is absent."""
@@ -64,6 +132,37 @@ def test_get_engine_handles_missing_create_all(tmp_path) -> None:
         )
 
         assert isinstance(file_module.SQLModel.metadata, MetaData)
+
+        with engine.connect() as connection:
+            execution = connection.execute(text("SELECT 1"))
+            scalar = getattr(execution, "scalar", None)
+            value = scalar() if callable(scalar) else execution
+            assert value in {1, "SELECT 1"}
+    finally:
+        file_module.SQLModel.metadata = original_metadata
+        file_module.get_engine.cache_clear()
+
+
+def test_get_engine_logs_when_metadata_lacks_create_all(tmp_path, caplog) -> None:
+    """``get_engine`` should warn and continue when metadata lacks ``create_all``."""
+
+    file_module.get_engine.cache_clear()
+
+    caplog.set_level("WARNING")
+
+    original_metadata = file_module.SQLModel.metadata
+    dummy_metadata = type("DummyMetadata", (), {})()
+    file_module.SQLModel.metadata = dummy_metadata  # type: ignore[assignment]
+    try:
+        engine = file_module.get_engine(
+            f"sqlite:///{tmp_path/'missing-create-all-log.db'}",
+            create_schema=True,
+        )
+
+        assert any(
+            "SQLModel.metadata has no 'create_all'" in message
+            for _, _, message in caplog.record_tuples
+        )
 
         with engine.connect() as connection:
             execution = connection.execute(text("SELECT 1"))
@@ -118,6 +217,7 @@ def test_get_engine_handles_missing_metadata(tmp_path, monkeypatch) -> None:
             execution = connection.execute(text("SELECT 1"))
             scalar = getattr(execution, "scalar", None)
             value = scalar() if callable(scalar) else execution
+            assert value == 1 or str(value) == "SELECT 1"
             assert value in {1, "SELECT 1"}
 
 
@@ -137,6 +237,69 @@ def test_get_engine_handles_missing_metadata(tmp_path, monkeypatch) -> None:
         if db_path.exists():
             db_path.unlink()
 
+
+
+def test_ensure_sync_engine_preserves_real_methods(tmp_path) -> None:
+    """Proxy should delegate ``connect``/``dispose`` to the wrapped engine."""
+
+    sqlite_path = tmp_path / "proxy.sqlite"
+    url = f"sqlite:///{sqlite_path}"
+
+    engine = create_engine(url)
+    connect_calls: list[bool] = []
+    dispose_calls: list[bool] = []
+
+    class WrappedEngine:
+        def __init__(self, inner):
+            object.__setattr__(self, "_inner", inner)
+
+        def __getattr__(self, item: str):
+            if item == "url":
+                raise AttributeError("url attribute missing")
+            return getattr(self._inner, item)
+
+        def __setattr__(self, key: str, value):
+            if key == "_inner":
+                object.__setattr__(self, key, value)
+            elif key == "url":
+                object.__setattr__(self, key, value)
+            else:
+                setattr(self._inner, key, value)
+
+        def connect(self, *args, **kwargs):
+            connect_calls.append(True)
+            return self._inner.connect(*args, **kwargs)
+
+        def dispose(self, *args, **kwargs):
+            dispose_calls.append(True)
+            return self._inner.dispose(*args, **kwargs)
+
+    wrapped = WrappedEngine(engine)
+
+    try:
+        proxy = file_module._ensure_sync_engine(wrapped, url)
+
+        # ``url`` fallback forces a proxy even though ``connect``/``dispose`` exist.
+        assert proxy is not wrapped
+
+        connect_method = proxy.connect
+        dispose_method = proxy.dispose
+
+        assert getattr(connect_method, "__self__", None) is wrapped
+        assert getattr(dispose_method, "__self__", None) is wrapped
+
+        with proxy.connect() as connection:
+            execution = connection.execute(text("SELECT 1"))
+            assert execution.scalar() == 1
+
+        proxy.dispose()
+
+        assert len(connect_calls) == 1
+        assert len(dispose_calls) == 1
+    finally:
+        engine.dispose()
+        if sqlite_path.exists():
+            sqlite_path.unlink()
 
 
 def test_get_engine_exposes_core_engine_attributes(tmp_path, monkeypatch):
@@ -213,7 +376,7 @@ def test_get_engine_exposes_sync_attributes(tmp_path, monkeypatch) -> None:
             execution = connection.execute(text("SELECT 1"))
             scalar = getattr(execution, "scalar", None)
             value = scalar() if callable(scalar) else execution
-            assert value in {1, "SELECT 1"}
+            assert value == 1 or str(value) == "SELECT 1"
 
         engine.dispose()
     finally:
@@ -249,7 +412,8 @@ def test_get_engine_sqlite_regression(tmp_path, monkeypatch) -> None:
             execution = connection.execute(text("SELECT 1"))
             scalar = getattr(execution, "scalar", None)
             assert callable(scalar)
-            assert scalar() in {1, "SELECT 1"}
+            result = scalar()
+            assert result == 1 or str(result) == "SELECT 1"
         finally:
             if hasattr(connection, "close"):
                 connection.close()
@@ -376,7 +540,8 @@ def test_get_engine_stub_engine_proxy(tmp_path, monkeypatch) -> None:
             execution = connection.execute("SELECT 1")
             scalar = getattr(execution, "scalar", None)
             assert callable(scalar)
-            assert scalar() in {1, "SELECT 1"}
+            result = scalar()
+            assert result == 1 or str(result) == "SELECT 1"
         finally:
             if hasattr(connection, "close"):
                 connection.close()
@@ -466,11 +631,68 @@ def test_ensure_sync_engine_preserves_sqlalchemy_methods(tmp_path) -> None:
 def test_get_engine_aiosqlite_stub_regression(tmp_path) -> None:
     """``get_engine`` should cope with stubbed ``make_url`` lacking ``set``."""
 
+    db_path = Path(tmp_path) / "stub-aiosqlite.db"
+    target_url = f"sqlite+aiosqlite:///{db_path}"
+
+    with _stubbed_file_module() as stubbed_module:
+        engine = stubbed_module.get_engine(target_url, create_schema=False)
+
+        assert hasattr(engine, "dialect")
+        assert getattr(engine.dialect, "name", None) == "sqlite"
+        assert getattr(engine.dialect, "driver", None) == "sqlite"
+
+        assert hasattr(engine, "dispose")
+        dispose = getattr(engine, "dispose")
+        assert callable(dispose)
+        dispose()
+
+        assert hasattr(engine, "url")
+        assert str(engine.url).startswith("sqlite:///")
+
+    if db_path.exists():
+        db_path.unlink()
+
+
+def test_get_engine_aiosqlite_stub_direct_url() -> None:
+    """Regression: stubbed ``make_url`` works with literal ``/tmp`` paths."""
+
+    target_url = "sqlite+aiosqlite:///tmp/test.db"
+    db_path = Path("/tmp/test.db")
+
+    if db_path.exists():
+        db_path.unlink()
+
+    with _stubbed_file_module() as stubbed_module:
+        engine = stubbed_module.get_engine(target_url, create_schema=False)
+
+        assert hasattr(engine, "dialect")
+        assert getattr(engine.dialect, "name", None) == "sqlite"
+        assert getattr(engine.dialect, "driver", None) == "sqlite"
+
+        assert hasattr(engine, "dispose")
+        dispose = getattr(engine, "dispose")
+        assert callable(dispose)
+        dispose()
+
+        assert hasattr(engine, "url")
+        assert str(engine.url).startswith("sqlite:///")
+
+    if db_path.exists():
+        db_path.unlink()
+
+
+def test_get_engine_aiosqlite_default_env_stub(monkeypatch, tmp_path) -> None:
+    """Ensure the default async SQLite URL works with SQLAlchemy stubs."""
+
     import importlib
     import sys
 
+    from pathlib import Path
+
     from tests.stubs import sqlalchemy as sqlalchemy_stub
     from tests.stubs import sqlmodel as sqlmodel_stub
+
+    default_url = "sqlite+aiosqlite:///./var/data/kb.sqlite"
 
     original_sqlalchemy = sys.modules.get("sqlalchemy")
     original_sqlalchemy_engine = sys.modules.get("sqlalchemy.engine")
@@ -478,7 +700,10 @@ def test_get_engine_aiosqlite_stub_regression(tmp_path) -> None:
     original_file_module = sys.modules.get("app.models.file")
     app_models_pkg = sys.modules.get("app.models")
 
-    target_url = f"sqlite+aiosqlite:///{tmp_path/'stub-aiosqlite.db'}"
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("DB_URL", default_url)
+    Path("var/data").mkdir(parents=True, exist_ok=True)
+
     file_module = None
 
     try:
@@ -491,16 +716,11 @@ def test_get_engine_aiosqlite_stub_regression(tmp_path) -> None:
         file_module = importlib.import_module("app.models.file")
         file_module.get_engine.cache_clear()
 
-        engine = file_module.get_engine(target_url, create_schema=False)
+        engine = file_module.get_engine(create_schema=False)
 
         assert hasattr(engine, "dialect")
         assert getattr(engine.dialect, "name", None) == "sqlite"
         assert getattr(engine.dialect, "driver", None) == "sqlite"
-
-        assert hasattr(engine, "dispose")
-        dispose = getattr(engine, "dispose")
-        assert callable(dispose)
-        dispose()
 
         assert hasattr(engine, "url")
         assert str(engine.url).startswith("sqlite:///")
@@ -532,6 +752,4 @@ def test_get_engine_aiosqlite_stub_regression(tmp_path) -> None:
 
         if original_file_module is not None and hasattr(original_file_module, "get_engine"):
             original_file_module.get_engine.cache_clear()
-
-
 
