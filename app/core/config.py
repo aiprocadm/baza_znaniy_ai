@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+
 from collections.abc import Iterable, Sequence
 from functools import lru_cache
 from pathlib import Path
@@ -34,8 +36,130 @@ except ImportError:  # pragma: no cover - provide light-weight fallbacks
         return decorator
 
 try:  # pragma: no cover - ``pydantic-settings`` is optional
-    from pydantic_settings import BaseSettings, SettingsConfigDict
+    from pydantic_settings import BaseSettings as PydanticBaseSettings, SettingsConfigDict
 except ImportError:  # pragma: no cover - minimal shim for tests
+
+    PydanticBaseSettings = None  # type: ignore[assignment]
+
+
+def _flatten_aliases(source: object) -> list[str]:
+    """Return a flattened list of alias names from arbitrary structures."""
+
+    if source is None or source is Ellipsis:  # pragma: no cover - defensive guard
+        return []
+    if isinstance(source, AliasChoices):
+        items: list[str] = []
+        iterable: Iterable[object]
+        try:
+            iterable = source  # ``AliasChoices`` behaves like a tuple of options.
+        except TypeError:  # pragma: no cover - defensive compatibility guard
+            iterable = getattr(source, "choices", ())  # type: ignore[attr-defined]
+        for choice in iterable:
+            items.extend(_flatten_aliases(choice))
+        return items
+    if isinstance(source, bytes):
+        try:
+            return [source.decode("utf-8")]
+        except Exception:  # pragma: no cover - defensive guard
+            return [str(source)]
+    if isinstance(source, str):
+        return [source]
+    if isinstance(source, Iterable):
+        items: list[str] = []
+        for item in source:
+            items.extend(_flatten_aliases(item))
+        return items
+    return [str(source)]
+
+
+def _candidate_env_names(field_name: str, field: object) -> list[str]:
+    """Return environment variable names to probe for a field."""
+
+    candidates: list[str] = []
+    seen: set[str] = set()
+
+    def _register(raw: object) -> None:
+        for alias_name in _flatten_aliases(raw):
+            name = alias_name.strip()
+            if not name:
+                continue
+            if name not in seen:
+                candidates.append(name)
+                seen.add(name)
+            upper_name = name.upper()
+            if upper_name not in seen:
+                candidates.append(upper_name)
+                seen.add(upper_name)
+
+    _register(field_name)
+    _register(field_name.upper())
+    _register(getattr(field, "alias", None))
+
+    field_info = getattr(field, "field_info", None)
+    if field_info is not None:  # pragma: no branch - simple attribute lookups
+        _register(getattr(field_info, "alias", None))
+        _register(getattr(field_info, "validation_alias", None))
+        _register(getattr(field_info, "serialization_alias", None))
+
+    _register(getattr(field, "validation_alias", None))
+    _register(getattr(field, "serialization_alias", None))
+
+    return candidates
+
+
+def _environment_overrides(
+    model_cls: type[BaseModel],
+    *,
+    skip: Iterable[str] | None = None,
+) -> tuple[dict[str, object], dict[str, list[str]]]:
+    """Collect overrides and the env variable names used for each field."""
+
+    excluded = set(skip or ())
+    overrides: dict[str, object] = {}
+    consumed: dict[str, list[str]] = {}
+    model_fields = getattr(model_cls, "model_fields", None)
+
+    if isinstance(model_fields, dict):
+        for name, field in model_fields.items():
+            if name in excluded:
+                continue
+            candidates = _candidate_env_names(name, field)
+            for env_name in candidates:
+                env_value = os.getenv(env_name)
+                if env_value is not None:
+                    overrides[name] = env_value
+                    consumed[name] = candidates
+                    break
+    else:  # pragma: no cover - fallback for Pydantic v1 style models
+        fields_map = getattr(model_cls, "__fields__", None)
+        if isinstance(fields_map, dict):
+            iterable: Iterable[tuple[str, object]] = fields_map.items()
+        else:
+            annotations = getattr(model_cls, "__annotations__", {})
+            iterable = ((name, getattr(model_cls, name, None)) for name in annotations)
+        for name, field in iterable:
+            if name in excluded:
+                continue
+
+            candidates = _candidate_env_names(name, field)
+            if not candidates:
+                candidates = [name, name.upper()]
+
+            field_info = getattr(model_cls, name, None)
+            candidates = _candidate_env_names(name, field_info)
+
+            for env_name in candidates:
+                env_value = os.getenv(env_name)
+                if env_value is not None:
+                    overrides[name] = env_value
+                    consumed[name] = candidates
+                    break
+
+    return overrides, consumed
+
+
+if PydanticBaseSettings is None:
+
     import os
 
     def _flatten_aliases(source: object) -> list[str]:
@@ -101,6 +225,7 @@ except ImportError:  # pragma: no cover - minimal shim for tests
 
         return candidates
 
+
     class SettingsConfigDict(dict):  # type: ignore[override]
         def __init__(self, **kwargs: object) -> None:
             super().__init__(**kwargs)
@@ -111,6 +236,107 @@ except ImportError:  # pragma: no cover - minimal shim for tests
         model_config = SettingsConfigDict()
 
         def __init__(self, **data: object) -> None:
+
+            overrides, consumed = _environment_overrides(self.__class__, skip=data.keys())
+            merged = {**overrides, **data}
+            restored: list[tuple[str, str | None]] = []
+            seen: set[str] = set()
+            for env_names in consumed.values():
+                for env_name in env_names:
+                    if env_name in seen:
+                        continue
+                    seen.add(env_name)
+                    restored.append((env_name, os.environ.get(env_name)))
+                    os.environ.pop(env_name, None)
+            config_obj = getattr(self.__class__, "model_config", None)
+            previous_env_file = getattr(config_obj, "env_file", None)
+            if config_obj is not None:
+                try:
+                    config_obj["env_file"] = ()  # type: ignore[index]
+                except Exception:
+                    pass
+                try:
+                    setattr(config_obj, "env_file", ())
+                except Exception:
+                    pass
+            try:
+                super().__init__(**merged)
+                if overrides:
+                    payload = self.model_dump(mode="python")
+                    payload.update(overrides)
+                    updated = self.__class__.model_validate(payload)
+                    self.__dict__.update(updated.__dict__)
+                    self.__pydantic_fields_set__ = updated.__pydantic_fields_set__
+            finally:
+                if config_obj is not None:
+                    try:
+                        config_obj["env_file"] = previous_env_file  # type: ignore[index]
+                    except Exception:
+                        pass
+                    try:
+                        setattr(config_obj, "env_file", previous_env_file)
+                    except Exception:
+                        pass
+                for env_name, original in reversed(restored):
+                    if original is None:
+                        os.environ.pop(env_name, None)
+                    else:
+                        os.environ[env_name] = original
+
+else:
+
+    class BaseSettings(PydanticBaseSettings):  # type: ignore[misc]
+        """Augmented settings class with eager environment alias resolution."""
+
+        model_config = SettingsConfigDict()
+
+        def __init__(self, **data: object) -> None:
+            env_overrides, consumed = _environment_overrides(self.__class__, skip=data.keys())
+            merged = {**env_overrides, **data}
+            restored: list[tuple[str, str | None]] = []
+            seen: set[str] = set()
+            for env_names in consumed.values():
+                for env_name in env_names:
+                    if env_name in seen:
+                        continue
+                    seen.add(env_name)
+                    restored.append((env_name, os.environ.get(env_name)))
+                    os.environ.pop(env_name, None)
+            config_obj = getattr(self.__class__, "model_config", None)
+            previous_env_file = getattr(config_obj, "env_file", None)
+            if config_obj is not None:
+                try:
+                    config_obj["env_file"] = ()  # type: ignore[index]
+                except Exception:
+                    pass
+                try:
+                    setattr(config_obj, "env_file", ())
+                except Exception:
+                    pass
+            try:
+                super().__init__(**merged)
+                if env_overrides:
+                    payload = self.model_dump(mode="python")
+                    payload.update(env_overrides)
+                    updated = self.__class__.model_validate(payload)
+                    self.__dict__.update(updated.__dict__)
+                    self.__pydantic_fields_set__ = updated.__pydantic_fields_set__
+            finally:
+                if config_obj is not None:
+                    try:
+                        config_obj["env_file"] = previous_env_file  # type: ignore[index]
+                    except Exception:
+                        pass
+                    try:
+                        setattr(config_obj, "env_file", previous_env_file)
+                    except Exception:
+                        pass
+                for env_name, original in reversed(restored):
+                    if original is None:
+                        os.environ.pop(env_name, None)
+                    else:
+                        os.environ[env_name] = original
+
             values: dict[str, object] = {}
             model_fields = getattr(self.__class__, "model_fields", None)
             if isinstance(model_fields, dict):
@@ -121,9 +347,21 @@ except ImportError:  # pragma: no cover - minimal shim for tests
                             values[name] = env_value
                             break
             else:  # pragma: no cover - fallback for extremely small shims
-                annotations = getattr(self, "__annotations__", {})
+
+                fields_map = getattr(self.__class__, "__fields__", None)
+                if isinstance(fields_map, dict):
+                    iterable: Iterable[tuple[str, object]] = fields_map.items()
+                else:
+                    annotations = getattr(self.__class__, "__annotations__", {})
+                    iterable = (
+                        (name, getattr(self.__class__, name, None)) for name in annotations
+                    )
+                for name, field_info in iterable:
+
+                annotations = getattr(self.__class__, "__annotations__", {})
                 for name in annotations:
                     field_info = getattr(self.__class__, name, None)
+
                     for env_name in _candidate_env_names(name, field_info):
                         env_value = os.getenv(env_name)
                         if env_value is not None:
@@ -131,6 +369,7 @@ except ImportError:  # pragma: no cover - minimal shim for tests
                             break
             values.update(data)
             super().__init__(**values)
+
 
 
 def _default_app_version() -> str:
@@ -153,14 +392,6 @@ class Settings(BaseSettings):
         extra="ignore",
         populate_by_name=True,
     )
-
-    def __init__(self, **data: object) -> None:  # pragma: no cover - exercised in integration tests
-        overrides = dict(data)
-        super().__init__(**data)
-        if overrides:
-            updated = self.model_copy(update=overrides)
-            self.__dict__.update(updated.__dict__)
-            self.__pydantic_fields_set__ = updated.__pydantic_fields_set__
 
     # Core application ---------------------------------------------------
     app_env: str = Field(
