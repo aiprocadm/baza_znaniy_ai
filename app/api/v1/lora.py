@@ -32,6 +32,11 @@ async def load_lora_adapter(
 
 
     scaling = float(payload.scaling)
+    if not math.isfinite(scaling) or scaling <= 0.0 or scaling > 10.0:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, detail="INVALID_SCALING")
+
+
+    scaling = float(payload.scaling)
     if math.isnan(scaling) or scaling <= 0 or scaling > 10:
         raise HTTPException(status_code=422, detail="INVALID_SCALING")
 
@@ -52,6 +57,7 @@ async def load_lora_adapter(
             HTTP_UNPROCESSABLE_ENTITY,
             detail="Scaling factor must be a finite number greater than zero.",
         )
+
 
 
     try:

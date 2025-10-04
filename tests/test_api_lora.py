@@ -145,6 +145,17 @@ def test_scaling_validation_rejects_non_positive(
 ) -> None:
     adapter_path = _create_adapter(tmp_path, "invalid.gguf")
 
+    try:
+        response = lora_client.post(
+            "/api/v1/lora/load",
+            json={"path": str(adapter_path), "scaling": -0.5},
+        )
+    except ValidationError:
+        return
+    assert response.status_code == 422
+    assert response.json()["detail"] == "INVALID_SCALING"
+
+
 @pytest.mark.parametrize("invalid_scaling", [-0.5, 0, "not-a-number"])
 def test_load_adapter_rejects_invalid_scaling(
     lora_client: TestClient, tmp_path: Path, invalid_scaling: object
@@ -161,6 +172,23 @@ def test_load_adapter_rejects_invalid_scaling(
 
 
     assert response.status_code == 422
+
+    assert response.json()["detail"] == "INVALID_SCALING"
+
+
+def test_scaling_validation_rejects_above_maximum(
+    lora_client: TestClient, tmp_path: Path
+) -> None:
+    adapter_path = _create_adapter(tmp_path, "too_large.gguf")
+    try:
+        response = lora_client.post(
+            "/api/v1/lora/load",
+            json={"path": str(adapter_path), "scaling": 10.5},
+        )
+    except ValidationError:
+        return
+    assert response.status_code == 422
+    assert response.json()["detail"] == "INVALID_SCALING"
 
 
 def test_load_adapter_accepts_valid_scaling(lora_client: TestClient, tmp_path: Path) -> None:
