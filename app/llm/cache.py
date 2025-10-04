@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import sys
-from typing import Callable, Optional
+from typing import Any, Callable, Optional, TYPE_CHECKING, cast
 
-from app.core.config import Settings, get_settings
+if TYPE_CHECKING:  # pragma: no cover - import for static analysis only
+    from app.core.config import Settings as SettingsType
+else:
+    SettingsType = Any
 
 from .exceptions import (
     LLMProviderError,
@@ -32,7 +35,16 @@ __all__ = [
 _cached_provider: Optional[LLMProvider] = None
 
 
-def _resolve_factory() -> Callable[[Settings], LLMProvider]:
+def _get_settings() -> SettingsType:
+    """Return configured settings, deferring the import until runtime."""
+
+    from app.core.config import get_settings as _get_settings  # local import for flexibility
+
+    settings = _get_settings()
+    return cast(SettingsType, settings)
+
+
+def _resolve_factory() -> Callable[[SettingsType], LLMProvider]:
     """Return the currently active ``get_llm_provider`` implementation."""
 
     package = sys.modules.get("app.llm")
@@ -42,13 +54,13 @@ def _resolve_factory() -> Callable[[Settings], LLMProvider]:
     return _providers_get_llm_provider
 
 
-def get_llm_provider(settings: Settings) -> LLMProvider:
+def get_llm_provider(settings: SettingsType) -> LLMProvider:
     """Expose the default provider factory used by the cache module."""
 
     return _providers_get_llm_provider(settings)
 
 
-def get_cached_provider(settings: Settings | None = None) -> LLMProvider:
+def get_cached_provider(settings: SettingsType | None = None) -> LLMProvider:
     """Return a cached provider instance, creating one on demand."""
 
     global _cached_provider
@@ -56,7 +68,7 @@ def get_cached_provider(settings: Settings | None = None) -> LLMProvider:
         _cached_provider = _resolve_factory()(settings)
         return _cached_provider
     if _cached_provider is None:
-        _cached_provider = _resolve_factory()(get_settings())
+        _cached_provider = _resolve_factory()(_get_settings())
     return _cached_provider
 
 

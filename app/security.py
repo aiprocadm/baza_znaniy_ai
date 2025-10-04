@@ -52,7 +52,8 @@ def create_access_token(
     expire_minutes = globals().get("ACCESS_TOKEN_EXPIRE_MINUTES", settings.access_token_expire_minutes)
     expire_delta = expires_delta or timedelta(minutes=expire_minutes)
     expire = datetime.now(timezone.utc) + expire_delta
-    to_encode.update({"exp": expire})
+    exp_ts = expire.timestamp()
+    to_encode.update({"exp": int(exp_ts) if exp_ts.is_integer() else exp_ts})
     secret = globals().get("SECRET_KEY", settings.secret_key)
     algorithm = globals().get("ALGORITHM", settings.jwt_algorithm)
     return jwt.encode(to_encode, secret, algorithm=algorithm)
@@ -65,7 +66,12 @@ def decode_token(token: str) -> Dict[str, Any]:
         settings = get_settings()
         secret = globals().get("SECRET_KEY", settings.secret_key)
         algorithm = globals().get("ALGORITHM", settings.jwt_algorithm)
-        return jwt.decode(token, secret, algorithms=[algorithm])
+        payload = jwt.decode(token, secret, algorithms=[algorithm])
+        exp_value = payload.get("exp")
+        if isinstance(exp_value, datetime):
+            timestamp = exp_value.timestamp()
+            payload["exp"] = int(timestamp) if timestamp.is_integer() else timestamp
+        return payload
     except JWTError as exc:
         raise InvalidTokenError("Could not validate credentials") from exc
 
