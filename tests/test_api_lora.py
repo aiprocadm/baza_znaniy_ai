@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
 from importlib import reload
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Iterator
 
 import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from tests.service_stubs import install_service_stubs
@@ -130,18 +133,49 @@ def test_unload_without_adapter_returns_conflict(lora_client: TestClient, tmp_pa
     assert response.json()["detail"] == "ADAPTER_NOT_LOADED"
 
 
-@pytest.mark.parametrize("invalid_scaling", [-0.5, 0, "not-a-number"])
-def test_load_adapter_rejects_invalid_scaling(
-    lora_client: TestClient, tmp_path: Path, invalid_scaling: object
+@pytest.mark.parametrize("invalid_scaling", [-0.5, 0.0, 10.5, float("nan")])
+def test_scaling_validation_rejects_non_positive(
+    tmp_path: Path, invalid_scaling: float
 ) -> None:
+    from app.api.v1.lora import HTTP_UNPROCESSABLE_ENTITY, load_lora_adapter
+
     adapter_path = _create_adapter(tmp_path, "invalid.gguf")
 
-    response = lora_client.post(
-        "/api/v1/lora/load",
-        json={"path": str(adapter_path), "scaling": invalid_scaling},
-    )
+    class DummyManager:
+        async def load_adapter(self, *_: object, **__: object) -> None:  # pragma: no cover
+            raise AssertionError("load_adapter should not be invoked for invalid scaling")
 
-    assert response.status_code == 422
+    payload = SimpleNamespace(path=adapter_path, scaling=invalid_scaling)
+
+    async def invoke() -> None:
+        await load_lora_adapter(payload, DummyManager())
+
+    with pytest.raises(HTTPException) as excinfo:
+        asyncio.run(invoke())
+
+    assert excinfo.value.status_code == HTTP_UNPROCESSABLE_ENTITY
+    assert excinfo.value.detail == "INVALID_SCALING"
+
+
+def test_scaling_validation_rejects_non_numeric(tmp_path: Path) -> None:
+    from app.api.v1.lora import HTTP_UNPROCESSABLE_ENTITY, load_lora_adapter
+
+    adapter_path = _create_adapter(tmp_path, "invalid_str.gguf")
+
+    class DummyManager:
+        async def load_adapter(self, *_: object, **__: object) -> None:  # pragma: no cover
+            raise AssertionError("load_adapter should not be invoked for invalid scaling")
+
+    payload = SimpleNamespace(path=adapter_path, scaling="not-a-number")
+
+    async def invoke() -> None:
+        await load_lora_adapter(payload, DummyManager())
+
+    with pytest.raises(HTTPException) as excinfo:
+        asyncio.run(invoke())
+
+    assert excinfo.value.status_code == HTTP_UNPROCESSABLE_ENTITY
+    assert excinfo.value.detail == "INVALID_SCALING"
 
 
 def test_load_adapter_accepts_valid_scaling(lora_client: TestClient, tmp_path: Path) -> None:
