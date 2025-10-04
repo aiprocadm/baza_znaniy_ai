@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import math
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Protocol, runtime_checkable
@@ -79,6 +80,24 @@ def _ensure_llm_package_exports() -> None:
 
 
 _ensure_llm_package_exports()
+
+
+def ensure_valid_scaling(scaling: float) -> float:
+    """Return *scaling* as a float if it is finite and within supported bounds."""
+
+    try:
+        value = float(scaling)
+    except (TypeError, ValueError) as exc:  # pragma: no cover - defensive programming
+        raise ValueError("Scaling factor must be a float") from exc
+
+    if not math.isfinite(value):
+        raise ValueError("Scaling factor must be finite")
+    if value <= 0.0:
+        raise ValueError("Scaling factor must be greater than zero")
+    if value > 10.0:
+        raise ValueError("Scaling factor must not exceed 10.0")
+
+    return value
 
 
 @dataclass(slots=True)
@@ -204,6 +223,8 @@ class LlamaLoraManager:
     async def load_adapter(self, path: Path, scaling: float) -> LoraStatus:
         """Load a LoRA adapter with *scaling* and make it active."""
 
+        value = ensure_valid_scaling(scaling)
+
         candidate = self._normalise_path(path)
         if not candidate.is_file():
             raise FileNotFoundError(str(candidate))
@@ -216,13 +237,13 @@ class LlamaLoraManager:
             adapter_name = self._adapter_name_from_path(candidate)
 
             if hasattr(llama, "load_adapter"):
-                llama.load_adapter(str(candidate), adapter_name=adapter_name, scale=scaling)
+                llama.load_adapter(str(candidate), adapter_name=adapter_name, scale=value)
             if hasattr(llama, "set_adapter"):
                 llama.set_adapter(adapter_name)
 
             self._adapter = _AdapterState(
                 path=candidate,
-                scaling=scaling,
+                scaling=value,
                 adapter_name=adapter_name,
             )
             return self._current_status()
@@ -258,6 +279,7 @@ class LlamaLoraManager:
 __all__ = [
     "AdapterAlreadyLoadedError",
     "AdapterNotLoadedError",
+    "ensure_valid_scaling",
     "LlamaLoraManager",
     "LoraStatus",
 ]
