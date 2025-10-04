@@ -21,6 +21,12 @@ class _DummySettings:
     llama_cpp_model_path: Path | None = None
 
 
+class _MinimalSettings:
+    """Settings stub exposing only the required attributes at runtime."""
+
+    llm_model_name: str = "test-model"
+
+
 @dataclass
 class _RecordingFactory:
     """Callable factory that records adapter interactions."""
@@ -108,7 +114,9 @@ def test_manager_supports_stub_settings_when_settings_missing(tmp_path: Path) ->
     adapter_path.write_text("stub")
 
     async def scenario() -> None:
-        manager, factory = _make_manager_with_factory(module.LlamaLoraManager)
+        manager, factory = _make_manager_with_factory(
+            module.LlamaLoraManager, settings=_MinimalSettings()
+        )
         status = await manager.load_adapter(adapter_path, 0.5)
 
         assert status.loaded is True
@@ -120,22 +128,37 @@ def test_manager_supports_stub_settings_when_settings_missing(tmp_path: Path) ->
     asyncio.run(scenario())
 
 
-def test_manager_missing_required_attribute_raises_clear_error() -> None:
+def test_manager_missing_required_attribute_raises_clear_error_on_use(
+    tmp_path: Path,
+) -> None:
     module = _load_manager_module(include_settings=False)
 
     class _IncompleteSettings:
         llama_cpp_model_path: Path | None = None
 
-    with pytest.raises(
-        AttributeError,
-        match="requires settings with attribute 'llm_model_name'",
-    ):
-        module.LlamaLoraManager(_IncompleteSettings())
+    manager = module.LlamaLoraManager(_IncompleteSettings())
+
+    adapter_path = tmp_path / "adapter.safetensors"
+    adapter_path.write_text("stub")
+
+    async def scenario() -> None:
+        assert (await manager.get_status()).loaded is False
+        with pytest.raises(
+            AttributeError,
+            match="requires settings with attribute 'llm_model_name'",
+        ):
+            await manager.load_adapter(adapter_path, 0.5)
+
+    asyncio.run(scenario())
 
 
-def _make_manager_with_factory(manager_cls: type) -> tuple[Any, _RecordingFactory]:
+def _make_manager_with_factory(
+    manager_cls: type,
+    *,
+    settings: Any | None = None,
+) -> tuple[Any, _RecordingFactory]:
     factory = _RecordingFactory()
-    manager = manager_cls(_DummySettings(), llama_factory=factory)
+    manager = manager_cls(settings or _DummySettings(), llama_factory=factory)
     return manager, factory
 
 

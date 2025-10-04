@@ -60,6 +60,9 @@ def clear_chat_env(monkeypatch: pytest.MonkeyPatch) -> None:
         "CHAT_MEMORY_TTL_DAYS",
         "CHAT_SUMMARY_TRIGGER",
         "CHAT_MEMORY_MAXTOK",
+        "CHAT_MEMORY_MAX_TOKENS",
+        "MEMORY_MAX_TOKENS",
+        "MEMORY_DB_PATH",
     ]:
         monkeypatch.delenv(key, raising=False)
 
@@ -95,6 +98,7 @@ def test_init_memory_store_uses_chat_memory_env(monkeypatch: pytest.MonkeyPatch,
     assert captured["ttl_days"] == 15
     assert captured["summary_trigger"] == 7
     assert captured["max_tokens"] == 1234
+    assert settings.chat_memory_max_tokens == 1234
 
 
 def test_init_memory_store_accepts_bare_filename(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -126,5 +130,33 @@ def test_init_memory_store_accepts_bare_filename(monkeypatch: pytest.MonkeyPatch
     assert captured["ttl_days"] == settings.chat_memory_ttl_days
     assert captured["summary_trigger"] == settings.chat_summary_trigger
     assert captured["max_tokens"] == settings.chat_memory_max_tokens
+
+
+def test_memory_alias_overrides_default(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    captured: dict[str, object] = {}
+
+    class DummyMemoryStore:
+        def __init__(
+            self, db_path: str, ttl_days: int, summary_trigger: int, max_tokens: int
+        ) -> None:
+            captured["instance"] = self
+            captured["db_path"] = db_path
+            captured["ttl_days"] = ttl_days
+            captured["summary_trigger"] = summary_trigger
+            captured["max_tokens"] = max_tokens
+
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    app_main = _load_service_main(tmp_path)
+    monkeypatch.setattr(app_main, "MemoryStore", DummyMemoryStore)
+
+    monkeypatch.setenv("CHAT_MEMORY_ENABLED", "1")
+    monkeypatch.setenv("MEMORY_MAX_TOKENS", "4096")
+
+    settings = app_main.get_settings()
+    store = app_main._init_memory_store(settings)
+
+    assert isinstance(store, DummyMemoryStore)
+    assert captured["max_tokens"] == 4096
+    assert settings.chat_memory_max_tokens == 4096
 
 
