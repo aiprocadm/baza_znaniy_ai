@@ -570,14 +570,56 @@ def _ensure_sync_engine(engine: Engine, url: str) -> Engine:
         extras.setdefault(name, value)
 
     class _EngineProxy:
-        __slots__ = ("_original", "_extras")
+        __slots__ = ("_original", "_extras", "_preserved")
 
-        def __init__(self, original: Any, extras_map: dict[str, _ProxyEntry]) -> None:
+        def __init__(
+            self,
+            original: Any,
+            extras_map: dict[str, _ProxyEntry],
+            preserved: dict[str, Any],
+        ) -> None:
             object.__setattr__(self, "_original", original)
             object.__setattr__(self, "_extras", dict(extras_map))
+            object.__setattr__(self, "_preserved", dict(preserved))
+
+        def _fallback_value(self, item: str, entry: _ProxyEntry) -> Any:
+            preserved = object.__getattribute__(self, "_preserved").get(item)
+            if preserved is not None:
+                return preserved
+            return entry.value
+
+        def _resolve_extra(self, item: str, entry: _ProxyEntry) -> Any:
+            if entry.prefer_fallback:
+                return self._fallback_value(item, entry)
+
+            original = object.__getattribute__(self, "_original")
+            try:
+                candidate = getattr(original, item)
+            except Exception:
+                return self._fallback_value(item, entry)
+
+            validator = entry.validator
+            if validator is not None and not validator(candidate):
+                return self._fallback_value(item, entry)
+
+            preserved = object.__getattribute__(self, "_preserved").get(item)
+            if preserved is not None and callable(preserved):
+                return preserved
+
+            return candidate
 
         def __getattribute__(self, item: str) -> Any:
-            if item in {"_original", "_extras", "__setattr__", "__getattribute__", "__dir__", "__repr__"}:
+            if item in {
+                "_original",
+                "_extras",
+                "_preserved",
+                "__setattr__",
+                "__getattribute__",
+                "__dir__",
+                "__repr__",
+                "_fallback_value",
+                "_resolve_extra",
+            }:
                 return object.__getattribute__(self, item)
 
             if item == "__class__":
@@ -587,38 +629,22 @@ def _ensure_sync_engine(engine: Engine, url: str) -> Engine:
             if item == "__wrapped__":
                 return object.__getattribute__(self, "_original")
 
-            if item in {"_original", "_extras", "__dict__"}:
-                return object.__getattribute__(self, item)
-            if item == "__class__":  # pragma: no cover - runtime compatibility
-                return object.__getattribute__(self, "_original").__class__
             extras_map = object.__getattribute__(self, "_extras")
-            if item in extras_map:
-                return extras_map[item]
-            return getattr(object.__getattribute__(self, "_original"), item)
+            entry = extras_map.get(item)
+            if entry is not None:
+                return self._resolve_extra(item, entry)
+
+            original = object.__getattribute__(self, "_original")
+            return getattr(original, item)
 
         def __getattr__(self, item: str) -> Any:
             extras_map = object.__getattribute__(self, "_extras")
-            original = object.__getattribute__(self, "_original")
-            if item not in extras_map:
-
+            entry = extras_map.get(item)
             if entry is None:
+                original = object.__getattribute__(self, "_original")
                 return getattr(original, item)
 
-            entry = extras_map[item]
-
-            if entry.prefer_fallback:
-                return entry.value
-
-            try:
-                candidate = getattr(original, item)
-            except Exception:
-                return entry.value
-
-            validator = entry.validator
-            if validator is not None and not validator(candidate):
-                return entry.value
-
-            return candidate
+            return self._resolve_extra(item, entry)
 
         def __setattr__(self, key: str, value: Any) -> None:
             extras_map = object.__getattribute__(self, "_extras")
@@ -637,11 +663,29 @@ def _ensure_sync_engine(engine: Engine, url: str) -> Engine:
             original = object.__getattribute__(self, "_original")
             return f"EngineProxy({original!r})"
 
-    return _EngineProxy(engine, extras)
-    proxy_extras = dict(preserved_callables)
-    proxy_extras.update(extras)
+    proxy_extras = dict(extras)
 
-    return _EngineProxy(engine, proxy_extras)
+    for name, value in originals.items():
+        entry = proxy_extras.get(name)
+        if isinstance(entry, _ProxyEntry):
+            entry.value = value
+        else:
+            proxy_extras[name] = _ProxyEntry(value, False, _callable_validator if callable(value) else None)
+
+    for name, preserved in preserved_callables.items():
+        entry = proxy_extras.get(name)
+        if isinstance(entry, _ProxyEntry):
+            if callable(preserved) and entry.validator is None:
+                entry.validator = _callable_validator
+            entry.value = preserved
+        else:
+            proxy_extras[name] = _ProxyEntry(
+                preserved,
+                False,
+                _callable_validator if callable(preserved) else None,
+            )
+
+    return _EngineProxy(engine, proxy_extras, preserved_callables)
 
 
 def _create_schema_if_possible(engine: Engine, metadata: Any | None) -> None:
