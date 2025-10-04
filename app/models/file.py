@@ -510,6 +510,24 @@ def _ensure_sync_engine(engine: Engine, url: str) -> Engine:
             validator=_callable_validator,
         )
 
+
+    for name, entry in extras.items():
+        if entry.prefer_fallback:
+            needs_wrap = True
+            continue
+
+        try:
+            candidate = getattr(engine, name)
+        except Exception:
+            entry.prefer_fallback = True
+            needs_wrap = True
+            continue
+
+        validator = entry.validator
+        if validator is not None and not validator(candidate):
+            entry.prefer_fallback = True
+            needs_wrap = True
+
     def _final_fallback(name: str) -> Any:
         return {
             "dialect": dialect_extra or fallback_dialect,
@@ -629,6 +647,19 @@ def _ensure_sync_engine(engine: Engine, url: str) -> Engine:
 def _create_schema_if_possible(engine: Engine, metadata: Any | None) -> None:
     """Create database schema when ``SQLModel.metadata`` exposes ``create_all``."""
 
+    metadata = getattr(SQLModel, "metadata", None)
+    if metadata is None or not hasattr(metadata, "create_all"):
+        logger.warning(
+            "SQLModel.metadata is missing required API; reinitialising metadata"
+        )
+        try:
+            metadata = MetaData()
+            setattr(SQLModel, "metadata", metadata)
+        except Exception:
+            logger.exception(
+                "Failed to attach fallback MetaData to SQLModel; skipping schema creation"
+            )
+            return
     if metadata is None:
         logger.warning("SQLModel.metadata is missing; skipping schema creation")
         return
@@ -643,6 +674,7 @@ def _create_schema_if_possible(engine: Engine, metadata: Any | None) -> None:
 
     if not callable(create_all):
         logger.warning(
+            "SQLModel.metadata.create_all is unavailable even after fallback; skipping schema creation"
             "SQLModel.metadata.create_all is not callable; skipping schema creation"
         )
         return

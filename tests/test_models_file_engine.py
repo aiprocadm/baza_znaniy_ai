@@ -106,8 +106,13 @@ def _stubbed_file_module() -> Iterator[object]:
 
 def test_get_engine_handles_missing_create_all(tmp_path) -> None:
 
+def test_get_engine_handles_missing_create_all(tmp_path) -> None:
+    """``get_engine`` should rebuild metadata when ``create_all`` is absent."""
+
+
 def test_get_engine_handles_missing_create_all(tmp_path, monkeypatch) -> None:
     """``get_engine`` should ignore metadata without ``create_all``."""
+
 
 def test_get_engine_handles_missing_create_all(tmp_path) -> None:
     """``get_engine`` should replace unusable metadata before schema creation."""
@@ -216,8 +221,14 @@ def test_get_engine_handles_missing_metadata(tmp_path, monkeypatch) -> None:
             assert value in {1, "SELECT 1"}
 
 
+        metadata = file_module.SQLModel.metadata
+        assert metadata is not dummy_metadata
+        assert hasattr(metadata, "create_all")
+
+
 
         dispose()
+
 
     finally:
         file_module.SQLModel.metadata = original_metadata
@@ -412,6 +423,31 @@ def test_get_engine_sqlite_regression(tmp_path, monkeypatch) -> None:
         if db_path.exists():
             db_path.unlink()
 
+
+def test_get_engine_sqlite_aiosqlite_conversion(tmp_path) -> None:
+    """Ensure ``sqlite+aiosqlite`` URLs produce a synchronous SQLite engine."""
+
+    from app.models import file as file_module
+
+    file_module.get_engine.cache_clear()
+
+    async_url = f"sqlite+aiosqlite:///{tmp_path/'async.sqlite'}"
+
+    engine = file_module.get_engine(async_url, create_schema=False)
+
+    try:
+        assert getattr(engine.dialect, "name", None) == "sqlite"
+        assert getattr(engine.dialect, "driver", None) in {"sqlite", "pysqlite"}
+        assert str(getattr(engine, "url", "")).startswith("sqlite:///")
+
+        with engine.connect() as connection:
+            execution = connection.execute(text("SELECT 1"))
+            scalar = getattr(execution, "scalar", None)
+            value = scalar() if callable(scalar) else execution
+            assert value in {1, "SELECT 1"}
+    finally:
+        engine.dispose()
+        file_module.get_engine.cache_clear()
 
 
 def test_ensure_sync_engine_proxy_preserves_original_methods(tmp_path) -> None:

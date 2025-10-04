@@ -27,6 +27,14 @@ class UniqueConstraint:
         self.kwargs = kwargs
 
 
+class MetaData:
+    def __init__(self) -> None:
+        self._bound_engines: list[Any] = []
+
+    def create_all(self, engine: Any) -> None:  # pragma: no cover - stub behaviour
+        self._bound_engines.append(engine)
+
+
 def text(value: str) -> str:
     return value
 
