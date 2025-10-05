@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import math
+
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.core.auth import require_admin_user
@@ -34,6 +36,14 @@ async def load_lora_adapter(
         scaling_value = ensure_valid_scaling(payload.scaling)
     except ValueError as exc:
         raise HTTPException(HTTP_UNPROCESSABLE_ENTITY, detail="INVALID_SCALING") from exc
+
+    if not math.isfinite(scaling_value):  # Defensive guard for unexpected NaN/Inf
+        raise HTTPException(HTTP_UNPROCESSABLE_ENTITY, detail="INVALID_SCALING")
+
+    try:
+        setattr(payload, "scaling", scaling_value)
+    except Exception:  # pragma: no cover - payload may not support attribute assignment
+        pass
 
     try:
         adapter_status = await manager.load_adapter(payload.path, scaling_value)

@@ -105,6 +105,7 @@ def _stubbed_file_module() -> Iterator[object]:
 
 
 def test_get_engine_handles_missing_create_all(tmp_path) -> None:
+    pass
 
 def test_get_engine_handles_missing_create_all(tmp_path) -> None:
     """``get_engine`` should rebuild metadata when ``create_all`` is absent."""
@@ -424,6 +425,42 @@ def test_get_engine_sqlite_regression(tmp_path, monkeypatch) -> None:
             db_path.unlink()
 
 
+def test_stubbed_engine_exposes_fallback_api(tmp_path) -> None:
+    """Engines created with stubs should expose synchronous SQLAlchemy attributes."""
+
+    with _stubbed_file_module() as stubbed_module:
+        stubbed_module.get_engine.cache_clear()
+
+        engine = stubbed_module.get_engine(
+            f"sqlite:///{tmp_path/'stubbed.sqlite'}",
+            create_schema=False,
+        )
+
+        try:
+            assert hasattr(engine, "dialect")
+            assert getattr(engine.dialect, "name", None) == "sqlite"
+            assert getattr(engine.dialect, "driver", None) == "sqlite"
+
+            assert hasattr(engine, "url")
+            assert str(getattr(engine, "url", "")).startswith("sqlite")
+
+            dispose = getattr(engine, "dispose", None)
+            connect = getattr(engine, "connect", None)
+
+            assert callable(dispose)
+            assert callable(connect)
+
+            with connect() as connection:  # type: ignore[operator]
+                execution = connection.execute("SELECT 1")
+                scalar = getattr(execution, "scalar", None)
+                assert callable(scalar)
+                assert scalar() == "SELECT 1"
+
+            dispose()
+        finally:
+            stubbed_module.get_engine.cache_clear()
+
+
 def test_get_engine_sqlite_aiosqlite_conversion(tmp_path) -> None:
     """Ensure ``sqlite+aiosqlite`` URLs produce a synchronous SQLite engine."""
 
@@ -490,6 +527,7 @@ def test_ensure_sync_engine_proxy_preserves_original_methods(tmp_path) -> None:
         base_engine.dispose()
 
 def test_get_engine_downgrades_aiosqlite(tmp_path, monkeypatch) -> None:
+    pass
 
 
 def test_get_engine_stub_engine_proxy(tmp_path, monkeypatch) -> None:
