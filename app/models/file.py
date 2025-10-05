@@ -10,12 +10,24 @@ from typing import Any, Callable, Optional
 
 from sqlalchemy import Column, JSON, MetaData, Text, UniqueConstraint
 from sqlalchemy.engine import Engine, make_url
+from sqlalchemy.ext.asyncio import create_async_engine
+try:  # pragma: no cover - optional dependency during lightweight test runs
+    from sqlalchemy.orm import sessionmaker
+except Exception:  # pragma: no cover - fallback when SQLAlchemy ORM is absent
+    sessionmaker = None  # type: ignore[assignment]
 from sqlmodel import Field, SQLModel, Session, create_engine
 
 from app.models.entities import JobRecord, SettingRecord
 
 
 logger = logging.getLogger(__name__)
+
+
+if getattr(SQLModel, "metadata", None) is None:
+    try:
+        SQLModel.metadata = MetaData()  # type: ignore[assignment]
+    except Exception:  # pragma: no cover - defensive fallback when assignment fails
+        logger.warning("SQLModel.metadata is unavailable; schema creation may be skipped")
 
 
 _FALLBACK_MARKER = "__kb_sync_engine_fallback__"
@@ -769,6 +781,58 @@ def _ensure_sync_engine(engine: Engine, url: str) -> Engine:
     return _EngineProxy(engine, proxy_extras, preserved_callables)
 
 
+class _SQLAlchemySessionAdapter:
+    """Compatibility wrapper providing ``Session.exec`` for SQLAlchemy sessions."""
+
+    __slots__ = ("_session",)
+
+    def __init__(self, engine: Engine) -> None:
+        if sessionmaker is None:
+            raise RuntimeError(
+                "SQLAlchemy sessionmaker is unavailable; install SQLAlchemy to enable database access"
+            )
+
+        factory = sessionmaker(
+            bind=engine,
+            autoflush=False,
+            expire_on_commit=False,
+            future=True,
+        )
+        self._session = factory()
+
+    # ------------------------------------------------------------------
+    # Context manager protocol
+    # ------------------------------------------------------------------
+    def __enter__(self) -> "_SQLAlchemySessionAdapter":
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> bool:
+        self.close()
+        return False
+
+    def close(self) -> None:
+        closer = getattr(self._session, "close", None)
+        if callable(closer):
+            closer()
+
+    # ------------------------------------------------------------------
+    # SQLModel compatible helpers
+    # ------------------------------------------------------------------
+    def exec(self, statement):
+        execute = getattr(self._session, "execute", None)
+        if not callable(execute):
+            raise AttributeError("Underlying session does not support execute")
+        result = execute(statement)
+        scalars = getattr(result, "scalars", None)
+        return scalars() if callable(scalars) else result
+
+    # ------------------------------------------------------------------
+    # Attribute delegation
+    # ------------------------------------------------------------------
+    def __getattr__(self, item):  # pragma: no cover - simple delegation
+        return getattr(self._session, item)
+
+
 def _create_schema_if_possible(engine: Engine, metadata: Any | None) -> Any | None:
     """Create database schema when ``SQLModel.metadata`` exposes ``create_all``."""
 
@@ -817,107 +881,56 @@ def get_engine(url: Optional[str] = None, *, create_schema: bool = True) -> Engi
     __import__("app.models.entities")
 
     metadata = getattr(SQLModel, "metadata", None)
+    if metadata is None or not isinstance(metadata, MetaData):
+        metadata = MetaData()
+        setattr(SQLModel, "metadata", metadata)
 
     if driver_name.endswith("+aiosqlite"):
-        dialect_str = str(dialect) if dialect is not None else ""
-        sync_url = _sqlite_aiosqlite_to_sync_url(db_url_str)
-        if sync_url == db_url_str and "+aiosqlite" in dialect_str:
-            sync_url = _sqlite_aiosqlite_to_sync_url(dialect_str)
-        if "+aiosqlite" in sync_url:
-            sync_url = sync_url.replace("+aiosqlite", "", 1)
-
-        sync_url = db_url_str.replace("+aiosqlite", "", 1)
-        engine = create_engine(sync_url, echo=False, connect_args=_connect_args(sync_url))
-        engine = _ensure_sync_engine(engine, sync_url)
-        if create_schema:
-            metadata = getattr(SQLModel, "metadata", None)
-            create_all = getattr(metadata, "create_all", None) if metadata is not None else None
-            if callable(create_all):
-                create_all(engine)
-
-        sync_url: str
-
-        if hasattr(dialect, "set"):
-            # ``sqlalchemy.engine.URL`` exposes ``set`` for copying with driver
-            # overrides. When available, it provides the canonical sync URL.
-            sync_url = str(dialect.set(drivername="sqlite"))
+        try:
+            async_engine = create_async_engine(db_url, echo=False)
+        except ModuleNotFoundError:
+            sync_url = _sqlite_aiosqlite_to_sync_url(db_url_str)
+            engine = create_engine(sync_url, echo=False, connect_args=_connect_args(sync_url))
         else:
-            # ``make_url`` may be stubbed to return a string without ``set``.
-            # Fall back to string rewriting and retry URL reconstruction so a
-            # synchronous driver is always selected.
-            dialect_str = str(dialect) if dialect is not None else ""
-            sync_url = _sqlite_aiosqlite_to_sync_url(dialect_str)
-            if not sync_url or sync_url == dialect_str:
-                sync_url = _sqlite_aiosqlite_to_sync_url(db_url_str)
-
-            try:
-                rebuilt_dialect = make_url(sync_url)
-            except Exception:  # pragma: no cover - defensive against bad URLs
-                rebuilt_dialect = None
-            else:
-                rebuilt_set = getattr(rebuilt_dialect, "set", None)
-                if callable(rebuilt_set):
-                    sync_url = str(rebuilt_set(drivername="sqlite"))
-            # ``sqlalchemy.engine.make_url`` may be stubbed to return a simple
-            # string that lacks the ``set`` method. Fall back to rewriting the
-            # URL manually so that we always select the synchronous driver.
-
-            candidates = [str(dialect) if dialect is not None else "", db_url_str]
-
-            sync_url = ""
-            for candidate in candidates:
-                if not candidate:
-                    continue
-
-                downgraded = _sqlite_aiosqlite_to_sync_url(candidate)
-                if "+aiosqlite" in candidate or downgraded != candidate:
-                    sync_url = downgraded
-                    break
-
-            if not sync_url:
-                sync_url = _sqlite_aiosqlite_to_sync_url(db_url_str)
-            # ``dialect`` can be a bare string when the SQLAlchemy dependency
-            # is stubbed during tests. Fall back to deterministic string
-            # rewriting so the synchronous driver is selected without relying
-            # on the ``URL`` helpers.
-            dialect_str = str(dialect)
-            source = dialect_str if "+aiosqlite" in dialect_str else db_url_str
-            sync_url = _sqlite_aiosqlite_to_sync_url(source)
-
-        engine = create_engine(sync_url, echo=False, connect_args=_connect_args(sync_url))
-        engine = _ensure_sync_engine(engine, sync_url)
+            engine = async_engine.sync_engine
         if create_schema:
-            metadata = getattr(SQLModel, "metadata", metadata)
-            create_all = getattr(metadata, "create_all", None)
-
-            if callable(create_all):
-                create_all(engine)
-            else:
-                _create_schema_if_possible(engine, metadata)
-
-
+            _create_schema_if_possible(engine, metadata)
         return engine
 
     engine = create_engine(db_url, echo=False, connect_args=_connect_args(db_url_str))
-    engine = _ensure_sync_engine(engine, db_url_str)
     if create_schema:
-        metadata = getattr(SQLModel, "metadata", metadata)
-        create_all = getattr(metadata, "create_all", None)
-
-        if callable(create_all):
-            create_all(engine)
-        else:
-            _create_schema_if_possible(engine, metadata)
-
+        _create_schema_if_possible(engine, metadata)
 
     return engine
 
 
-def get_session(url: Optional[str] = None) -> Session:
-    """Create a SQLModel session bound to the configured engine."""
 
-    engine = get_engine(url)
-    return Session(engine)
+def get_session(url: Optional[str] = None, *, engine: Engine | None = None):
+    """Create a SQLModel-compatible session bound to the configured engine."""
+
+    target_engine = engine or get_engine(url)
+
+    session: Any
+    try:
+        session = Session(target_engine)
+    except TypeError:
+        session = Session(bind=target_engine)  # type: ignore[call-arg]
+
+    exec_method = getattr(session, "exec", None)
+    if callable(exec_method):
+        return session
+
+    closer = getattr(session, "close", None)
+    if callable(closer):
+        try:
+            closer()
+        except Exception:  # pragma: no cover - defensive best-effort cleanup
+            pass
+
+    logger.warning(
+        "sqlmodel.Session lacks 'exec'; falling back to SQLAlchemy session adapter"
+    )
+    return _SQLAlchemySessionAdapter(target_engine)
 
 
 __all__ = [
