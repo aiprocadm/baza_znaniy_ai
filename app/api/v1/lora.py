@@ -57,7 +57,9 @@ async def load_lora_adapter(
         raise HTTPException(HTTP_UNPROCESSABLE_ENTITY, detail="INVALID_SCALING") from exc
 
     try:
-        adapter_status = await manager.load_adapter(payload.path, scaling_value)
+        adapter_status = await manager.load_adapter(
+            payload_copy.path, payload_copy.scaling
+        )
     except FileNotFoundError as exc:
         raise HTTPException(HTTP_NOT_FOUND, detail="ADAPTER_NOT_FOUND") from exc
     except AdapterAlreadyLoadedError as exc:
