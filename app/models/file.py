@@ -7,7 +7,7 @@ import logging
 import os
 from datetime import datetime
 from functools import lru_cache
-from typing import Any, Callable, Optional
+from typing import Any, Optional
 
 import sqlite3
 from urllib.parse import unquote, urlparse
@@ -21,6 +21,7 @@ except Exception:  # pragma: no cover - fallback when SQLAlchemy ORM is absent
     sessionmaker = None  # type: ignore[assignment]
 from sqlmodel import Field, SQLModel, Session, create_engine
 
+from app.models.engine_guard import SyncEngineGuard
 from app.models.entities import JobRecord, SettingRecord
 
 
@@ -53,6 +54,28 @@ def _is_fallback_value(value: Any) -> bool:
         return bool(getattr(value, _FALLBACK_MARKER))
     except Exception:  # pragma: no cover - defensive against exotic descriptors
         return False
+
+
+def _collect_sqlmodel_tables() -> list[tuple[type[Any], Any]]:
+    """Capture SQLModel table mappings for later metadata migration."""
+
+    tables: list[tuple[type[Any], Any]] = []
+    seen: set[type[Any]] = set()
+    stack = list(getattr(SQLModel, "__subclasses__", lambda: [])())
+
+    while stack:
+        cls = stack.pop()
+        if cls in seen:
+            continue
+        seen.add(cls)
+
+        table = getattr(cls, "__table__", None)
+        if table is not None and hasattr(table, "tometadata"):
+            tables.append((cls, table))
+
+        stack.extend(getattr(cls, "__subclasses__", lambda: [])())
+
+    return tables
 
 
 class FileStatus(str):
@@ -253,10 +276,19 @@ def _ensure_sync_engine(engine: Engine, url: str) -> Engine:
         dialect_name = scheme
         dialect_driver = scheme
 
+    needs_wrap = False
+    attr_failure = False
+
+    def _note_failure() -> None:
+        nonlocal needs_wrap, attr_failure
+        needs_wrap = True
+        attr_failure = True
+
     def _try_assign_attr(target: Any, name: str, value: Any) -> bool:
         try:
             setattr(target, name, value)
         except (AttributeError, TypeError):
+            _note_failure()
             return False
         return True
 
@@ -264,9 +296,11 @@ def _ensure_sync_engine(engine: Engine, url: str) -> Engine:
         try:
             value = getattr(target, name)
         except Exception:  # pragma: no cover - defensive against exotic descriptors
+            _note_failure()
             return False
 
         if require_callable and not callable(value):
+            _note_failure()
             return False
 
         return True
@@ -293,8 +327,6 @@ def _ensure_sync_engine(engine: Engine, url: str) -> Engine:
 
     extras: dict[str, _ProxyEntry] = {}
 
-    needs_wrap = False
-
 
     def _register_extra(
         name: str,
@@ -306,7 +338,11 @@ def _ensure_sync_engine(engine: Engine, url: str) -> Engine:
     ) -> None:
         """Record a fallback attribute to expose via the proxy."""
 
-        nonlocal needs_wrap
+        nonlocal needs_wrap, attr_failure
+
+        if assignment_failed:
+            needs_wrap = True
+            attr_failure = True
 
         is_fallback = _is_fallback_value(value)
         effective_prefer_fallback = prefer_fallback or is_fallback
@@ -637,6 +673,7 @@ def _ensure_sync_engine(engine: Engine, url: str) -> Engine:
         except Exception:
             entry.prefer_fallback = True
             needs_wrap = True
+            attr_failure = True
             continue
 
         validator = entry.validator
@@ -685,6 +722,7 @@ def _ensure_sync_engine(engine: Engine, url: str) -> Engine:
         try:
             attr_value = getattr(engine, attr_name)
         except Exception:
+            attr_failure = True
             _force_core_fallback(attr_name)
             continue
 
@@ -697,6 +735,7 @@ def _ensure_sync_engine(engine: Engine, url: str) -> Engine:
                 getattr(attr_value, "name")
                 getattr(attr_value, "driver")
             except Exception:
+                attr_failure = True
                 _force_core_fallback(attr_name)
                 continue
 
@@ -708,7 +747,7 @@ def _ensure_sync_engine(engine: Engine, url: str) -> Engine:
 
 
 
-    if not needs_wrap:
+    if not needs_wrap and not attr_failure:
         return engine
 
     def _ensure_proxy_entry(
@@ -938,14 +977,22 @@ class _SQLAlchemySessionAdapter:
         return getattr(self._session, item)
 
 
-def _create_schema_if_possible(engine: Engine, metadata: Any | None) -> Any | None:
+def _create_schema_if_possible(engine: Engine, metadata: Any | None) -> MetaData | None:
     """Create database schema when ``SQLModel.metadata`` exposes ``create_all``."""
 
-    meta = metadata if metadata is not None else getattr(SQLModel, "metadata", None)
+    meta: MetaData | None
+    tables_snapshot: list[tuple[type[Any], Any]] | None = None
 
-    if meta is None or not hasattr(meta, "create_all"):
+    if isinstance(metadata, MetaData):
+        meta = metadata
+    else:
+        candidate = getattr(SQLModel, "metadata", None)
+        meta = candidate if isinstance(candidate, MetaData) else None
+
+    if meta is None:
+        tables_snapshot = _collect_sqlmodel_tables()
         logger.warning(
-            "SQLModel.metadata is missing required API; reinitialising metadata"
+            "SQLModel.metadata is missing or invalid; reinitialising metadata"
         )
         try:
             meta = MetaData()
@@ -954,18 +1001,38 @@ def _create_schema_if_possible(engine: Engine, metadata: Any | None) -> Any | No
             logger.exception(
                 "Failed to attach fallback MetaData to SQLModel; skipping schema creation"
             )
-            return getattr(SQLModel, "metadata", None)
+            return None
 
-    if meta is None:
-        logger.warning("SQLModel.metadata is missing; skipping schema creation")
-        return None
+        if tables_snapshot:
+            for model_cls, table in tables_snapshot:
+                migrate = getattr(table, "to_metadata", None)
+                if not callable(migrate):
+                    migrate = getattr(table, "tometadata", None)
+                if not callable(migrate):
+                    continue
+                try:
+                    new_table = migrate(meta)
+                except Exception:
+                    logger.exception(
+                        "Failed to migrate SQLModel table %s to new metadata",
+                        getattr(model_cls, "__name__", repr(model_cls)),
+                    )
+                    continue
+                try:
+                    setattr(model_cls, "__table__", new_table)
+                except Exception:
+                    logger.debug(
+                        "Unable to update __table__ for %s during metadata migration",
+                        getattr(model_cls, "__name__", repr(model_cls)),
+                        exc_info=True,
+                    )
 
     create_all = getattr(meta, "create_all", None)
     if not callable(create_all):
-        logger.warning(
-            "SQLModel.metadata.create_all is not callable; skipping schema creation"
+        logger.error(
+            "SQLModel.metadata.create_all is not callable; cannot create schema"
         )
-        return meta
+        return None
 
     create_all(engine)
     return meta
@@ -986,9 +1053,6 @@ def get_engine(url: Optional[str] = None, *, create_schema: bool = True) -> Engi
     __import__("app.models.entities")
 
     metadata = getattr(SQLModel, "metadata", None)
-    if metadata is None or not isinstance(metadata, MetaData):
-        metadata = MetaData()
-        setattr(SQLModel, "metadata", metadata)
 
     if driver_name.endswith("+aiosqlite"):
         try:
@@ -1013,10 +1077,19 @@ def get_engine(url: Optional[str] = None, *, create_schema: bool = True) -> Engi
                 engine_url = db_url_str
                 engine = sync_candidate
         _maybe_configure_sqlite_engine(engine, engine_url)
-        engine = _ensure_sync_engine(engine, engine_url)
+        engine = SyncEngineGuard(engine, engine_url).ensure_sync()
         _maybe_configure_sqlite_engine(engine, engine_url)
         if create_schema:
-            _create_schema_if_possible(engine, metadata)
+            schema_metadata = _create_schema_if_possible(engine, metadata)
+            if schema_metadata is None:
+                logger.error(
+                    "Unable to initialise SQLModel metadata; aborting engine setup"
+                )
+                raise RuntimeError(
+                    "SQLModel metadata initialisation failed; cannot create schema"
+                )
+            setattr(SQLModel, "metadata", schema_metadata)
+            metadata = schema_metadata
         ensured_engine = _ensure_sync_engine(engine, engine_url)
         if ensured_engine is not engine:
             _maybe_configure_sqlite_engine(ensured_engine, engine_url)
@@ -1024,16 +1097,24 @@ def get_engine(url: Optional[str] = None, *, create_schema: bool = True) -> Engi
 
     engine = create_engine(db_url, echo=False, connect_args=_connect_args(db_url_str))
     _maybe_configure_sqlite_engine(engine, db_url_str)
-    engine = _ensure_sync_engine(engine, db_url_str)
+    engine = SyncEngineGuard(engine, db_url_str).ensure_sync()
     _maybe_configure_sqlite_engine(engine, db_url_str)
     if create_schema:
-        _create_schema_if_possible(engine, metadata)
+        schema_metadata = _create_schema_if_possible(engine, metadata)
+        if schema_metadata is None:
+            logger.error(
+                "Unable to initialise SQLModel metadata; aborting engine setup"
+            )
+            raise RuntimeError(
+                "SQLModel metadata initialisation failed; cannot create schema"
+            )
+        setattr(SQLModel, "metadata", schema_metadata)
+        metadata = schema_metadata
 
-    ensured_engine = _ensure_sync_engine(engine, db_url_str)
-    if ensured_engine is not engine:
-        _maybe_configure_sqlite_engine(ensured_engine, db_url_str)
+    engine = SyncEngineGuard(engine, db_url_str).ensure_sync()
+    _maybe_configure_sqlite_engine(engine, db_url_str)
 
-    return ensured_engine
+    return engine
 
 
 

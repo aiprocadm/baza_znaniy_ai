@@ -21,12 +21,13 @@ try:  # pragma: no cover - optional dependency for wider validation coverage
 except Exception:  # pragma: no cover - numpy is optional in test environments
     np = None  # type: ignore[assignment]
 
-from app.api.v1 import lora as lora_module
-from app.api.v1.lora import load_lora_adapter
-from app.models.lora import LoraLoadRequest
 from tests.service_stubs import install_service_stubs
 
 install_service_stubs()
+
+from app.api.v1 import lora as lora_module
+from app.api.v1.lora import load_lora_adapter
+from app.models.lora import LoraLoadRequest
 
 
 @pytest.fixture()
@@ -245,6 +246,45 @@ def test_load_endpoint_rejects_invalid_scaling_when_bypassed(
     expected_status = getattr(status, "HTTP_422_UNPROCESSABLE_ENTITY", 422)
     assert response.status_code == expected_status
     assert response.json()["detail"] == "INVALID_SCALING"
+
+
+def test_load_endpoint_negative_scaling_returns_422_without_manager_call(
+    lora_client: TestClient,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    adapter_path = _create_adapter(tmp_path, "negative_integration.gguf")
+
+    async_manager = AsyncMock()
+    async_manager.load_adapter = AsyncMock()
+
+    def _construct_negative(
+        cls: type[LoraLoadRequest], data: dict[str, object], /, *_: object, **__: object
+    ) -> object:
+        return _construct_lora_payload(Path(data["path"]), data.get("scaling", -0.5))
+
+    monkeypatch.setattr(
+        lora_module.LoraLoadRequest,
+        "model_validate",
+        classmethod(_construct_negative),
+    )
+
+    app = lora_client.app
+    dependency = lora_module.get_lora_manager
+    app.dependency_overrides[dependency] = lambda: async_manager
+
+    try:
+        response = lora_client.post(
+            "/api/v1/lora/load",
+            json={"path": str(adapter_path), "scaling": -0.5},
+        )
+    finally:
+        app.dependency_overrides.pop(dependency, None)
+
+    expected_status = getattr(status, "HTTP_422_UNPROCESSABLE_ENTITY", 422)
+    assert response.status_code == expected_status
+    assert response.json()["detail"] == "INVALID_SCALING"
+    async_manager.load_adapter.assert_not_called()
 
 
 def _coerce_scaling_candidate(candidate: object) -> object:
