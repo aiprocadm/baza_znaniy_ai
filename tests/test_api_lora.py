@@ -231,6 +231,11 @@ def test_load_endpoint_rejects_invalid_scaling_when_bypassed(
         classmethod(_passthrough_model_validate),
     )
 
+    def _identity_scaling(value: object) -> object:
+        return value
+
+    monkeypatch.setattr(lora_module, "ensure_valid_scaling", _identity_scaling)
+
     response = lora_client.post(
         "/api/v1/lora/load",
         json={"path": str(adapter_path), "scaling": raw_value},
