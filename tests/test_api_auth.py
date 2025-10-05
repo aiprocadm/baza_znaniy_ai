@@ -90,6 +90,12 @@ def test_get_engine_sync_sqlite(
         assert engine.dialect.name == "sqlite"
         assert engine.dialect.driver != "aiosqlite"
         assert str(engine.url).startswith("sqlite:")
+        assert hasattr(engine, "dispose")
+        assert callable(engine.dispose)
+        assert hasattr(engine, "connect")
+        assert callable(engine.connect)
+        connection = engine.connect()
+        assert hasattr(connection, "execute")
     finally:
         engine.dispose()
         file_models.get_engine.cache_clear()

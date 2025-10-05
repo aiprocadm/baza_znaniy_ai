@@ -575,32 +575,59 @@ def _ensure_sync_engine(engine: Engine, url: str) -> Engine:
             "connect": connect_extra or _connect,
         }[name]
 
+    _core_validators: dict[str, Callable[[Any], bool]] = {
+        "dialect": _dialect_validator,
+        "url": _url_validator,
+        "dispose": _callable_validator,
+        "connect": _callable_validator,
+    }
+
+    def _force_core_fallback(attr_name: str) -> None:
+        nonlocal needs_wrap
+
+        fallback_value = _final_fallback(attr_name)
+        validator = _core_validators[attr_name]
+
+        _register_extra(
+            attr_name,
+            fallback_value,
+            prefer_fallback=True,
+            validator=validator,
+        )
+
+        needs_wrap = True
+
     for attr_name, require_callable in (
         ("dialect", False),
         ("url", False),
         ("dispose", True),
         ("connect", True),
     ):
+        validator = _core_validators[attr_name]
+
         try:
             attr_value = getattr(engine, attr_name)
-            if require_callable and not callable(attr_value):
-                raise TypeError(attr_name)
-            if attr_name == "dialect":
+        except Exception:
+            _force_core_fallback(attr_name)
+            continue
+
+        if require_callable and not callable(attr_value):
+            _force_core_fallback(attr_name)
+            continue
+
+        if attr_name == "dialect":
+            try:
                 getattr(attr_value, "name")
                 getattr(attr_value, "driver")
+            except Exception:
+                _force_core_fallback(attr_name)
+                continue
+
+        try:
+            if not validator(attr_value):
+                raise ValueError(attr_name)
         except Exception:
-            _register_extra(
-                attr_name,
-                _final_fallback(attr_name),
-                prefer_fallback=True,
-                validator=(
-                    _dialect_validator
-                    if attr_name == "dialect"
-                    else _url_validator
-                    if attr_name == "url"
-                    else _callable_validator
-                ),
-            )
+            _force_core_fallback(attr_name)
 
 
 
