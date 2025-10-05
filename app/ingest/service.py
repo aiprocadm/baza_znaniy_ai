@@ -291,6 +291,15 @@ class IngestService:
         try:
             job_record = self._create_job_record(job, session=session_obj)
             job.job_record_id = job_record.id
+            worker = getattr(self, "worker", None)
+            if self.auto_process and worker is not None:
+                commit = getattr(session_obj, "commit", None)
+                if callable(commit):
+                    commit()
+                else:  # pragma: no cover - extremely defensive
+                    session_obj.flush()
+                await worker.process_job(job)
+                return job
             try:
                 self.queue.put_nowait(job)
             except QueueFull as exc:
@@ -433,6 +442,13 @@ class IngestWorker:
         if self.service.auto_process:
             self.service.ensure_background_worker()
 
+    async def process_job(self, job: IngestJob) -> None:
+        logger.debug("ingest worker immediate processing job %s", job)
+        try:
+            await self._process(job)
+        except Exception:
+            await self._handle_failure(job)
+
     async def run(self) -> None:
         logger.debug("ingest worker run loop entered")
         while True:
@@ -531,6 +547,7 @@ class IngestWorker:
         except Exception as exc:
             success = False
             error_message = str(exc)
+            logger.exception("Failed to ingest job %s", job)
         finally:
             with Session(self.service.engine) as session:
                 file_obj = session.get(FileRecord, job.file_id)
