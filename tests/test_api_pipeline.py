@@ -35,6 +35,7 @@ def api_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Test
     monkeypatch.setenv("LLM_MODEL_VERSION", "test-model-4.5.6")
     monkeypatch.setenv("LORA_ADAPTER_VERSION", "test-lora-7.8.9")
     monkeypatch.setenv("LLM_LORA_ADAPTER", "stub-adapter")
+    monkeypatch.setenv("UPLOAD_ALLOWED_EXTS", "pdf,docx,pptx,xlsx,txt,md")
     install_service_stubs()
 
     from app.core import config as config_module

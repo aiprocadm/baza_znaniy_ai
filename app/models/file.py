@@ -18,6 +18,27 @@ from app.models.entities import JobRecord, SettingRecord
 logger = logging.getLogger(__name__)
 
 
+_FALLBACK_MARKER = "__kb_sync_engine_fallback__"
+
+
+def _mark_fallback(value: Any) -> None:
+    """Mark the provided value as a synthetic fallback."""
+
+    try:
+        setattr(value, _FALLBACK_MARKER, True)
+    except Exception:  # pragma: no cover - attribute assignment best effort
+        return
+
+
+def _is_fallback_value(value: Any) -> bool:
+    """Check whether a value has been flagged as a fallback helper."""
+
+    try:
+        return bool(getattr(value, _FALLBACK_MARKER))
+    except Exception:  # pragma: no cover - defensive against exotic descriptors
+        return False
+
+
 class FileStatus(str):
     QUEUED = "queued"
     PROCESSING = "processing"
@@ -196,11 +217,40 @@ def _ensure_sync_engine(engine: Engine, url: str) -> Engine:
     ) -> None:
         """Record a fallback attribute to expose via the proxy."""
 
-
-        extras[name] = value
-
         nonlocal needs_wrap
-        extras[name] = _ProxyEntry(value, prefer_fallback, validator)
+
+        is_fallback = _is_fallback_value(value)
+        effective_prefer_fallback = prefer_fallback or is_fallback
+
+        entry = extras.get(name)
+        if entry is None:
+            extras[name] = _ProxyEntry(value, effective_prefer_fallback, validator)
+            return
+
+        if effective_prefer_fallback:
+            if is_fallback or not entry.prefer_fallback:
+                entry.value = value
+            entry.prefer_fallback = True
+            if validator is not None:
+                entry.validator = validator
+            return
+
+        if entry.prefer_fallback:
+            can_downgrade = not is_fallback
+            if validator is not None:
+                try:
+                    can_downgrade = can_downgrade and bool(validator(value))
+                except Exception:
+                    can_downgrade = False
+            if can_downgrade:
+                entry.prefer_fallback = False
+            if validator is not None:
+                entry.validator = validator
+            return
+
+        entry.value = value
+        if validator is not None:
+            entry.validator = validator
 
 
     def _preserve_callable(name: str, value: Any) -> None:
@@ -208,19 +258,21 @@ def _ensure_sync_engine(engine: Engine, url: str) -> Engine:
             preserved_callables[name] = value
 
     class _FallbackDialect:
-        __slots__ = ("name", "driver")
+        __slots__ = ("name", "driver", _FALLBACK_MARKER)
 
         def __init__(self, name: str, driver: str) -> None:
             self.name = name
             self.driver = driver
+            setattr(self, _FALLBACK_MARKER, True)
 
     class _DialectProxy:
-        __slots__ = ("_original", "name", "driver")
+        __slots__ = ("_original", "name", "driver", _FALLBACK_MARKER)
 
         def __init__(self, original: Any, name: str, driver: str) -> None:
             object.__setattr__(self, "_original", original)
             object.__setattr__(self, "name", getattr(original, "name", name))
             object.__setattr__(self, "driver", getattr(original, "driver", driver))
+            object.__setattr__(self, _FALLBACK_MARKER, True)
 
         def __getattr__(self, item: str) -> Any:
             return getattr(object.__getattribute__(self, "_original"), item)
@@ -341,6 +393,8 @@ def _ensure_sync_engine(engine: Engine, url: str) -> Engine:
     def _noop_dispose(*_: Any, **__: Any) -> None:
         return None
 
+    _mark_fallback(_noop_dispose)
+
     dispose_extra: Any | None = None
     prefer_dispose_fallback = False
 
@@ -403,6 +457,8 @@ def _ensure_sync_engine(engine: Engine, url: str) -> Engine:
 
     def _connect(*_: Any, **__: Any) -> _FallbackConnection:
         return _FallbackConnection()
+
+    _mark_fallback(_connect)
 
     connect_extra: Any | None = None
     prefer_connect_fallback = False

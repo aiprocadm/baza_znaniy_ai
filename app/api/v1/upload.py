@@ -9,7 +9,12 @@ import secrets
 import sys
 from pathlib import Path
 from tempfile import SpooledTemporaryFile
-from typing import List, Optional
+from typing import Any, List, Optional
+
+try:  # pragma: no cover - starlette is optional when running with stubs
+    from starlette.datastructures import UploadFile as StarletteUploadFile
+except Exception:  # pragma: no cover - fallback when starlette is not installed
+    StarletteUploadFile = None  # type: ignore[assignment]
 
 from fastapi import APIRouter, Depends, File, HTTPException, status
 from fastapi import UploadFile as FastAPIUploadFile
@@ -287,6 +292,18 @@ async def upload_file(
                     pass
             return UploadFile(filename=filename, file=file_obj, content_type=content_type)
 
+        if StarletteUploadFile is not None and isinstance(item, StarletteUploadFile):
+            filename = getattr(item, "filename", "uploaded") or "uploaded"
+            content_type = getattr(item, "content_type", None)
+            file_obj = getattr(item, "file", item)
+            seek = getattr(file_obj, "seek", None)
+            if callable(seek):
+                try:
+                    seek(0)
+                except Exception:  # pragma: no cover - defensive seek
+                    pass
+            return UploadFile(filename=filename, file=file_obj, content_type=content_type)
+
         if isinstance(item, dict):  # pragma: no cover - compatibility for legacy clients
             filename = (item.get("filename") or "uploaded").strip() or "uploaded"
             content_type = item.get("content_type")
@@ -395,7 +412,31 @@ async def upload_file(
 
 
 def _coerce_upload_argument(item: object) -> UploadFile:
-    if isinstance(item, (UploadFile, FastAPIUploadFile)):
+    candidate_types: tuple[type[Any], ...] = (UploadFile, FastAPIUploadFile)
+    if StarletteUploadFile is not None:
+        candidate_types = (*candidate_types, StarletteUploadFile)
+
+    if isinstance(item, candidate_types):
+        filename = getattr(item, "filename", None)
+        if not filename:
+            headers = getattr(item, "headers", None)
+            raw_disposition = None
+            if headers is not None:
+                try:
+                    raw_disposition = headers.get("content-disposition")
+                except Exception:  # pragma: no cover - defensive against custom mappings
+                    raw_disposition = None
+            if raw_disposition:
+                for piece in raw_disposition.split(";"):
+                    key, sep, value = piece.partition("=")
+                    if sep and key.strip().lower() in {"filename", "filename*"}:
+                        candidate = value.strip().strip('"')
+                        if candidate:
+                            try:
+                                setattr(item, "filename", candidate)
+                            except Exception:  # pragma: no cover - assignment best effort
+                                pass
+                            break
         return item
 
     filename = "uploaded"
