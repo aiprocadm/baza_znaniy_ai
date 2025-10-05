@@ -7,7 +7,7 @@ import logging
 import os
 from datetime import datetime
 from functools import lru_cache
-from typing import Any, Callable, Optional
+from typing import Any, Optional
 
 import sqlite3
 from urllib.parse import unquote, urlparse
@@ -21,6 +21,7 @@ except Exception:  # pragma: no cover - fallback when SQLAlchemy ORM is absent
     sessionmaker = None  # type: ignore[assignment]
 from sqlmodel import Field, SQLModel, Session, create_engine
 
+from app.models.engine_guard import SyncEngineGuard
 from app.models.entities import JobRecord, SettingRecord
 
 
@@ -1076,7 +1077,7 @@ def get_engine(url: Optional[str] = None, *, create_schema: bool = True) -> Engi
                 engine_url = db_url_str
                 engine = sync_candidate
         _maybe_configure_sqlite_engine(engine, engine_url)
-        engine = _ensure_sync_engine(engine, engine_url)
+        engine = SyncEngineGuard(engine, engine_url).ensure_sync()
         _maybe_configure_sqlite_engine(engine, engine_url)
         if create_schema:
             schema_metadata = _create_schema_if_possible(engine, metadata)
@@ -1096,7 +1097,7 @@ def get_engine(url: Optional[str] = None, *, create_schema: bool = True) -> Engi
 
     engine = create_engine(db_url, echo=False, connect_args=_connect_args(db_url_str))
     _maybe_configure_sqlite_engine(engine, db_url_str)
-    engine = _ensure_sync_engine(engine, db_url_str)
+    engine = SyncEngineGuard(engine, db_url_str).ensure_sync()
     _maybe_configure_sqlite_engine(engine, db_url_str)
     if create_schema:
         schema_metadata = _create_schema_if_possible(engine, metadata)
@@ -1110,11 +1111,10 @@ def get_engine(url: Optional[str] = None, *, create_schema: bool = True) -> Engi
         setattr(SQLModel, "metadata", schema_metadata)
         metadata = schema_metadata
 
-    ensured_engine = _ensure_sync_engine(engine, db_url_str)
-    if ensured_engine is not engine:
-        _maybe_configure_sqlite_engine(ensured_engine, db_url_str)
+    engine = SyncEngineGuard(engine, db_url_str).ensure_sync()
+    _maybe_configure_sqlite_engine(engine, db_url_str)
 
-    return ensured_engine
+    return engine
 
 
 
