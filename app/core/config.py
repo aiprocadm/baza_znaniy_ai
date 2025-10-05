@@ -464,6 +464,56 @@ class Settings(BaseSettings):
         default=1.0,
         validation_alias=AliasChoices("INGEST_BACKOFF_SECONDS", "INGEST_BACKOFF_BASE"),
     )
+    ingest_queue_size: int = Field(
+        default=64,
+        validation_alias=AliasChoices("INGEST_QUEUE_SIZE", "INGEST_MAX_QUEUE"),
+    )
+    ingest_worker_interval_seconds: float = Field(
+        default=1.0,
+        validation_alias=AliasChoices(
+            "INGEST_WORKER_INTERVAL_SECONDS",
+            "INGEST_POLL_INTERVAL",
+            "INGEST_SCHEDULER_INTERVAL",
+        ),
+    )
+    ingest_maintenance_cron: str = Field(
+        default="0 * * * *",
+        validation_alias=AliasChoices(
+            "INGEST_MAINTENANCE_CRON",
+            "INGEST_MAINTENANCE_SCHEDULE",
+        ),
+    )
+    ingest_job_retention_days: int = Field(
+        default=7,
+        validation_alias=AliasChoices(
+            "INGEST_JOB_RETENTION_DAYS",
+            "INGEST_RETENTION_DAYS",
+        ),
+    )
+
+    @field_validator("ingest_queue_size", mode="before")
+    @classmethod
+    def _validate_ingest_queue_size(cls, value: object) -> int:
+        candidate = int(value)
+        if candidate <= 0:
+            raise ValueError("ingest_queue_size must be greater than zero")
+        return candidate
+
+    @field_validator("ingest_worker_interval_seconds", mode="before")
+    @classmethod
+    def _validate_ingest_worker_interval(cls, value: object) -> float:
+        candidate = float(value)
+        if candidate <= 0:
+            raise ValueError("ingest_worker_interval_seconds must be positive")
+        return candidate
+
+    @field_validator("ingest_job_retention_days", mode="before")
+    @classmethod
+    def _validate_ingest_retention(cls, value: object) -> int:
+        candidate = int(value)
+        if candidate <= 0:
+            raise ValueError("ingest_job_retention_days must be positive")
+        return candidate
 
 
     # OCR configuration --------------------------------------------------

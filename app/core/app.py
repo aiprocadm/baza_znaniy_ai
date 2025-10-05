@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
+from datetime import timezone
 from typing import Sequence
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from app.api.router import api_router
 from app.chat.summarizer import ConversationSummarizer
 from app.core.auth import TokenRegistry
@@ -77,6 +78,8 @@ def create_app(provider: LLMProvider | None = None) -> FastAPI:
 
     file_store = FileStore()
     ingest_queue = IngestQueue()
+    scheduler = AsyncIOScheduler(timezone=timezone.utc)
+
     ingest_service = IngestService(
         max_retries=settings.ingest_max_retries,
         backoff_seconds=settings.ingest_backoff_seconds,
@@ -84,6 +87,7 @@ def create_app(provider: LLMProvider | None = None) -> FastAPI:
     )
     ingest_worker = IngestWorker(ingest_service)
     ingest_service.set_worker(ingest_worker)
+    ingest_service.configure_scheduler(scheduler)
 
     min_citations, max_citations = settings.citations_bounds
 
@@ -99,6 +103,7 @@ def create_app(provider: LLMProvider | None = None) -> FastAPI:
     application.state.ingest_service = ingest_service
     application.state.ingest_worker = ingest_worker
     application.state.ingest_worker_task = None
+    application.state.scheduler = scheduler
     application.state.summarizer = summarizer
     application.state.reranker = reranker
     fallback_index: list[dict[str, object]] = []
@@ -120,22 +125,28 @@ def create_app(provider: LLMProvider | None = None) -> FastAPI:
     async def _startup_ingestion_worker() -> None:  # pragma: no cover - I/O heavy
         worker = getattr(application.state, "ingest_worker", None)
         service = getattr(application.state, "ingest_service", None)
-        if worker is None or service is None:
+        scheduler = getattr(application.state, "scheduler", None)
+        if worker is None or service is None or scheduler is None:
             return
         try:
             service.ensure_background_worker()
             worker.ensure_started()
-            application.state.ingest_worker_task = getattr(worker, "_task", None)
+            if not scheduler.running:
+                scheduler.start()
+            application.state.ingest_worker_task = None
         except Exception:  # pragma: no cover - defensive
             logger.exception("Failed to start ingestion worker")
 
     @application.on_event("shutdown")
     async def _shutdown_ingestion_worker() -> None:  # pragma: no cover - I/O heavy
         service = getattr(application.state, "ingest_service", None)
+        scheduler = getattr(application.state, "scheduler", None)
         if service is None:
             return
         try:
             await service.stop_background_worker()
+            if scheduler is not None and scheduler.running:
+                await scheduler.shutdown(wait=True)
         except Exception:  # pragma: no cover - defensive
             logger.exception("Failed to stop ingestion worker")
 

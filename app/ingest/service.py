@@ -6,10 +6,15 @@ import asyncio
 import hashlib
 import logging
 import os
-import threading
+from asyncio import QueueEmpty, QueueFull
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional, Tuple
+
+from apscheduler.jobstores.base import JobLookupError
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.triggers.cron import CronTrigger
+from apscheduler.triggers.interval import IntervalTrigger
 
 from sqlmodel import Session, delete, select
 
@@ -46,6 +51,10 @@ class IngestJob:
     attempt: int = 0
 
 
+class IngestQueueFullError(RuntimeError):
+    """Raised when the ingestion queue cannot accept additional jobs."""
+
+
 class IngestService:
     """Service responsible for computing file hashes and enqueueing jobs."""
 
@@ -53,6 +62,7 @@ class IngestService:
         self,
         *,
         queue: Optional[asyncio.Queue[Optional[IngestJob]]] = None,
+        queue_maxsize: Optional[int] = None,
         max_retries: Optional[int] = None,
         backoff_seconds: Optional[float] = None,
         engine=None,
@@ -63,16 +73,24 @@ class IngestService:
         backoff = (
             settings.ingest_backoff_seconds if backoff_seconds is None else backoff_seconds
         )
-        self.queue: asyncio.Queue[Optional[IngestJob]] = queue or asyncio.Queue()
+        queue_size = queue_maxsize or settings.ingest_queue_size
+        self.queue_maxsize = max(1, int(queue_size))
+        self.queue: asyncio.Queue[Optional[IngestJob]] = queue or asyncio.Queue(
+            maxsize=self.queue_maxsize
+        )
         self.max_retries = max(0, int(retries))
         self.backoff_seconds = max(0.0, float(backoff))
         self._engine = engine
         self.auto_process = auto_process
-        self._thread_lock = threading.Lock()
-        self._worker_instance: Optional["IngestWorker"] = None
-        self._job_threads: set[threading.Thread] = set()
-
         self.worker: "IngestWorker" | None = None
+        self._scheduler: AsyncIOScheduler | None = None
+        self._worker_job_id: str | None = None
+        self._maintenance_job_id: str | None = None
+        self.worker_interval_seconds = max(
+            0.1, float(settings.ingest_worker_interval_seconds)
+        )
+        self.maintenance_cron = settings.ingest_maintenance_cron
+        self.job_retention_days = max(1, int(settings.ingest_job_retention_days))
 
     @property
     def engine(self):
@@ -83,58 +101,127 @@ class IngestService:
     def set_worker(self, worker: "IngestWorker") -> None:
         """Register the worker instance responsible for background processing."""
 
-        with self._thread_lock:
-            self._worker_instance = worker
+        self.worker = worker
+
+    def configure_scheduler(self, scheduler: AsyncIOScheduler) -> None:
+        """Attach an :class:`AsyncIOScheduler` used for background jobs."""
+
+        self._scheduler = scheduler
+
+    def _scheduler_job_name(self, suffix: str) -> str:
+        return f"ingest-{id(self)}-{suffix}"
 
     def ensure_background_worker(self) -> None:
         """Start a background worker thread when auto-processing is enabled."""
 
         if not self.auto_process:
             return
-        with self._thread_lock:
-            if self._worker_instance is None:
-                self._worker_instance = IngestWorker(self)
-            # Prune completed job threads to avoid unbounded growth.
-            self._job_threads = {thread for thread in self._job_threads if thread.is_alive()}
+        if self.worker is None:
+            self.worker = IngestWorker(self)
+        if self._scheduler is None:
+            raise RuntimeError("Ingest scheduler has not been configured")
+        if self._worker_job_id is None:
+            trigger = IntervalTrigger(seconds=self.worker_interval_seconds)
+            job = self._scheduler.add_job(
+                self.worker.drain,
+                trigger=trigger,
+                id=self._scheduler_job_name("worker"),
+                max_instances=1,
+                coalesce=True,
+            )
+            self._worker_job_id = job.id
+        if self.maintenance_cron and self._maintenance_job_id is None:
+            try:
+                trigger = CronTrigger.from_crontab(self.maintenance_cron)
+            except ValueError:
+                logger.error(
+                    "Invalid ingest maintenance cron expression: %s",
+                    self.maintenance_cron,
+                )
+            else:
+                job = self._scheduler.add_job(
+                    self.run_maintenance,
+                    trigger=trigger,
+                    id=self._scheduler_job_name("maintenance"),
+                    max_instances=1,
+                    coalesce=True,
+                )
+                self._maintenance_job_id = job.id
 
     async def stop_background_worker(self) -> None:
         """Signal the background worker thread to shut down."""
 
-        if not self.auto_process:
+        if self.worker is not None:
+            await self.worker.shutdown()
+        if self._scheduler is None:
             return
-        # Wait for active ingestion threads to finish gracefully.
-        while True:
-            with self._thread_lock:
-                threads = [thread for thread in self._job_threads if thread.is_alive()]
-                if not threads:
-                    self._job_threads.clear()
-                    break
-            for thread in threads:
-                thread.join(timeout=1)
-
-    def _spawn_job_thread(self, job: IngestJob) -> None:
-        """Execute a job asynchronously using a dedicated worker thread."""
-
-        self.ensure_background_worker()
-        worker = self._worker_instance or IngestWorker(self)
-
-        def _runner() -> None:
+        if self._worker_job_id is not None:
             try:
-                asyncio.run(worker._process(job))
-            except Exception:  # pragma: no cover - defensive logging
-                logger.exception("Background ingest job failed for file %s", job.file_id)
-            finally:
-                with self._thread_lock:
-                    self._job_threads.discard(threading.current_thread())
+                self._scheduler.remove_job(self._worker_job_id)
+            except JobLookupError:  # pragma: no cover - defensive cleanup
+                pass
+            self._worker_job_id = None
+        if self._maintenance_job_id is not None:
+            try:
+                self._scheduler.remove_job(self._maintenance_job_id)
+            except JobLookupError:  # pragma: no cover - defensive cleanup
+                pass
+            self._maintenance_job_id = None
 
-        thread = threading.Thread(
-            target=_runner,
-            name=f"ingest-job-{job.file_id}",
-            daemon=True,
-        )
-        with self._thread_lock:
-            self._job_threads.add(thread)
-        thread.start()
+    async def run_maintenance(self) -> None:
+        """Execute periodic maintenance tasks for ingest metadata."""
+
+        try:
+            await asyncio.to_thread(self._perform_maintenance)
+        except Exception:  # pragma: no cover - defensive logging
+            logger.exception("Ingest maintenance job failed")
+
+    def _perform_maintenance(self) -> None:
+        """Prune stale job records and reset stuck files."""
+
+        cutoff = datetime.utcnow() - timedelta(days=self.job_retention_days)
+        removed_jobs = 0
+        reset_files = 0
+        with Session(self.engine) as session:
+            delete_result = session.exec(
+                delete(JobRecord).where(
+                    JobRecord.finished_at != None,  # noqa: E711 - SQLAlchemy comparison
+                    JobRecord.finished_at < cutoff,
+                )
+            )
+            try:
+                removed_jobs = int(getattr(delete_result, "rowcount", 0) or 0)
+            except Exception:  # pragma: no cover - defensive fallback
+                removed_jobs = 0
+
+            stale_files = session.exec(
+                select(FileRecord).where(
+                    FileRecord.status == FileStatus.PROCESSING,
+                    FileRecord.updated_at < cutoff,
+                )
+            ).all()
+
+            for file_obj in stale_files:
+                file_obj.status = FileStatus.FAILED
+                file_obj.error = "STALE_PROCESSING"
+                file_obj.updated_at = datetime.utcnow()
+                session.add(file_obj)
+                if file_obj.document_id is not None:
+                    document = session.get(DocumentRecord, file_obj.document_id)
+                    if document:
+                        document.status = DocumentStatus.FAILED
+                        document.error = "STALE_PROCESSING"
+                        document.updated_at = datetime.utcnow()
+                        session.add(document)
+            reset_files = len(stale_files)
+            if removed_jobs or reset_files:
+                session.commit()
+
+        if removed_jobs or reset_files:
+            logger.info(
+                "Ingest maintenance removed %d jobs and reset %d files", removed_jobs, reset_files
+            )
+
     @staticmethod
     def _hash_file(path: str) -> str:
         digest = hashlib.sha256()
@@ -156,7 +243,7 @@ class IngestService:
             attempt=attempt,
         )
 
-    def _create_job_record(self, job: IngestJob) -> JobRecord:
+    def _create_job_record(self, job: IngestJob, session: Session | None = None) -> JobRecord:
         payload = {
             "file_id": job.file_id,
             "sha256": job.sha256,
@@ -167,7 +254,9 @@ class IngestService:
         if job.document_id is not None:
             payload["document_id"] = job.document_id
 
-        with Session(self.engine) as session:
+        manage_session = session is None
+        session_obj = session or Session(self.engine)
+        try:
             record = JobRecord(
                 tenant_id=job.tenant_id,
                 tenant_slug=job.tenant_id,
@@ -179,19 +268,43 @@ class IngestService:
                 attempt=job.attempt,
                 payload=payload,
             )
-            session.add(record)
-            session.commit()
-            session.refresh(record)
+            session_obj.add(record)
+            session_obj.flush()
+            session_obj.refresh(record)
+            if manage_session:
+                session_obj.commit()
             return record
+        finally:
+            if manage_session:
+                session_obj.close()
 
-    async def enqueue_job(self, file_obj: FileRecord, *, attempt: int = 0) -> IngestJob:
+    async def enqueue_job(
+        self, file_obj: FileRecord, *, attempt: int = 0, session: Session | None = None
+    ) -> IngestJob:
+        if self.queue.full():
+            raise IngestQueueFullError("INGEST_QUEUE_FULL")
+
         job = self._make_job(file_obj, attempt=attempt)
-        job_record = self._create_job_record(job)
-        job.job_record_id = job_record.id
-        if self.auto_process:
-            self._spawn_job_thread(job)
-        else:
-            await self.queue.put(job)
+        manage_session = session is None
+        session_obj = session or Session(self.engine)
+
+        try:
+            job_record = self._create_job_record(job, session=session_obj)
+            job.job_record_id = job_record.id
+            try:
+                self.queue.put_nowait(job)
+            except QueueFull as exc:
+                raise IngestQueueFullError("INGEST_QUEUE_FULL") from exc
+            if manage_session:
+                session_obj.commit()
+        except IngestQueueFullError:
+            if manage_session:
+                session_obj.rollback()
+            raise
+        finally:
+            if manage_session:
+                session_obj.close()
+
         worker = getattr(self, "worker", None)
         if worker is not None:
             worker.ensure_started()
@@ -212,72 +325,84 @@ class IngestService:
         queued = False
         detected_mime = mime_type or "application/octet-stream"
         with Session(self.engine) as session:
-            document = session.exec(
-                select(DocumentRecord).where(
-                    DocumentRecord.tenant_id == tenant_id,
-                    DocumentRecord.tenant_slug == tenant_id,
-                    DocumentRecord.sha256 == sha,
-                )
-            ).first()
-            if document is None:
-                document = DocumentRecord(
-                    tenant_id=tenant_id,
-                    tenant_slug=tenant_id,
-                    sha256=sha,
-                    mime_type=detected_mime,
-                    status=DocumentStatus.QUEUED,
-                    error=None,
-                    chunks=None,
-                )
-            else:
-                document.updated_at = datetime.utcnow()
-                if mime_type and document.mime_type != mime_type:
-                    document.mime_type = mime_type
-                if document.status == DocumentStatus.FAILED:
-                    document.status = DocumentStatus.QUEUED
-                    document.error = None
-                document.chunks = None
-            session.add(document)
-            session.flush()
+            try:
+                document = session.exec(
+                    select(DocumentRecord).where(
+                        DocumentRecord.tenant_id == tenant_id,
+                        DocumentRecord.tenant_slug == tenant_id,
+                        DocumentRecord.sha256 == sha,
+                    )
+                ).first()
+                if document is None:
+                    document = DocumentRecord(
+                        tenant_id=tenant_id,
+                        tenant_slug=tenant_id,
+                        sha256=sha,
+                        mime_type=detected_mime,
+                        status=DocumentStatus.QUEUED,
+                        error=None,
+                        chunks=None,
+                    )
+                    session.add(document)
+                else:
+                    document.updated_at = datetime.utcnow()
+                    if mime_type and document.mime_type != mime_type:
+                        document.mime_type = mime_type
+                    if document.status == DocumentStatus.FAILED:
+                        document.status = DocumentStatus.QUEUED
+                        document.error = None
+                    document.chunks = None
+                    session.add(document)
 
-            statement = select(FileRecord).where(
-                FileRecord.tenant_id == tenant_id, FileRecord.sha256 == sha
-            )
-            file_obj = session.exec(statement).first()
-            if file_obj is None:
-                file_obj = FileRecord(
-                    tenant_id=tenant_id,
-                    sha256=sha,
-                    document_id=document.id,
-                    path=path,
-                    filename=filename,
-                    size=size,
-                    status=FileStatus.QUEUED,
-                    retries=0,
-                    error=None,
-                    chunks=None,
+                session.flush()
+
+                statement = select(FileRecord).where(
+                    FileRecord.tenant_id == tenant_id, FileRecord.sha256 == sha
                 )
-                session.add(file_obj)
-                queued = True
-            else:
-                file_obj.updated_at = datetime.utcnow()
-                file_obj.document_id = document.id
-                if file_obj.status == FileStatus.FAILED:
-                    file_obj.path = path
-                    file_obj.filename = filename
-                    file_obj.size = size
-                    file_obj.status = FileStatus.QUEUED
-                    file_obj.retries = 0
-                    file_obj.error = None
-                    file_obj.chunks = None
+                file_obj = session.exec(statement).first()
+                if file_obj is None:
+                    file_obj = FileRecord(
+                        tenant_id=tenant_id,
+                        sha256=sha,
+                        document_id=document.id,
+                        path=path,
+                        filename=filename,
+                        size=size,
+                        status=FileStatus.QUEUED,
+                        retries=0,
+                        error=None,
+                        chunks=None,
+                    )
+                    session.add(file_obj)
                     queued = True
-                session.add(file_obj)
-            session.commit()
-            session.refresh(file_obj)
-            session.refresh(document)
+                else:
+                    file_obj.updated_at = datetime.utcnow()
+                    file_obj.document_id = document.id
+                    if file_obj.status == FileStatus.FAILED:
+                        file_obj.path = path
+                        file_obj.filename = filename
+                        file_obj.size = size
+                        file_obj.status = FileStatus.QUEUED
+                        file_obj.retries = 0
+                        file_obj.error = None
+                        file_obj.chunks = None
+                        queued = True
+                    session.add(file_obj)
 
-        if queued:
-            await self.enqueue_job(file_obj)
+                session.flush()
+                if queued:
+                    await self.enqueue_job(file_obj, session=session)
+                session.commit()
+            except IngestQueueFullError:
+                session.rollback()
+                raise
+            except Exception:
+                session.rollback()
+                raise
+            else:
+                session.refresh(file_obj)
+                session.refresh(document)
+
         return file_obj, queued
 
 
@@ -302,30 +427,35 @@ class IngestWorker:
         if self.overlap >= self.chunk_size:
             self.overlap = max(0, self.chunk_size - 1)
         self._stop = False
-        self._task: asyncio.Task[None] | None = None
         self.service.worker = self
 
     def ensure_started(self) -> None:
-        if self._task is not None and not self._task.done():
-            return
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:  # pragma: no cover - synchronous fallback
-            return
-        self._task = loop.create_task(self.run())
+        if self.service.auto_process:
+            self.service.ensure_background_worker()
 
     async def run(self) -> None:
         logger.debug("ingest worker run loop entered")
         while True:
+            processed = await self.drain()
             if self._stop and self.service.queue.empty():
                 break
+            if processed == 0:
+                await asyncio.sleep(0.1)
+
+    async def drain(self, *, limit: int | None = None) -> int:
+        """Process pending jobs without blocking for new items."""
+
+        processed = 0
+        while True:
+            if limit is not None and processed >= limit:
+                break
             try:
-                job = await self.service.queue.get()
-            except asyncio.CancelledError:  # pragma: no cover - shutdown safety
+                job = self.service.queue.get_nowait()
+            except QueueEmpty:
                 break
             if job is None:
                 self.service.queue.task_done()
-                break
+                continue
             logger.debug("ingest worker processing job %s", job)
             try:
                 await self._process(job)
@@ -333,6 +463,8 @@ class IngestWorker:
                 await self._handle_failure(job)
             finally:
                 self.service.queue.task_done()
+            processed += 1
+        return processed
 
     async def _process(self, job: IngestJob) -> None:
         with Session(self.service.engine) as session:
@@ -580,11 +712,14 @@ class IngestWorker:
         if file_obj:
             await self.service.enqueue_job(file_obj, attempt=job.attempt)
 
+    async def shutdown(self) -> None:
+        """Process remaining jobs and stop the worker."""
+
+        self._stop = True
+        await self.drain()
+
     def stop(self) -> None:
         self._stop = True
-        task = self._task
-        if task is not None:
-            task.cancel()
 
 
-__all__ = ["IngestJob", "IngestService", "IngestWorker"]
+__all__ = ["IngestJob", "IngestQueueFullError", "IngestService", "IngestWorker"]

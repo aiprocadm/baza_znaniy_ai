@@ -30,7 +30,7 @@ from app.core.deps import (
 )
 from app.models.user import UserRecord
 from app.models import UploadResponse
-from app.ingest.service import IngestService
+from app.ingest.service import IngestQueueFullError, IngestService
 
 router = APIRouter(tags=["upload"])
 
@@ -384,13 +384,21 @@ async def upload_file(
         guessed, _ = mimetypes.guess_type(selected_filename or "")
         mime_type = guessed or "application/octet-stream"
 
-    record, queued = await ingest_service.register_file(
-        tenant,
-        str(target),
-        filename=selected_filename or target.name,
-        size=len(payload),
-        mime_type=mime_type,
-    )
+    try:
+        record, queued = await ingest_service.register_file(
+            tenant,
+            str(target),
+            filename=selected_filename or target.name,
+            size=len(payload),
+            mime_type=mime_type,
+        )
+    except IngestQueueFullError as exc:
+        try:
+            target.unlink()
+        except FileNotFoundError:  # pragma: no cover - defensive cleanup
+            pass
+        status_code = getattr(status, "HTTP_429_TOO_MANY_REQUESTS", 429)
+        raise HTTPException(status_code, detail=str(exc)) from exc
 
     if not queued and record.path != str(target):
         try:
