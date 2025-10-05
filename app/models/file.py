@@ -21,7 +21,10 @@ except Exception:  # pragma: no cover - fallback when SQLAlchemy ORM is absent
     sessionmaker = None  # type: ignore[assignment]
 from sqlmodel import Field, SQLModel, Session, create_engine
 
-from app.models.engine_guard import SyncEngineGuard
+from app.observability.metrics import (
+    record_sqlmodel_metadata_alert,
+    record_sqlmodel_metadata_state,
+)
 from app.models.entities import JobRecord, SettingRecord
 
 
@@ -56,26 +59,22 @@ def _is_fallback_value(value: Any) -> bool:
         return False
 
 
-def _collect_sqlmodel_tables() -> list[tuple[type[Any], Any]]:
-    """Capture SQLModel table mappings for later metadata migration."""
+def _record_sqlmodel_metadata_health(metadata: Any | None, *, origin: str) -> None:
+    """Update Prometheus metrics describing the SQLModel metadata state."""
 
-    tables: list[tuple[type[Any], Any]] = []
-    seen: set[type[Any]] = set()
-    stack = list(getattr(SQLModel, "__subclasses__", lambda: [])())
+    try:
+        healthy, reason = record_sqlmodel_metadata_state(metadata, origin=origin)
+    except Exception:  # pragma: no cover - instrumentation must not break flows
+        logger.debug("Failed to record SQLModel metadata metrics", exc_info=True)
+        return
 
-    while stack:
-        cls = stack.pop()
-        if cls in seen:
-            continue
-        seen.add(cls)
+    if healthy:
+        return
 
-        table = getattr(cls, "__table__", None)
-        if table is not None and hasattr(table, "tometadata"):
-            tables.append((cls, table))
-
-        stack.extend(getattr(cls, "__subclasses__", lambda: [])())
-
-    return tables
+    try:
+        record_sqlmodel_metadata_alert(origin=origin, reason=reason)
+    except Exception:  # pragma: no cover - best-effort alerting
+        logger.debug("Failed to increment SQLModel metadata alert counter", exc_info=True)
 
 
 class FileStatus(str):
@@ -1053,6 +1052,9 @@ def get_engine(url: Optional[str] = None, *, create_schema: bool = True) -> Engi
     __import__("app.models.entities")
 
     metadata = getattr(SQLModel, "metadata", None)
+    if metadata is None:
+        metadata = MetaData()
+        setattr(SQLModel, "metadata", metadata)
 
     if driver_name.endswith("+aiosqlite"):
         try:
@@ -1079,40 +1081,41 @@ def get_engine(url: Optional[str] = None, *, create_schema: bool = True) -> Engi
         _maybe_configure_sqlite_engine(engine, engine_url)
         engine = SyncEngineGuard(engine, engine_url).ensure_sync()
         _maybe_configure_sqlite_engine(engine, engine_url)
-        if create_schema:
-            schema_metadata = _create_schema_if_possible(engine, metadata)
-            if schema_metadata is None:
-                logger.error(
-                    "Unable to initialise SQLModel metadata; aborting engine setup"
-                )
-                raise RuntimeError(
-                    "SQLModel metadata initialisation failed; cannot create schema"
-                )
-            setattr(SQLModel, "metadata", schema_metadata)
-            metadata = schema_metadata
         ensured_engine = _ensure_sync_engine(engine, engine_url)
         if ensured_engine is not engine:
             _maybe_configure_sqlite_engine(ensured_engine, engine_url)
-        return ensured_engine
+        engine = ensured_engine
+        if create_schema:
+            schema_metadata = _create_schema_if_possible(engine, metadata)
+            if schema_metadata is not None:
+                metadata = schema_metadata
+            current_metadata = getattr(SQLModel, "metadata", metadata)
+            _record_sqlmodel_metadata_health(current_metadata, origin="get_engine")
+        else:
+            _record_sqlmodel_metadata_health(
+                getattr(SQLModel, "metadata", metadata), origin="get_engine"
+            )
+        return engine
 
     engine = create_engine(db_url, echo=False, connect_args=_connect_args(db_url_str))
     _maybe_configure_sqlite_engine(engine, db_url_str)
     engine = SyncEngineGuard(engine, db_url_str).ensure_sync()
     _maybe_configure_sqlite_engine(engine, db_url_str)
+    ensured_engine = _ensure_sync_engine(engine, db_url_str)
+    if ensured_engine is not engine:
+        _maybe_configure_sqlite_engine(ensured_engine, db_url_str)
+    engine = ensured_engine
+
     if create_schema:
         schema_metadata = _create_schema_if_possible(engine, metadata)
-        if schema_metadata is None:
-            logger.error(
-                "Unable to initialise SQLModel metadata; aborting engine setup"
-            )
-            raise RuntimeError(
-                "SQLModel metadata initialisation failed; cannot create schema"
-            )
-        setattr(SQLModel, "metadata", schema_metadata)
-        metadata = schema_metadata
-
-    engine = SyncEngineGuard(engine, db_url_str).ensure_sync()
-    _maybe_configure_sqlite_engine(engine, db_url_str)
+        if schema_metadata is not None:
+            metadata = schema_metadata
+        current_metadata = getattr(SQLModel, "metadata", metadata)
+        _record_sqlmodel_metadata_health(current_metadata, origin="get_engine")
+    else:
+        _record_sqlmodel_metadata_health(
+            getattr(SQLModel, "metadata", metadata), origin="get_engine"
+        )
 
     return engine
 

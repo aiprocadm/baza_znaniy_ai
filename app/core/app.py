@@ -18,6 +18,10 @@ from app.core.services import init_chat_store, init_memory_store
 from app.ingest import IngestService, IngestWorker, parse_and_chunk  # noqa: F401
 from app.llm import LLMProvider, get_cached_provider
 from app.llm.manager import LlamaLoraManager
+from app.observability.metadata_guard import (
+    check_sqlmodel_metadata,
+    schedule_sqlmodel_metadata_guard,
+)
 from app.retriever import CrossEncoderReranker, get_reranker, get_vector_store
 from app.services.files import FileStore, IngestQueue
 from app.services import vectorstore as vectorstore_service
@@ -79,6 +83,7 @@ def create_app(provider: LLMProvider | None = None) -> FastAPI:
     file_store = FileStore()
     ingest_queue = IngestQueue()
     scheduler = AsyncIOScheduler(timezone=timezone.utc)
+    schedule_sqlmodel_metadata_guard(scheduler)
 
     ingest_service = IngestService(
         max_retries=settings.ingest_max_retries,
@@ -120,6 +125,10 @@ def create_app(provider: LLMProvider | None = None) -> FastAPI:
 
     application.include_router(ui_router)
     application.include_router(api_router)
+
+    # Prime the metadata guard once during application construction so metrics are
+    # populated even before the first scheduler tick.
+    check_sqlmodel_metadata(origin="startup")
 
     @application.on_event("startup")
     async def _startup_ingestion_worker() -> None:  # pragma: no cover - I/O heavy

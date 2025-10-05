@@ -5,6 +5,7 @@ from typing import Iterable, Mapping, MutableMapping, TypeVar
 __all__ = [
     "CollectorRegistry",
     "Counter",
+    "Gauge",
     "Histogram",
     "CONTENT_TYPE_LATEST",
     "generate_latest",
@@ -137,6 +138,16 @@ class _MetricChild:
 class Counter(_MetricBase):
     _type = "counter"
     _child_type = _MetricChild
+
+
+class _GaugeChild(_MetricChild):
+    def set(self, value: float) -> None:
+        self._metric._samples[self._label_values] = float(value)
+
+
+class Gauge(_MetricBase):
+    _type = "gauge"
+    _child_type = _GaugeChild
 
 
 class _HistogramChild(_MetricChild):
