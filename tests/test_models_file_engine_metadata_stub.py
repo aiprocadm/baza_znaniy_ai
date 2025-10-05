@@ -29,7 +29,7 @@ def test_get_engine_warns_when_metadata_has_no_callable_create_all(
         with caplog.at_level("WARNING", logger=file_module.logger.name):
             engine = file_module.get_engine(f"sqlite:///{db_path}", create_schema=True)
 
-        assert "create_all is unavailable" in caplog.text
+        assert "metadata.create_all is not callable" in caplog.text
 
         with engine.connect() as connection:
             execution = connection.execute(text("SELECT 1"))
@@ -78,3 +78,31 @@ def test_get_engine_skips_schema_when_metadata_is_none(tmp_path, monkeypatch) ->
         monkeypatch.delenv("DB_URL", raising=False)
         if db_path.exists():
             db_path.unlink(missing_ok=True)
+
+
+def test_get_engine_creates_schema_when_metadata_callable(tmp_path, monkeypatch) -> None:
+    """``get_engine`` should create database tables when metadata is valid."""
+
+    file_module.get_engine.cache_clear()
+
+    db_path = Path(tmp_path) / "metadata-valid.sqlite"
+
+    metadata = file_module.SQLModel.metadata
+    original_create_all = getattr(metadata, "create_all", None)
+    assert callable(original_create_all)
+
+    calls: list[object] = []
+
+    def _counting_create_all(engine: object, _orig=original_create_all) -> object:
+        calls.append(engine)
+        return _orig(engine)
+
+    monkeypatch.setattr(metadata, "create_all", _counting_create_all, raising=False)
+
+    engine = file_module.get_engine(f"sqlite:///{db_path}", create_schema=True)
+
+    assert calls == [engine]
+
+    engine.dispose()
+
+    file_module.get_engine.cache_clear()

@@ -791,17 +791,13 @@ def get_engine(url: Optional[str] = None, *, create_schema: bool = True) -> Engi
         engine = create_engine(sync_url, echo=False, connect_args=_connect_args(sync_url))
         engine = _ensure_sync_engine(engine, sync_url)
         if create_schema:
-            metadata = _create_schema_if_possible(engine, metadata)
-
             metadata = getattr(SQLModel, "metadata", metadata)
-            if metadata is None or not hasattr(metadata, "create_all"):
-                metadata = MetaData()
-                setattr(SQLModel, "metadata", metadata)
-            if hasattr(metadata, "create_all"):
-                metadata.create_all(engine)
+            create_all = getattr(metadata, "create_all", None)
 
-            metadata = getattr(SQLModel, "metadata", metadata)
-            _create_schema_if_possible(engine, metadata)
+            if callable(create_all):
+                create_all(engine)
+            else:
+                _create_schema_if_possible(engine, metadata)
 
 
         return engine
@@ -809,22 +805,13 @@ def get_engine(url: Optional[str] = None, *, create_schema: bool = True) -> Engi
     engine = create_engine(db_url, echo=False, connect_args=_connect_args(db_url_str))
     engine = _ensure_sync_engine(engine, db_url_str)
     if create_schema:
-        metadata = _create_schema_if_possible(engine, metadata)
-
         metadata = getattr(SQLModel, "metadata", metadata)
+        create_all = getattr(metadata, "create_all", None)
 
-        if metadata is None or not hasattr(metadata, "create_all"):
-            metadata = MetaData()
-            setattr(SQLModel, "metadata", metadata)
-        if hasattr(metadata, "create_all"):
-            metadata.create_all(engine)
-
-        create_all = getattr(metadata, "create_all", None) if metadata is not None else None
         if callable(create_all):
             create_all(engine)
-
-        metadata = getattr(SQLModel, "metadata", metadata)
-        _create_schema_if_possible(engine, metadata)
+        else:
+            _create_schema_if_possible(engine, metadata)
 
 
     return engine
