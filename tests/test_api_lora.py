@@ -200,6 +200,7 @@ def test_runtime_scaling_guard_rejects_invalid_values(bad_scaling: float) -> Non
         pytest.param(0, id="zero-int"),
         pytest.param("nan", id="nan-string"),
         pytest.param("inf", id="inf-string"),
+        pytest.param({"kind": "non-numeric"}, id="non-numeric-object"),
     ],
 )
 def test_load_endpoint_rejects_invalid_scaling_when_bypassed(
