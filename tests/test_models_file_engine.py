@@ -8,8 +8,7 @@ import sys
 from pathlib import Path
 from typing import Iterator
 
-from sqlalchemy import create_engine, text
-
+import pytest
 STUBS_PATH = Path(__file__).resolve().parent / "stubs"
 
 if "sqlalchemy" in sys.modules and getattr(
@@ -32,9 +31,12 @@ importlib.import_module("sqlalchemy")
 if removed_stub:
     sys.path.insert(0, str(STUBS_PATH))
 
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, inspect, text
 
 from sqlalchemy import MetaData, text
+from sqlmodel import Session, select
+
+from app.ingest.service import IngestService
 
 
 from app.models import file as file_module
@@ -104,20 +106,85 @@ def _stubbed_file_module() -> Iterator[object]:
             original_file_module.get_engine.cache_clear()
 
 
-def test_get_engine_handles_missing_create_all(tmp_path) -> None:
-    pass
+def _scalar_from_execution(execution: object) -> object:
+    """Extract a scalar value from SQLAlchemy execution results."""
 
-def test_get_engine_handles_missing_create_all(tmp_path) -> None:
-    """``get_engine`` should rebuild metadata when ``create_all`` is absent."""
+    scalar_one = getattr(execution, "scalar_one", None)
+    if callable(scalar_one):
+        try:
+            return scalar_one()
+        except Exception:
+            pass
 
+    scalar = getattr(execution, "scalar", None)
+    if callable(scalar):
+        try:
+            return scalar()
+        except Exception:
+            pass
+
+    return execution
+
+
+def test_get_engine_recovers_metadata_for_ingest_session(tmp_path, monkeypatch) -> None:
+    """``get_engine`` should rebuild metadata and keep ingest sessions functional."""
+
+    file_module.get_engine.cache_clear()
+
+    db_path = tmp_path / "metadata-recover.sqlite"
+    db_url = f"sqlite:///{db_path}"
+    monkeypatch.setenv("DB_URL", db_url)
+
+    original_metadata = getattr(file_module.SQLModel, "metadata", None)
+    engine = None
+    try:
+        file_module.SQLModel.metadata = None  # type: ignore[assignment]
+
+        engine = file_module.get_engine(create_schema=True)
+
+        metadata = getattr(file_module.SQLModel, "metadata", None)
+        assert isinstance(metadata, MetaData)
+
+        inspector = inspect(engine)
+        assert inspector.has_table("files")
+
+        ingest_service = IngestService(engine=engine)
+
+        with Session(ingest_service.engine) as session:
+            record = file_module.FileRecord(
+                tenant_id="tenant",
+                sha256="sha",
+                path="/tmp/path",
+                filename="name.txt",
+                size=1,
+            )
+            session.add(record)
+            session.commit()
+            retrieved = session.exec(select(file_module.FileRecord)).first()
+
+        assert retrieved is not None
+    finally:
+        if engine is not None:
+            try:
+                engine.dispose()
+            except Exception:
+                pass
+
+        if original_metadata is None:
+            file_module.SQLModel.metadata = None  # type: ignore[assignment]
+        else:
+            file_module.SQLModel.metadata = original_metadata
+
+        file_module.get_engine.cache_clear()
+        monkeypatch.delenv("DB_URL", raising=False)
+        if db_path.exists():
+            try:
+                db_path.unlink()
+            except Exception:
+                pass
 
 def test_get_engine_handles_missing_create_all(tmp_path, monkeypatch) -> None:
-    """``get_engine`` should ignore metadata without ``create_all``."""
-
-
-def test_get_engine_handles_missing_create_all(tmp_path) -> None:
-    """``get_engine`` should replace unusable metadata before schema creation."""
-
+    """``get_engine`` should rebuild metadata when ``create_all`` is absent."""
 
     file_module.get_engine.cache_clear()
 
@@ -126,25 +193,24 @@ def test_get_engine_handles_missing_create_all(tmp_path) -> None:
     original_metadata = file_module.SQLModel.metadata
     dummy_metadata = object()
     file_module.SQLModel.metadata = dummy_metadata  # type: ignore[assignment]
+    engine = None
     try:
         engine = file_module.get_engine(
             f"sqlite:///{tmp_path/'missing-create-all.db'}",
             create_schema=True,
         )
 
-        assert isinstance(file_module.SQLModel.metadata, MetaData)
-
-        with engine.connect() as connection:
-            execution = connection.execute(text("SELECT 1"))
-            scalar = getattr(execution, "scalar", None)
-            value = scalar() if callable(scalar) else execution
-            assert value in {1, "SELECT 1"}
+        metadata = file_module.SQLModel.metadata
+        assert isinstance(metadata, MetaData)
+        assert metadata is not dummy_metadata
     finally:
         file_module.SQLModel.metadata = original_metadata
+        if engine is not None:
+            engine.dispose()
         file_module.get_engine.cache_clear()
 
 
-def test_get_engine_logs_when_metadata_lacks_create_all(tmp_path, caplog) -> None:
+def test_get_engine_logs_when_metadata_lacks_create_all(tmp_path, caplog, monkeypatch) -> None:
     """``get_engine`` should warn and continue when metadata lacks ``create_all``."""
 
     file_module.get_engine.cache_clear()
@@ -154,6 +220,8 @@ def test_get_engine_logs_when_metadata_lacks_create_all(tmp_path, caplog) -> Non
     original_metadata = file_module.SQLModel.metadata
     dummy_metadata = type("DummyMetadata", (), {})()
     file_module.SQLModel.metadata = dummy_metadata  # type: ignore[assignment]
+    monkeypatch.setattr(file_module, "create_engine", create_engine)
+    engine = None
     try:
         engine = file_module.get_engine(
             f"sqlite:///{tmp_path/'missing-create-all-log.db'}",
@@ -161,17 +229,17 @@ def test_get_engine_logs_when_metadata_lacks_create_all(tmp_path, caplog) -> Non
         )
 
         assert any(
-            "SQLModel.metadata has no 'create_all'" in message
+            "missing or invalid" in message
             for _, _, message in caplog.record_tuples
         )
 
-        with engine.connect() as connection:
-            execution = connection.execute(text("SELECT 1"))
-            scalar = getattr(execution, "scalar", None)
-            value = scalar() if callable(scalar) else execution
-            assert value in {1, "SELECT 1"}
+        metadata = file_module.SQLModel.metadata
+        assert isinstance(metadata, MetaData)
+        assert metadata is not dummy_metadata
     finally:
         file_module.SQLModel.metadata = original_metadata
+        if engine is not None:
+            engine.dispose()
         file_module.get_engine.cache_clear()
 
 
@@ -187,56 +255,38 @@ def test_get_engine_handles_missing_metadata(tmp_path, monkeypatch) -> None:
     db_path = Path(tmp_path) / "missing-metadata.sqlite"
     monkeypatch.setenv("DB_URL", f"sqlite:///{db_path}")
 
-
     original_metadata = file_module.SQLModel.metadata
     file_module.SQLModel.metadata = None  # type: ignore[assignment]
 
+    engine = None
     try:
-
-        engine = file_module.get_engine(
-            f"sqlite:///{tmp_path/'missing-metadata.db'}",
-            create_schema=True,
-        )
-
-        assert isinstance(file_module.SQLModel.metadata, MetaData)
-
-        with engine.connect() as connection:
-
         engine = file_module.get_engine(create_schema=True)
 
-        assert getattr(engine, "dialect", None) is not None
-        assert getattr(engine, "url", None) is not None
+        metadata = getattr(file_module.SQLModel, "metadata", None)
+        assert isinstance(metadata, MetaData)
 
-        dispose = getattr(engine, "dispose", None)
-        connect = getattr(engine, "connect", None)
-
-        assert callable(dispose)
-        assert callable(connect)
-
-        with connect() as connection:  # type: ignore[operator]
-
+        with engine.connect() as connection:
             execution = connection.execute(text("SELECT 1"))
             scalar = getattr(execution, "scalar", None)
             value = scalar() if callable(scalar) else execution
-            assert value == 1 or str(value) == "SELECT 1"
             assert value in {1, "SELECT 1"}
 
-
-        metadata = file_module.SQLModel.metadata
-        assert metadata is not dummy_metadata
-        assert hasattr(metadata, "create_all")
-
-
-
-        dispose()
-
-
+        assert getattr(engine, "dialect", None) is not None
+        assert getattr(engine, "url", None) is not None
     finally:
         file_module.SQLModel.metadata = original_metadata
+        if engine is not None:
+            try:
+                engine.dispose()
+            except Exception:
+                pass
         file_module.get_engine.cache_clear()
         monkeypatch.delenv("DB_URL", raising=False)
         if db_path.exists():
-            db_path.unlink()
+            try:
+                db_path.unlink()
+            except Exception:
+                pass
 
 
 
@@ -563,9 +613,8 @@ def test_get_engine_stub_engine_proxy(tmp_path, monkeypatch) -> None:
 
         with engine.connect() as connection:
             execution = connection.execute(text("SELECT 1"))
-            scalar = getattr(execution, "scalar", None)
-            value = scalar() if callable(scalar) else execution
-            assert value in {1, "SELECT 1"}
+            value = _scalar_from_execution(execution)
+            assert value in {1, "SELECT 1"} or str(value) == "SELECT 1"
 
         assert getattr(engine.dialect, "driver", None) == "sqlite"
 

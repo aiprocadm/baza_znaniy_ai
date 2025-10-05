@@ -55,6 +55,28 @@ def _is_fallback_value(value: Any) -> bool:
         return False
 
 
+def _collect_sqlmodel_tables() -> list[tuple[type[Any], Any]]:
+    """Capture SQLModel table mappings for later metadata migration."""
+
+    tables: list[tuple[type[Any], Any]] = []
+    seen: set[type[Any]] = set()
+    stack = list(getattr(SQLModel, "__subclasses__", lambda: [])())
+
+    while stack:
+        cls = stack.pop()
+        if cls in seen:
+            continue
+        seen.add(cls)
+
+        table = getattr(cls, "__table__", None)
+        if table is not None and hasattr(table, "tometadata"):
+            tables.append((cls, table))
+
+        stack.extend(getattr(cls, "__subclasses__", lambda: [])())
+
+    return tables
+
+
 class FileStatus(str):
     QUEUED = "queued"
     PROCESSING = "processing"
@@ -938,14 +960,22 @@ class _SQLAlchemySessionAdapter:
         return getattr(self._session, item)
 
 
-def _create_schema_if_possible(engine: Engine, metadata: Any | None) -> Any | None:
+def _create_schema_if_possible(engine: Engine, metadata: Any | None) -> MetaData | None:
     """Create database schema when ``SQLModel.metadata`` exposes ``create_all``."""
 
-    meta = metadata if metadata is not None else getattr(SQLModel, "metadata", None)
+    meta: MetaData | None
+    tables_snapshot: list[tuple[type[Any], Any]] | None = None
 
-    if meta is None or not hasattr(meta, "create_all"):
+    if isinstance(metadata, MetaData):
+        meta = metadata
+    else:
+        candidate = getattr(SQLModel, "metadata", None)
+        meta = candidate if isinstance(candidate, MetaData) else None
+
+    if meta is None:
+        tables_snapshot = _collect_sqlmodel_tables()
         logger.warning(
-            "SQLModel.metadata is missing required API; reinitialising metadata"
+            "SQLModel.metadata is missing or invalid; reinitialising metadata"
         )
         try:
             meta = MetaData()
@@ -954,18 +984,38 @@ def _create_schema_if_possible(engine: Engine, metadata: Any | None) -> Any | No
             logger.exception(
                 "Failed to attach fallback MetaData to SQLModel; skipping schema creation"
             )
-            return getattr(SQLModel, "metadata", None)
+            return None
 
-    if meta is None:
-        logger.warning("SQLModel.metadata is missing; skipping schema creation")
-        return None
+        if tables_snapshot:
+            for model_cls, table in tables_snapshot:
+                migrate = getattr(table, "to_metadata", None)
+                if not callable(migrate):
+                    migrate = getattr(table, "tometadata", None)
+                if not callable(migrate):
+                    continue
+                try:
+                    new_table = migrate(meta)
+                except Exception:
+                    logger.exception(
+                        "Failed to migrate SQLModel table %s to new metadata",
+                        getattr(model_cls, "__name__", repr(model_cls)),
+                    )
+                    continue
+                try:
+                    setattr(model_cls, "__table__", new_table)
+                except Exception:
+                    logger.debug(
+                        "Unable to update __table__ for %s during metadata migration",
+                        getattr(model_cls, "__name__", repr(model_cls)),
+                        exc_info=True,
+                    )
 
     create_all = getattr(meta, "create_all", None)
     if not callable(create_all):
-        logger.warning(
-            "SQLModel.metadata.create_all is not callable; skipping schema creation"
+        logger.error(
+            "SQLModel.metadata.create_all is not callable; cannot create schema"
         )
-        return meta
+        return None
 
     create_all(engine)
     return meta
@@ -986,9 +1036,6 @@ def get_engine(url: Optional[str] = None, *, create_schema: bool = True) -> Engi
     __import__("app.models.entities")
 
     metadata = getattr(SQLModel, "metadata", None)
-    if metadata is None or not isinstance(metadata, MetaData):
-        metadata = MetaData()
-        setattr(SQLModel, "metadata", metadata)
 
     if driver_name.endswith("+aiosqlite"):
         try:
@@ -1016,7 +1063,16 @@ def get_engine(url: Optional[str] = None, *, create_schema: bool = True) -> Engi
         engine = _ensure_sync_engine(engine, engine_url)
         _maybe_configure_sqlite_engine(engine, engine_url)
         if create_schema:
-            _create_schema_if_possible(engine, metadata)
+            schema_metadata = _create_schema_if_possible(engine, metadata)
+            if schema_metadata is None:
+                logger.error(
+                    "Unable to initialise SQLModel metadata; aborting engine setup"
+                )
+                raise RuntimeError(
+                    "SQLModel metadata initialisation failed; cannot create schema"
+                )
+            setattr(SQLModel, "metadata", schema_metadata)
+            metadata = schema_metadata
         ensured_engine = _ensure_sync_engine(engine, engine_url)
         if ensured_engine is not engine:
             _maybe_configure_sqlite_engine(ensured_engine, engine_url)
@@ -1027,7 +1083,16 @@ def get_engine(url: Optional[str] = None, *, create_schema: bool = True) -> Engi
     engine = _ensure_sync_engine(engine, db_url_str)
     _maybe_configure_sqlite_engine(engine, db_url_str)
     if create_schema:
-        _create_schema_if_possible(engine, metadata)
+        schema_metadata = _create_schema_if_possible(engine, metadata)
+        if schema_metadata is None:
+            logger.error(
+                "Unable to initialise SQLModel metadata; aborting engine setup"
+            )
+            raise RuntimeError(
+                "SQLModel metadata initialisation failed; cannot create schema"
+            )
+        setattr(SQLModel, "metadata", schema_metadata)
+        metadata = schema_metadata
 
     ensured_engine = _ensure_sync_engine(engine, db_url_str)
     if ensured_engine is not engine:

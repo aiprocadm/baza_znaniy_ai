@@ -4,15 +4,16 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 from sqlalchemy import text
 
 from app.models import file as file_module
 
 
-def test_get_engine_warns_when_metadata_has_no_callable_create_all(
+def test_get_engine_errors_when_metadata_has_no_callable_create_all(
     tmp_path, caplog
 ) -> None:
-    """``get_engine`` should warn and continue when ``create_all`` is missing."""
+    """``get_engine`` should abort when ``create_all`` is missing."""
 
     file_module.get_engine.cache_clear()
 
@@ -26,16 +27,13 @@ def test_get_engine_warns_when_metadata_has_no_callable_create_all(
     db_path = Path(tmp_path) / "missing-create-all.db"
 
     try:
-        with caplog.at_level("WARNING", logger=file_module.logger.name):
-            engine = file_module.get_engine(f"sqlite:///{db_path}", create_schema=True)
+        with caplog.at_level("ERROR", logger=file_module.logger.name):
+            with pytest.raises(RuntimeError) as exc:
+                file_module.get_engine(f"sqlite:///{db_path}", create_schema=True)
 
+        message = str(exc.value)
+        assert "metadata initialisation failed" in message
         assert "metadata.create_all is not callable" in caplog.text
-
-        with engine.connect() as connection:
-            execution = connection.execute(text("SELECT 1"))
-            scalar = getattr(execution, "scalar", None)
-            value = scalar() if callable(scalar) else execution
-            assert value in {1, "SELECT 1"}
     finally:
         file_module.SQLModel.metadata = original_metadata
         file_module.get_engine.cache_clear()
