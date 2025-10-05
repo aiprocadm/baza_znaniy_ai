@@ -379,24 +379,64 @@ def get_engine(url: Optional[str] = None, *, create_schema: bool = True) -> Engi
     engine_url = db_url_str
 
     if driver_name.endswith("+aiosqlite"):
+        engine_url = _sqlite_aiosqlite_to_sync_url(db_url_str)
+
+        def _dispose_async_engine(engine: Any) -> None:
+            disposer = getattr(engine, "dispose", None)
+            if disposer is None:
+                return
+
+            try:
+                running_loop = asyncio.get_running_loop()
+            except RuntimeError:
+                running_loop = None
+
+            if running_loop and running_loop.is_running():
+                loop = asyncio.new_event_loop()
+                try:
+                    loop.run_until_complete(disposer())
+                finally:
+                    loop.close()
+                return
+
+            try:
+                result = disposer()
+            except TypeError:
+                return
+            if not asyncio.iscoroutine(result):
+                return
+            try:
+                asyncio.run(result)
+            except Exception:
+                logger.debug(
+                    "Failed to dispose async SQLite engine",
+                    exc_info=True,
+                )
+
         try:
             async_engine = create_async_engine(db_url, echo=False)
             if asyncio.iscoroutine(async_engine):
                 async_engine = asyncio.run(async_engine)
         except ModuleNotFoundError:
-            engine_url = _sqlite_aiosqlite_to_sync_url(db_url_str)
-            engine = create_engine(
-                engine_url, echo=False, connect_args=_connect_args(engine_url)
+            async_engine = None
+        except Exception:
+            logger.debug(
+                "Failed to initialise async SQLite engine; falling back to sync engine",
+                exc_info=True,
             )
+            async_engine = None
         else:
-            sync_candidate = getattr(async_engine, "sync_engine", None)
-            if sync_candidate is None:
-                engine_url = _sqlite_aiosqlite_to_sync_url(db_url_str)
-                engine = create_engine(
-                    engine_url, echo=False, connect_args=_connect_args(engine_url)
+            try:
+                _dispose_async_engine(async_engine)
+            except Exception:
+                logger.debug(
+                    "Error disposing async SQLite engine prior to sync fallback",
+                    exc_info=True,
                 )
-            else:
-                engine = sync_candidate
+
+        engine = create_engine(
+            engine_url, echo=False, connect_args=_connect_args(engine_url)
+        )
     else:
         engine = create_engine(db_url, echo=False, connect_args=_connect_args(db_url_str))
 

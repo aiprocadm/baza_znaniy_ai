@@ -6,6 +6,7 @@ from typing import Iterator
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy.engine import make_url
 from sqlmodel import Session
 
 from tests.service_stubs import install_service_stubs
@@ -92,9 +93,27 @@ def test_get_engine_sync_sqlite(
         assert hasattr(engine.dialect, "driver")
         assert engine.dialect.name == "sqlite"
         assert engine.dialect.driver != "aiosqlite"
+        assert getattr(engine.dialect, "is_async", False) is False
 
         assert hasattr(engine, "url")
-        assert str(engine.url).startswith("sqlite:")
+        engine_url = engine.url
+        engine_url_str = str(engine_url)
+        assert engine_url_str.startswith("sqlite:")
+
+        if hasattr(engine_url, "get_backend_name"):
+            backend_name = engine_url.get_backend_name()
+            driver_name = engine_url.get_driver_name()
+        else:
+            resolved_url = make_url(engine_url_str)
+            if hasattr(resolved_url, "get_backend_name"):
+                backend_name = resolved_url.get_backend_name()
+                driver_name = resolved_url.get_driver_name()
+            else:
+                backend_name = engine_url_str.split(":", 1)[0]
+                driver_name = backend_name.split("+", 1)[0]
+
+        assert backend_name == "sqlite"
+        assert driver_name in {"sqlite", "pysqlite"}
 
         assert hasattr(engine, "dispose")
         assert callable(engine.dispose)
