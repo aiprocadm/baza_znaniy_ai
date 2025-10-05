@@ -211,17 +211,16 @@ async def upload_file(
 ) -> UploadResponse:
     """Store an uploaded file on disk and register it for ingestion."""
 
-    uploads = []
+    raw_uploads = []
     if file:
-        uploads.extend(file)
+        raw_uploads.extend(file)
     if files:
-        uploads.extend(files)
+        raw_uploads.extend(files)
 
-    if not uploads:
+    if not raw_uploads:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="UPLOAD_EMPTY")
 
-
-    initial_candidates = [_coerce_upload_argument(item) for item in uploads]
+    initial_candidates = [_coerce_upload_argument(item) for item in raw_uploads]
 
     upload = next(
         (
@@ -331,11 +330,14 @@ async def upload_file(
 
         return _build_upload("uploaded", item)
 
-    coerced = [_coerce(item) for item in uploads]
+    coerced = [_coerce(item) for item in initial_candidates]
     cleanup_targets = list(coerced)
     for candidate in initial_candidates:
         if not any(candidate is other for other in coerced):
             cleanup_targets.append(candidate)
+    for original in raw_uploads:
+        if not any(original is other for other in cleanup_targets):
+            cleanup_targets.append(original)
 
 
     selected_extension = ""
@@ -419,6 +421,25 @@ async def upload_file(
     )
 
 
+def _extract_disposition_filename(source: object) -> str | None:
+    headers = getattr(source, "headers", None)
+    if headers is None:
+        return None
+    try:
+        raw_disposition = headers.get("content-disposition")
+    except Exception:  # pragma: no cover - defensive against custom mappings
+        return None
+    if not raw_disposition:
+        return None
+    for piece in raw_disposition.split(";"):
+        key, sep, value = piece.partition("=")
+        if sep and key.strip().lower() in {"filename", "filename*"}:
+            candidate = value.strip().strip('"')
+            if candidate:
+                return candidate
+    return None
+
+
 def _coerce_upload_argument(item: object) -> UploadFile:
     candidate_types: tuple[type[Any], ...] = (UploadFile, FastAPIUploadFile)
     if StarletteUploadFile is not None:
@@ -427,25 +448,16 @@ def _coerce_upload_argument(item: object) -> UploadFile:
     if isinstance(item, candidate_types):
         filename = getattr(item, "filename", None)
         if not filename:
-            headers = getattr(item, "headers", None)
-            raw_disposition = None
-            if headers is not None:
-                try:
-                    raw_disposition = headers.get("content-disposition")
-                except Exception:  # pragma: no cover - defensive against custom mappings
-                    raw_disposition = None
-            if raw_disposition:
-                for piece in raw_disposition.split(";"):
-                    key, sep, value = piece.partition("=")
-                    if sep and key.strip().lower() in {"filename", "filename*"}:
-                        candidate = value.strip().strip('"')
-                        if candidate:
-                            try:
-                                setattr(item, "filename", candidate)
-                            except Exception:  # pragma: no cover - assignment best effort
-                                pass
-                            break
-        return item
+            filename = _extract_disposition_filename(item) or "uploaded"
+        content_type = getattr(item, "content_type", None)
+        file_obj = getattr(item, "file", item)
+        seek = getattr(file_obj, "seek", None)
+        if callable(seek):
+            try:
+                seek(0)
+            except Exception:  # pragma: no cover - defensive seek
+                pass
+        return UploadFile(filename=filename or "uploaded", file=file_obj, content_type=content_type)
 
     filename = "uploaded"
     content: object = b""

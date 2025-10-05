@@ -33,12 +33,14 @@ async def load_lora_adapter(
     """Load a LoRA adapter into the configured llama.cpp instance."""
 
     try:
-        scaling_value = ensure_valid_scaling(payload.scaling)
+        scaling_candidate = ensure_valid_scaling(payload.scaling)
     except ValueError as exc:
         raise HTTPException(HTTP_UNPROCESSABLE_ENTITY, detail="INVALID_SCALING") from exc
 
-    if not isinstance(scaling_value, (int, float)):
-        raise HTTPException(HTTP_UNPROCESSABLE_ENTITY, detail="INVALID_SCALING")
+    try:
+        scaling_value = float(scaling_candidate)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(HTTP_UNPROCESSABLE_ENTITY, detail="INVALID_SCALING") from exc
 
     try:
         if not math.isfinite(scaling_value):  # Defensive guard for unexpected NaN/Inf
@@ -50,12 +52,14 @@ async def load_lora_adapter(
         raise HTTPException(HTTP_UNPROCESSABLE_ENTITY, detail="INVALID_SCALING") from exc
 
     try:
-        setattr(payload, "scaling", scaling_value)
-    except Exception:  # pragma: no cover - payload may not support attribute assignment
-        pass
+        scaling_value = ensure_valid_scaling(scaling_value)
+    except ValueError as exc:
+        raise HTTPException(HTTP_UNPROCESSABLE_ENTITY, detail="INVALID_SCALING") from exc
 
     try:
-        adapter_status = await manager.load_adapter(payload.path, scaling_value)
+        adapter_status = await manager.load_adapter(
+            payload_copy.path, payload_copy.scaling
+        )
     except FileNotFoundError as exc:
         raise HTTPException(HTTP_NOT_FOUND, detail="ADAPTER_NOT_FOUND") from exc
     except AdapterAlreadyLoadedError as exc:
