@@ -253,10 +253,19 @@ def _ensure_sync_engine(engine: Engine, url: str) -> Engine:
         dialect_name = scheme
         dialect_driver = scheme
 
+    needs_wrap = False
+    attr_failure = False
+
+    def _note_failure() -> None:
+        nonlocal needs_wrap, attr_failure
+        needs_wrap = True
+        attr_failure = True
+
     def _try_assign_attr(target: Any, name: str, value: Any) -> bool:
         try:
             setattr(target, name, value)
         except (AttributeError, TypeError):
+            _note_failure()
             return False
         return True
 
@@ -264,9 +273,11 @@ def _ensure_sync_engine(engine: Engine, url: str) -> Engine:
         try:
             value = getattr(target, name)
         except Exception:  # pragma: no cover - defensive against exotic descriptors
+            _note_failure()
             return False
 
         if require_callable and not callable(value):
+            _note_failure()
             return False
 
         return True
@@ -293,8 +304,6 @@ def _ensure_sync_engine(engine: Engine, url: str) -> Engine:
 
     extras: dict[str, _ProxyEntry] = {}
 
-    needs_wrap = False
-
 
     def _register_extra(
         name: str,
@@ -306,7 +315,11 @@ def _ensure_sync_engine(engine: Engine, url: str) -> Engine:
     ) -> None:
         """Record a fallback attribute to expose via the proxy."""
 
-        nonlocal needs_wrap
+        nonlocal needs_wrap, attr_failure
+
+        if assignment_failed:
+            needs_wrap = True
+            attr_failure = True
 
         is_fallback = _is_fallback_value(value)
         effective_prefer_fallback = prefer_fallback or is_fallback
@@ -637,6 +650,7 @@ def _ensure_sync_engine(engine: Engine, url: str) -> Engine:
         except Exception:
             entry.prefer_fallback = True
             needs_wrap = True
+            attr_failure = True
             continue
 
         validator = entry.validator
@@ -685,6 +699,7 @@ def _ensure_sync_engine(engine: Engine, url: str) -> Engine:
         try:
             attr_value = getattr(engine, attr_name)
         except Exception:
+            attr_failure = True
             _force_core_fallback(attr_name)
             continue
 
@@ -697,6 +712,7 @@ def _ensure_sync_engine(engine: Engine, url: str) -> Engine:
                 getattr(attr_value, "name")
                 getattr(attr_value, "driver")
             except Exception:
+                attr_failure = True
                 _force_core_fallback(attr_name)
                 continue
 
@@ -708,7 +724,7 @@ def _ensure_sync_engine(engine: Engine, url: str) -> Engine:
 
 
 
-    if not needs_wrap:
+    if not needs_wrap and not attr_failure:
         return engine
 
     def _ensure_proxy_entry(
