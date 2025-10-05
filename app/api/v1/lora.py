@@ -37,11 +37,17 @@ async def load_lora_adapter(
     except ValueError as exc:
         raise HTTPException(HTTP_UNPROCESSABLE_ENTITY, detail="INVALID_SCALING") from exc
 
-    if not math.isfinite(scaling_value):  # Defensive guard for unexpected NaN/Inf
+    if not isinstance(scaling_value, (int, float)):
         raise HTTPException(HTTP_UNPROCESSABLE_ENTITY, detail="INVALID_SCALING")
 
-    if scaling_value <= 0:  # Defensive guard for bypassed validation
-        raise HTTPException(HTTP_UNPROCESSABLE_ENTITY, detail="INVALID_SCALING")
+    try:
+        if not math.isfinite(scaling_value):  # Defensive guard for unexpected NaN/Inf
+            raise HTTPException(HTTP_UNPROCESSABLE_ENTITY, detail="INVALID_SCALING")
+
+        if scaling_value <= 0:  # Defensive guard for bypassed validation
+            raise HTTPException(HTTP_UNPROCESSABLE_ENTITY, detail="INVALID_SCALING")
+    except (TypeError, ValueError) as exc:  # Defensive guard for non-numeric inputs
+        raise HTTPException(HTTP_UNPROCESSABLE_ENTITY, detail="INVALID_SCALING") from exc
 
     try:
         setattr(payload, "scaling", scaling_value)
