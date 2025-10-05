@@ -40,6 +40,9 @@ async def load_lora_adapter(
     if not math.isfinite(scaling_value):  # Defensive guard for unexpected NaN/Inf
         raise HTTPException(HTTP_UNPROCESSABLE_ENTITY, detail="INVALID_SCALING")
 
+    if scaling_value <= 0:  # Defensive guard for bypassed validation
+        raise HTTPException(HTTP_UNPROCESSABLE_ENTITY, detail="INVALID_SCALING")
+
     try:
         setattr(payload, "scaling", scaling_value)
     except Exception:  # pragma: no cover - payload may not support attribute assignment
