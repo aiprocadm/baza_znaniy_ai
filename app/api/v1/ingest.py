@@ -10,7 +10,7 @@ from sqlmodel import Session
 from app.core.auth import ensure_tenant_access, get_current_active_user
 from app.core.deps import get_ingest_service, get_ingest_session
 from app.models.user import UserRecord
-from app.ingest.service import IngestService
+from app.ingest.service import IngestQueueFullError, IngestService
 from app.models import IngestRequest, IngestResponse
 from app.models.file import DocumentRecord, DocumentStatus, FileRecord, FileStatus
 
@@ -67,7 +67,11 @@ async def ingest_file(
             session.add(document)
         session.commit()
 
-    await ingest_service.enqueue_job(record)
+    try:
+        await ingest_service.enqueue_job(record)
+    except IngestQueueFullError as exc:
+        status_code = getattr(status, "HTTP_429_TOO_MANY_REQUESTS", 429)
+        raise HTTPException(status_code, detail=str(exc)) from exc
     session.refresh(record)
 
     return IngestResponse(

@@ -8,7 +8,7 @@ from .chunking import (
     iter_document_pages,
     parse_and_chunk,
 )
-from .service import IngestJob, IngestService, IngestWorker
+from .service import IngestJob, IngestQueueFullError, IngestService, IngestWorker
 
 __all__ = [
     "_CharTokenizer",
@@ -18,6 +18,7 @@ __all__ = [
     "iter_document_pages",
     "parse_and_chunk",
     "IngestJob",
+    "IngestQueueFullError",
     "IngestService",
     "IngestWorker",
 ]
