@@ -49,13 +49,12 @@ async def load_lora_adapter(
     except (TypeError, ValueError) as exc:  # Defensive guard for non-numeric inputs
         raise HTTPException(HTTP_UNPROCESSABLE_ENTITY, detail="INVALID_SCALING") from exc
 
-    try:
-        setattr(payload, "scaling", scaling_value)
-    except Exception:  # pragma: no cover - payload may not support attribute assignment
-        pass
+    payload_copy = payload.model_copy(update={"scaling": float(scaling_value)})
 
     try:
-        adapter_status = await manager.load_adapter(payload.path, scaling_value)
+        adapter_status = await manager.load_adapter(
+            payload_copy.path, payload_copy.scaling
+        )
     except FileNotFoundError as exc:
         raise HTTPException(HTTP_NOT_FOUND, detail="ADAPTER_NOT_FOUND") from exc
     except AdapterAlreadyLoadedError as exc:

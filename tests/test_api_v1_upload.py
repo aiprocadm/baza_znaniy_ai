@@ -278,9 +278,13 @@ if not hasattr(ingest_module, "IngestService"):
     class IngestJob:  # pragma: no cover - typing stub
         ...
 
+    class IngestQueueFullError(RuntimeError):  # pragma: no cover - typing stub
+        ...
+
     ingest_module.IngestService = IngestService
     ingest_module.IngestWorker = IngestWorker
     ingest_module.IngestJob = IngestJob
+    ingest_module.IngestQueueFullError = IngestQueueFullError
 
 
 upload_path = Path(__file__).resolve().parents[1] / "app" / "api" / "v1" / "upload.py"
@@ -530,3 +534,40 @@ def test_upload_endpoint_handles_multiple_formats(tmp_path: Path) -> None:
     stored_path = Path(recorded["path"])
     assert stored_path.exists()
     assert stored_path.read_bytes() == pdf_payload
+
+
+def test_upload_does_not_mutate_original_uploadfile(tmp_path: Path) -> None:
+    limits = UploadLimits(max_upload_mb=1, allowed_extensions={"txt"})
+    service = _StubIngestService()
+
+    payload = b"immutable"
+    stream = SpooledTemporaryFile(mode="w+b")
+    stream.write(payload)
+    stream.seek(0)
+
+    headers = upload_module.MutableHeaders()
+    headers["content-disposition"] = 'form-data; name="file"; filename="immutable.txt"'
+
+    original = upload_module.FastAPIUploadFile(
+        file=stream,
+        filename="",
+        headers=headers,
+    )
+    headers["content-type"] = "text/plain"
+
+    response = asyncio.run(
+        upload_module.upload_file(
+            file=[original],
+            files=None,
+            limits=limits,
+            data_dir=tmp_path,
+            _=object(),
+            tenant="immutable",
+            ingest_service=service,  # type: ignore[arg-type]
+        )
+    )
+
+    assert response.filename == "immutable.txt"
+    assert original.filename == ""
+    recorded = service.calls[0]
+    assert Path(recorded["path"]).read_bytes() == payload

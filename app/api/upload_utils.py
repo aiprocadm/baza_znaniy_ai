@@ -41,7 +41,7 @@ def create_upload_file(
     upload = UploadFile(filename=filename, file=file_obj)
     if content_type is not None:
         try:
-            setattr(upload, "content_type", content_type)
+            upload.content_type = content_type  # type: ignore[assignment]
         except AttributeError:
             headers = getattr(upload, "headers", None)
             if headers is not None:

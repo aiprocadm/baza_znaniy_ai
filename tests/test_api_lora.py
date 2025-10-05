@@ -329,3 +329,25 @@ def test_scaling_validation_rejects_non_numeric(tmp_path: Path) -> None:
     expected_status = getattr(status, "HTTP_422_UNPROCESSABLE_ENTITY", 422)
     assert excinfo.value.status_code == expected_status
     assert excinfo.value.detail == "INVALID_SCALING"
+
+
+def test_load_endpoint_preserves_original_request_model(tmp_path: Path) -> None:
+    adapter_path = _create_adapter(tmp_path, "immutable.gguf")
+
+    payload = LoraLoadRequest.model_construct(path=adapter_path, scaling=Decimal("0.75"))
+
+    status_payload = SimpleNamespace(
+        loaded=True,
+        path=adapter_path,
+        scaling=0.75,
+        adapter_name="immutable",
+    )
+
+    manager = SimpleNamespace(load_adapter=AsyncMock(return_value=status_payload))
+
+    response = asyncio.run(load_lora_adapter(payload, manager=manager))
+
+    assert isinstance(response, lora_module.LoraStatusResponse)
+    manager.load_adapter.assert_awaited_once_with(adapter_path, 0.75)
+    assert payload.scaling == Decimal("0.75")
+    assert isinstance(payload.scaling, Decimal)
