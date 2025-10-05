@@ -9,7 +9,10 @@ from datetime import datetime
 from functools import lru_cache
 from typing import Any, Callable, Optional
 
-from sqlalchemy import Column, JSON, MetaData, Text, UniqueConstraint
+import sqlite3
+from urllib.parse import unquote, urlparse
+
+from sqlalchemy import Column, JSON, MetaData, Text, UniqueConstraint, text
 from sqlalchemy.engine import Engine, make_url
 from sqlalchemy.ext.asyncio import create_async_engine
 try:  # pragma: no cover - optional dependency during lightweight test runs
@@ -150,8 +153,82 @@ class ChunkRecord(SQLModel, table=True):
 
 def _connect_args(url: str) -> dict[str, object]:
     if url.startswith("sqlite"):
-        return {"check_same_thread": False}
+        return {"check_same_thread": False, "timeout": 5.0}
     return {}
+
+
+def _maybe_configure_sqlite_engine(engine: Engine, url: str) -> None:
+    """Apply default SQLite pragmas for durability and concurrency."""
+
+    try:
+        dialect = make_url(url)
+    except Exception:
+        dialect = None
+
+    if isinstance(dialect, str):
+        driver_name = dialect
+    else:
+        driver_name = getattr(dialect, "drivername", "") or ""
+
+    if not str(driver_name).lower().startswith("sqlite"):
+        return
+
+    pragmas = (
+        "PRAGMA journal_mode=WAL",
+        "PRAGMA synchronous=NORMAL",
+        "PRAGMA busy_timeout=5000",
+    )
+
+    try:
+        with engine.connect() as connection:
+            for statement in pragmas:
+                connection.execute(text(statement))
+            connection.commit()
+            return
+    except Exception:
+        logger.debug(
+            "SQLite engine connection is unavailable for PRAGMA configuration",
+            exc_info=True,
+        )
+
+    database: str | None = None
+
+    if (
+        dialect is not None
+        and not isinstance(dialect, str)
+        and hasattr(dialect, "database")
+    ):
+        database = getattr(dialect, "database", None)
+
+    raw_url = str(url)
+    if not database:
+        parsed = urlparse(raw_url)
+        if parsed.scheme.lower() == "sqlite":
+            if parsed.netloc:
+                database = f"/{parsed.netloc}{parsed.path}"
+            else:
+                database = parsed.path
+            database = unquote(database or "")
+
+    if not database or database == ":memory:":
+        return
+
+    if database.startswith("//"):
+        database = "/" + database.lstrip("/")
+    elif database.startswith("/") and not raw_url.startswith("sqlite:////"):
+        database = database.lstrip("/")
+
+    try:
+        with sqlite3.connect(database) as sqlite_conn:
+            for statement in pragmas:
+                cursor = sqlite_conn.execute(statement)
+                try:
+                    cursor.fetchall()
+                except Exception:
+                    pass
+            sqlite_conn.commit()
+    except Exception:
+        logger.exception("Failed to configure SQLite pragmas")
 
 
 def _sqlite_aiosqlite_to_sync_url(async_url: str) -> str:
@@ -935,17 +1012,28 @@ def get_engine(url: Optional[str] = None, *, create_schema: bool = True) -> Engi
             else:
                 engine_url = db_url_str
                 engine = sync_candidate
+        _maybe_configure_sqlite_engine(engine, engine_url)
         engine = _ensure_sync_engine(engine, engine_url)
+        _maybe_configure_sqlite_engine(engine, engine_url)
         if create_schema:
             _create_schema_if_possible(engine, metadata)
-        return _ensure_sync_engine(engine, engine_url)
+        ensured_engine = _ensure_sync_engine(engine, engine_url)
+        if ensured_engine is not engine:
+            _maybe_configure_sqlite_engine(ensured_engine, engine_url)
+        return ensured_engine
 
     engine = create_engine(db_url, echo=False, connect_args=_connect_args(db_url_str))
+    _maybe_configure_sqlite_engine(engine, db_url_str)
     engine = _ensure_sync_engine(engine, db_url_str)
+    _maybe_configure_sqlite_engine(engine, db_url_str)
     if create_schema:
         _create_schema_if_possible(engine, metadata)
 
-    return _ensure_sync_engine(engine, db_url_str)
+    ensured_engine = _ensure_sync_engine(engine, db_url_str)
+    if ensured_engine is not engine:
+        _maybe_configure_sqlite_engine(ensured_engine, db_url_str)
+
+    return ensured_engine
 
 
 
