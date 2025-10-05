@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import math
+from types import SimpleNamespace
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Protocol, runtime_checkable
@@ -86,18 +87,33 @@ def _ensure_llm_package_exports() -> None:
 _ensure_llm_package_exports()
 
 
-def ensure_valid_scaling(scaling: float) -> float:
+def _unwrap_scaling_candidate(candidate: object, *, _depth: int = 0) -> object:
+    """Return the innermost value stored in supported wrapper types."""
+
+    if _depth > 4:  # pragma: no cover - recursion guard for pathological inputs
+        return candidate
+
+    if isinstance(candidate, SimpleNamespace):
+        if hasattr(candidate, "scaling"):
+            return _unwrap_scaling_candidate(getattr(candidate, "scaling"), _depth=_depth + 1)
+        if hasattr(candidate, "value"):
+            return _unwrap_scaling_candidate(getattr(candidate, "value"), _depth=_depth + 1)
+
+    return candidate
+
+
+def ensure_valid_scaling(scaling: object) -> float:
     """Return *scaling* as a float if it is finite and within supported bounds."""
 
-    try:
-        value = float(scaling)
-    except (TypeError, ValueError) as exc:  # pragma: no cover - defensive programming
-        raise ValueError("Scaling factor must be a float") from exc
+    candidate = _unwrap_scaling_candidate(scaling)
 
-    if not math.isfinite(value):
-        raise ValueError("Scaling factor must be finite")
-    if value <= 0.0:
-        raise ValueError("Scaling factor must be greater than zero")
+    try:
+        value = float(candidate)
+    except (TypeError, ValueError) as exc:  # pragma: no cover - defensive programming
+        raise ValueError("Scaling factor must be a numeric value") from exc
+
+    if not math.isfinite(value) or value <= 0.0:
+        raise ValueError("Scaling factor must be a finite number greater than zero")
     if value > 10.0:
         raise ValueError("Scaling factor must not exceed 10.0")
 
