@@ -100,6 +100,7 @@ def test_get_engine_handles_missing_metadata(tmp_path: Path, monkeypatch: pytest
     original_metadata = file_module.SQLModel.metadata
     file_module.SQLModel.metadata = None  # type: ignore[assignment]
 
+    engine = None
     try:
         engine = file_module.get_engine(create_schema=True)
 
