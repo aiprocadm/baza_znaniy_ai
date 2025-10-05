@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 from datetime import datetime
@@ -888,20 +889,36 @@ def get_engine(url: Optional[str] = None, *, create_schema: bool = True) -> Engi
     if driver_name.endswith("+aiosqlite"):
         try:
             async_engine = create_async_engine(db_url, echo=False)
+            if asyncio.iscoroutine(async_engine):
+                async_engine = asyncio.run(async_engine)
         except ModuleNotFoundError:
-            sync_url = _sqlite_aiosqlite_to_sync_url(db_url_str)
-            engine = create_engine(sync_url, echo=False, connect_args=_connect_args(sync_url))
+            engine_url = _sqlite_aiosqlite_to_sync_url(db_url_str)
+            engine = create_engine(engine_url, echo=False, connect_args=_connect_args(engine_url))
         else:
-            engine = async_engine.sync_engine
+            try:
+                sync_candidate = getattr(async_engine, "sync_engine")
+            except AttributeError:
+                sync_candidate = None
+
+            if sync_candidate is None:
+                engine_url = _sqlite_aiosqlite_to_sync_url(db_url_str)
+                engine = create_engine(
+                    engine_url, echo=False, connect_args=_connect_args(engine_url)
+                )
+            else:
+                engine_url = db_url_str
+                engine = sync_candidate
+        engine = _ensure_sync_engine(engine, engine_url)
         if create_schema:
             _create_schema_if_possible(engine, metadata)
-        return engine
+        return _ensure_sync_engine(engine, engine_url)
 
     engine = create_engine(db_url, echo=False, connect_args=_connect_args(db_url_str))
+    engine = _ensure_sync_engine(engine, db_url_str)
     if create_schema:
         _create_schema_if_possible(engine, metadata)
 
-    return engine
+    return _ensure_sync_engine(engine, db_url_str)
 
 
 
