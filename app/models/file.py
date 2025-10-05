@@ -21,6 +21,10 @@ except Exception:  # pragma: no cover - fallback when SQLAlchemy ORM is absent
     sessionmaker = None  # type: ignore[assignment]
 from sqlmodel import Field, SQLModel, Session, create_engine
 
+from app.observability.metrics import (
+    record_sqlmodel_metadata_alert,
+    record_sqlmodel_metadata_state,
+)
 from app.models.entities import JobRecord, SettingRecord
 
 
@@ -53,6 +57,24 @@ def _is_fallback_value(value: Any) -> bool:
         return bool(getattr(value, _FALLBACK_MARKER))
     except Exception:  # pragma: no cover - defensive against exotic descriptors
         return False
+
+
+def _record_sqlmodel_metadata_health(metadata: Any | None, *, origin: str) -> None:
+    """Update Prometheus metrics describing the SQLModel metadata state."""
+
+    try:
+        healthy, reason = record_sqlmodel_metadata_state(metadata, origin=origin)
+    except Exception:  # pragma: no cover - instrumentation must not break flows
+        logger.debug("Failed to record SQLModel metadata metrics", exc_info=True)
+        return
+
+    if healthy:
+        return
+
+    try:
+        record_sqlmodel_metadata_alert(origin=origin, reason=reason)
+    except Exception:  # pragma: no cover - best-effort alerting
+        logger.debug("Failed to increment SQLModel metadata alert counter", exc_info=True)
 
 
 class FileStatus(str):
@@ -986,7 +1008,7 @@ def get_engine(url: Optional[str] = None, *, create_schema: bool = True) -> Engi
     __import__("app.models.entities")
 
     metadata = getattr(SQLModel, "metadata", None)
-    if metadata is None or not isinstance(metadata, MetaData):
+    if metadata is None:
         metadata = MetaData()
         setattr(SQLModel, "metadata", metadata)
 
@@ -1015,25 +1037,43 @@ def get_engine(url: Optional[str] = None, *, create_schema: bool = True) -> Engi
         _maybe_configure_sqlite_engine(engine, engine_url)
         engine = _ensure_sync_engine(engine, engine_url)
         _maybe_configure_sqlite_engine(engine, engine_url)
-        if create_schema:
-            _create_schema_if_possible(engine, metadata)
         ensured_engine = _ensure_sync_engine(engine, engine_url)
         if ensured_engine is not engine:
             _maybe_configure_sqlite_engine(ensured_engine, engine_url)
-        return ensured_engine
+        engine = ensured_engine
+        if create_schema:
+            schema_metadata = _create_schema_if_possible(engine, metadata)
+            if schema_metadata is not None:
+                metadata = schema_metadata
+            current_metadata = getattr(SQLModel, "metadata", metadata)
+            _record_sqlmodel_metadata_health(current_metadata, origin="get_engine")
+        else:
+            _record_sqlmodel_metadata_health(
+                getattr(SQLModel, "metadata", metadata), origin="get_engine"
+            )
+        return engine
 
     engine = create_engine(db_url, echo=False, connect_args=_connect_args(db_url_str))
     _maybe_configure_sqlite_engine(engine, db_url_str)
     engine = _ensure_sync_engine(engine, db_url_str)
     _maybe_configure_sqlite_engine(engine, db_url_str)
-    if create_schema:
-        _create_schema_if_possible(engine, metadata)
-
     ensured_engine = _ensure_sync_engine(engine, db_url_str)
     if ensured_engine is not engine:
         _maybe_configure_sqlite_engine(ensured_engine, db_url_str)
+    engine = ensured_engine
 
-    return ensured_engine
+    if create_schema:
+        schema_metadata = _create_schema_if_possible(engine, metadata)
+        if schema_metadata is not None:
+            metadata = schema_metadata
+        current_metadata = getattr(SQLModel, "metadata", metadata)
+        _record_sqlmodel_metadata_health(current_metadata, origin="get_engine")
+    else:
+        _record_sqlmodel_metadata_health(
+            getattr(SQLModel, "metadata", metadata), origin="get_engine"
+        )
+
+    return engine
 
 
 

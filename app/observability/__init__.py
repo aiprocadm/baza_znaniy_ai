@@ -1,5 +1,9 @@
 """Observability utilities such as Prometheus metrics."""
 
+from .metadata_guard import (
+    check_sqlmodel_metadata,
+    schedule_sqlmodel_metadata_guard,
+)
 from .metrics import (
     CHAT_CITATIONS_TOTAL,
     CHAT_COMPLETIONS_TOTAL,
@@ -15,11 +19,15 @@ from .metrics import (
     SEARCH_DURATION_SECONDS,
     SEARCH_HITS_TOTAL,
     SEARCH_QUERIES_TOTAL,
+    SQLMODEL_METADATA_ALERTS_TOTAL,
+    SQLMODEL_METADATA_HEALTH,
     record_chat_completion,
     record_document_parse,
     record_document_ocr_pages,
     record_index_operation,
     record_search_operation,
+    record_sqlmodel_metadata_alert,
+    record_sqlmodel_metadata_state,
 )
 
 __all__ = [
@@ -37,9 +45,15 @@ __all__ = [
     "SEARCH_DURATION_SECONDS",
     "SEARCH_HITS_TOTAL",
     "SEARCH_QUERIES_TOTAL",
+    "SQLMODEL_METADATA_ALERTS_TOTAL",
+    "SQLMODEL_METADATA_HEALTH",
+    "check_sqlmodel_metadata",
+    "record_sqlmodel_metadata_alert",
+    "record_sqlmodel_metadata_state",
     "record_chat_completion",
     "record_document_parse",
     "record_document_ocr_pages",
     "record_index_operation",
     "record_search_operation",
+    "schedule_sqlmodel_metadata_guard",
 ]

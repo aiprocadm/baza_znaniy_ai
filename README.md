@@ -233,6 +233,27 @@ cp .env.example .env
 Prometheus доступны по `/metrics` и включают показатели парсинга, OCR,
 индексации, поиска и чата.
 
+### Мониторинг `SQLModel.metadata`
+
+- Гейдж `kb_sqlmodel_metadata_health{origin="..."}` устанавливается в `1`, когда
+  `SQLModel.metadata` присутствует и содержит все таблицы моделей, и `0`, если
+  объект потерян или повреждён.
+- Счётчик `kb_sqlmodel_metadata_alerts_total{origin="...",reason="..."}`
+  увеличивается при каждом срабатывании фонового стража
+  `sqlmodel-metadata-guard` (интервал 15 секунд) или при неуспешной попытке
+  инициализации схемы.
+
+**Как реагировать на алерт:**
+
+1. Проверить логи приложения (`tail -f var/logs/app.log` или `docker compose logs`)
+   на запись `SQLModel metadata integrity check failed` и уточнить причину в поле
+   `reason`.
+2. Убедиться, что SQLite-файл доступен и не повреждён: `sqlite3 var/data/kb.sqlite ".tables"`.
+3. Если таблицы отсутствуют, повторно применить миграции `alembic upgrade head`
+   и перезапустить сервис (`docker compose restart kb_web` или `make run`).
+4. После восстановления состояния выполнить `curl -s http://localhost:8000/metrics`
+   и убедиться, что `kb_sqlmodel_metadata_health` снова равен `1`.
+
 ```bash
 docker compose exec kb_web curl -s http://localhost:8000/ready
 ```

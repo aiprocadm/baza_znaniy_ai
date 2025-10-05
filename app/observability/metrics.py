@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from typing import Final
+from typing import Any, Final, Tuple
 
-from prometheus_client import Counter, Histogram
+from prometheus_client import Counter, Gauge, Histogram
+from sqlalchemy import MetaData
 
 _DEFAULT_STATUS: Final[str] = "unknown"
 _DEFAULT_EXTENSION: Final[str] = "unknown"
@@ -90,6 +91,18 @@ CHAT_CITATIONS_TOTAL = Counter(
     labelnames=("status",),
 )
 
+SQLMODEL_METADATA_HEALTH = Gauge(
+    "kb_sqlmodel_metadata_health",
+    "Health status of SQLModel metadata (1=healthy, 0=invalid).",
+    labelnames=("origin",),
+)
+
+SQLMODEL_METADATA_ALERTS_TOTAL = Counter(
+    "kb_sqlmodel_metadata_alerts_total",
+    "Total number of SQLModel metadata integrity alerts.",
+    labelnames=("origin", "reason"),
+)
+
 
 def record_document_parse(extension: str | None, status: str, chunks: int, duration: float) -> None:
     """Record metrics for a document parsing attempt."""
@@ -172,3 +185,35 @@ def record_chat_completion(
         CHAT_CONTEXT_HITS_TOTAL.labels(status=status_label).inc(hits)
     if citations > 0:
         CHAT_CITATIONS_TOTAL.labels(status=status_label).inc(citations)
+
+
+def record_sqlmodel_metadata_state(
+    metadata: Any | None,
+    *,
+    origin: str,
+) -> Tuple[bool, str]:
+    """Record the health of ``SQLModel.metadata`` and return status details."""
+
+    if metadata is None:
+        reason = "missing"
+        healthy = False
+    elif not isinstance(metadata, MetaData):
+        reason = "not_meta"
+        healthy = False
+    else:
+        try:
+            tables = getattr(metadata, "tables", {})
+            healthy = bool(tables)
+        except Exception:
+            tables = {}
+            healthy = False
+        reason = "healthy" if healthy else "empty"
+
+    SQLMODEL_METADATA_HEALTH.labels(origin=origin).set(1.0 if healthy else 0.0)
+    return healthy, reason
+
+
+def record_sqlmodel_metadata_alert(*, origin: str, reason: str) -> None:
+    """Increment the alert counter for SQLModel metadata issues."""
+
+    SQLMODEL_METADATA_ALERTS_TOTAL.labels(origin=origin, reason=reason).inc()
