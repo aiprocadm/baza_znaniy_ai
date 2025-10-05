@@ -155,3 +155,62 @@ def install_service_stubs() -> None:
 
         st_module.CrossEncoder = DummyCrossEncoder
         sys.modules["sentence_transformers"] = st_module
+
+    if "apscheduler" not in sys.modules:
+        aps_module = types.ModuleType("apscheduler")
+        jobstores_pkg = types.ModuleType("apscheduler.jobstores")
+        base_module = types.ModuleType("apscheduler.jobstores.base")
+        schedulers_pkg = types.ModuleType("apscheduler.schedulers")
+        asyncio_module = types.ModuleType("apscheduler.schedulers.asyncio")
+        triggers_pkg = types.ModuleType("apscheduler.triggers")
+        cron_module = types.ModuleType("apscheduler.triggers.cron")
+        interval_module = types.ModuleType("apscheduler.triggers.interval")
+
+        class JobLookupError(Exception):
+            """Placeholder job lookup error for scheduler stubs."""
+
+        class AsyncIOScheduler:
+            def __init__(self, *args: Any, **kwargs: Any) -> None:
+                self.args = args
+                self.kwargs = kwargs
+                self.jobs: list[tuple[Any, dict[str, Any]]] = []
+
+            def add_job(self, func: Any, trigger: Any = None, **kwargs: Any) -> None:
+                self.jobs.append((func, kwargs))
+
+            def start(self) -> None:  # pragma: no cover - noop
+                return None
+
+            def shutdown(self, wait: bool = True) -> None:  # pragma: no cover - noop
+                return None
+
+        class CronTrigger:
+            def __init__(self, *args: Any, **kwargs: Any) -> None:
+                self.args = args
+                self.kwargs = kwargs
+
+        class IntervalTrigger:
+            def __init__(self, *args: Any, **kwargs: Any) -> None:
+                self.args = args
+                self.kwargs = kwargs
+
+        base_module.JobLookupError = JobLookupError
+        jobstores_pkg.base = base_module
+        aps_module.jobstores = jobstores_pkg
+        asyncio_module.AsyncIOScheduler = AsyncIOScheduler
+        schedulers_pkg.asyncio = asyncio_module
+        aps_module.schedulers = schedulers_pkg
+        cron_module.CronTrigger = CronTrigger
+        interval_module.IntervalTrigger = IntervalTrigger
+        triggers_pkg.cron = cron_module
+        triggers_pkg.interval = interval_module
+        aps_module.triggers = triggers_pkg
+
+        sys.modules["apscheduler"] = aps_module
+        sys.modules["apscheduler.jobstores"] = jobstores_pkg
+        sys.modules["apscheduler.jobstores.base"] = base_module
+        sys.modules["apscheduler.schedulers"] = schedulers_pkg
+        sys.modules["apscheduler.schedulers.asyncio"] = asyncio_module
+        sys.modules["apscheduler.triggers"] = triggers_pkg
+        sys.modules["apscheduler.triggers.cron"] = cron_module
+        sys.modules["apscheduler.triggers.interval"] = interval_module
