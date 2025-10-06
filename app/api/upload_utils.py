@@ -12,6 +12,50 @@ import app.core.auth  # noqa: F401 - ensure auth module registration
 from starlette.datastructures import MutableHeaders
 
 
+def _ensure_mutable_content_type() -> None:
+    """Install a ``content_type`` setter on FastAPI's ``UploadFile``."""
+
+    descriptor = getattr(UploadFile, "content_type", None)
+    if not isinstance(descriptor, property) or descriptor.fset is not None:
+        return
+
+    def _coerce_headers(obj: UploadFile) -> MutableHeaders:
+        headers = getattr(obj, "headers", None)
+        if isinstance(headers, MutableHeaders):
+            return headers
+        if headers is None:
+            mutable = MutableHeaders()
+        else:
+            try:
+                raw = list(getattr(headers, "raw"))  # type: ignore[attr-defined]
+            except Exception:
+                raw = list(getattr(headers, "items")())  # type: ignore[attr-defined]
+            mutable = MutableHeaders(raw=raw)
+        try:
+            setattr(obj, "headers", mutable)
+        except Exception:  # pragma: no cover - defensive
+            try:
+                object.__setattr__(obj, "headers", mutable)
+            except Exception:
+                pass
+        return mutable
+
+    def _set_content_type(self: UploadFile, value: str | None) -> None:
+        headers = _coerce_headers(self)
+        if value is None:
+            try:
+                headers.pop("content-type", None)
+            except Exception:  # pragma: no cover - defensive
+                pass
+        else:
+            headers["content-type"] = value
+
+    setattr(UploadFile, "content_type", descriptor.setter(_set_content_type))
+
+
+_ensure_mutable_content_type()
+
+
 def create_upload_file(
     filename: str | None,
     content: Any,
