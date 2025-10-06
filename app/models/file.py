@@ -22,6 +22,7 @@ except Exception:  # pragma: no cover - fallback when SQLAlchemy ORM is absent
     sessionmaker = None  # type: ignore[assignment]
 from sqlmodel import Field, SQLModel, Session, create_engine
 
+from app.core.datetime_utils import utc_now
 from app.observability.metrics import (
     record_sqlmodel_metadata_alert,
     record_sqlmodel_metadata_state,
@@ -159,8 +160,8 @@ class DocumentRecord(SQLModel, table=True):
     meta: Optional[dict[str, Any]] = Field(default=None, sa_column=Column(JSON, nullable=True))
     chunks: Optional[int] = Field(default=None)
     content: str = Field(default="", sa_column=Column(Text, nullable=False))
-    created_at: datetime = Field(default_factory=datetime.utcnow, nullable=False)
-    updated_at: datetime = Field(default_factory=datetime.utcnow, nullable=False)
+    created_at: datetime = Field(default_factory=utc_now, nullable=False)
+    updated_at: datetime = Field(default_factory=utc_now, nullable=False)
 
 
 class FileRecord(SQLModel, table=True):
@@ -181,8 +182,8 @@ class FileRecord(SQLModel, table=True):
     error: Optional[str] = Field(default=None)
     meta: Optional[dict[str, Any]] = Field(default=None, sa_column=Column(JSON, nullable=True))
     chunks: Optional[int] = Field(default=None)
-    created_at: datetime = Field(default_factory=datetime.utcnow, nullable=False)
-    updated_at: datetime = Field(default_factory=datetime.utcnow, nullable=False)
+    created_at: datetime = Field(default_factory=utc_now, nullable=False)
+    updated_at: datetime = Field(default_factory=utc_now, nullable=False)
 
 
 class PageRecord(SQLModel, table=True):
@@ -199,7 +200,7 @@ class PageRecord(SQLModel, table=True):
     text: str
     tokens: int = Field(default=0, ge=0)
     meta: Optional[dict[str, Any]] = Field(default=None, sa_column=Column(JSON, nullable=True))
-    created_at: datetime = Field(default_factory=datetime.utcnow, nullable=False)
+    created_at: datetime = Field(default_factory=utc_now, nullable=False)
 
 
 class ChunkRecord(SQLModel, table=True):
@@ -218,7 +219,7 @@ class ChunkRecord(SQLModel, table=True):
     batch: Optional[int] = Field(default=None, index=True)
     tokens: int = Field(default=0, ge=0)
     meta: Optional[dict[str, Any]] = Field(default=None, sa_column=Column(JSON, nullable=True))
-    created_at: datetime = Field(default_factory=datetime.utcnow, nullable=False)
+    created_at: datetime = Field(default_factory=utc_now, nullable=False)
 
 
 install_stub_model_initializers([DocumentRecord, FileRecord, PageRecord, ChunkRecord])

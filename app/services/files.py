@@ -8,6 +8,7 @@ from pathlib import Path
 from threading import Lock
 from typing import Dict, Iterable, List, Optional
 
+from app.core.datetime_utils import utc_now
 
 class IngestStatus(str):
     """String-based status enum used in API responses."""
@@ -27,7 +28,7 @@ class FileRecord:
     tenant: str
     path: Path
     size: int
-    uploaded_at: datetime = field(default_factory=datetime.utcnow)
+    uploaded_at: datetime = field(default_factory=utc_now)
     status: str = field(default=IngestStatus.PENDING)
     chunks: int = 0
     error: Optional[str] = None

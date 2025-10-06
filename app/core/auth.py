@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import timedelta
 from typing import Any, Iterable
 from uuid import uuid4
 
@@ -14,6 +14,7 @@ from sqlmodel import Session, select
 
 from app.core.config import get_settings
 from app.core.deps import get_ingest_session, get_tenant
+from app.core.datetime_utils import utc_now
 from app.models.tenant import TenantRecord
 from app.models.user import UserRecord, UserRole
 from app.security import InvalidTokenError, create_access_token, decode_token
@@ -45,7 +46,7 @@ def _env_auth_disabled() -> bool:
 def _build_test_admin_user() -> UserRecord:
     """Return a synthetic admin user for environments with auth disabled."""
 
-    now = datetime.utcnow()
+    now = utc_now()
     return UserRecord(
         id=0,
         tenant_id="test-tenant",

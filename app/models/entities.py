@@ -9,6 +9,7 @@ from pydantic import field_validator, model_validator
 from sqlalchemy import Column, JSON, UniqueConstraint
 from sqlmodel import Field, SQLModel
 
+from app.core.datetime_utils import utc_now
 from app.models.sqlmodel_compat import install_stub_model_initializers
 
 
@@ -46,8 +47,8 @@ class TenantRecord(SQLModel, table=True):
     document_quota: int = Field(default=0, ge=0)
     document_count: int = Field(default=0, ge=0)
     error: Optional[str] = Field(default=None)
-    created_at: datetime = Field(default_factory=datetime.utcnow, nullable=False)
-    updated_at: datetime = Field(default_factory=datetime.utcnow, nullable=False)
+    created_at: datetime = Field(default_factory=utc_now, nullable=False)
+    updated_at: datetime = Field(default_factory=utc_now, nullable=False)
 
     @model_validator(mode="before")
     @classmethod
@@ -124,8 +125,8 @@ class UserRecord(SQLModel, table=True):
     status: str = Field(default=UserStatus.ACTIVE, index=True)
     hashed_password: Optional[str] = Field(default=None)
     error: Optional[str] = Field(default=None)
-    created_at: datetime = Field(default_factory=datetime.utcnow, nullable=False)
-    updated_at: datetime = Field(default_factory=datetime.utcnow, nullable=False)
+    created_at: datetime = Field(default_factory=utc_now, nullable=False)
+    updated_at: datetime = Field(default_factory=utc_now, nullable=False)
     last_login_at: Optional[datetime] = Field(default=None)
 
 
@@ -155,8 +156,8 @@ class JobRecord(SQLModel, table=True):
     payload: Optional[dict[str, Any]] = Field(
         default=None, sa_column=Column(JSON, nullable=True)
     )
-    created_at: datetime = Field(default_factory=datetime.utcnow, nullable=False)
-    updated_at: datetime = Field(default_factory=datetime.utcnow, nullable=False)
+    created_at: datetime = Field(default_factory=utc_now, nullable=False)
+    updated_at: datetime = Field(default_factory=utc_now, nullable=False)
     started_at: Optional[datetime] = Field(default=None)
     finished_at: Optional[datetime] = Field(default=None)
 
@@ -177,8 +178,8 @@ class SettingRecord(SQLModel, table=True):
     )
     status: str = Field(default="active", index=True)
     error: Optional[str] = Field(default=None)
-    created_at: datetime = Field(default_factory=datetime.utcnow, nullable=False)
-    updated_at: datetime = Field(default_factory=datetime.utcnow, nullable=False)
+    created_at: datetime = Field(default_factory=utc_now, nullable=False)
+    updated_at: datetime = Field(default_factory=utc_now, nullable=False)
 
 
 install_stub_model_initializers([TenantRecord, UserRecord, JobRecord, SettingRecord])

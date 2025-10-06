@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-from datetime import datetime
-
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlmodel import Session, select
 
 from app.core.auth import require_admin_user
+from app.core.datetime_utils import utc_now
 from app.core.deps import get_ingest_session
 from app.models.tenant import TenantRecord
 from app.models.user import UserCreate, UserRecord, UserResponse, UserRole
@@ -51,7 +50,7 @@ def create_user(
     if tenant is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="TENANT_NOT_FOUND")
 
-    now = datetime.utcnow()
+    now = utc_now()
     record = UserRecord(
         email=payload.email,
         full_name=payload.full_name,

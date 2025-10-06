@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-from datetime import datetime
-
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlmodel import Session
 
+from app.core.datetime_utils import utc_now
 from app.core.auth import ensure_tenant_access, get_current_active_user
 from app.core.deps import get_ingest_service, get_ingest_session
 from app.models.user import UserRecord
@@ -63,7 +62,7 @@ async def ingest_file(
             document.status = DocumentStatus.QUEUED
             document.error = None
             document.chunks = None
-            document.updated_at = datetime.utcnow()
+            document.updated_at = utc_now()
             session.add(document)
         session.commit()
 

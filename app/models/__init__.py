@@ -7,6 +7,7 @@ from typing import Any, List, Optional
 
 from pydantic import BaseModel, Field
 
+from app.core.datetime_utils import utc_now
 from .lora import LoraLoadRequest, LoraStatusResponse, LoraUnloadRequest
 
 import importlib
@@ -28,7 +29,7 @@ class Document(BaseModel):
     id: str = Field(..., description="Unique document identifier")
     content: str = Field(..., description="Document body")
     tags: List[str] = Field(default_factory=list)
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=utc_now)
 
 
 class DocumentCreate(BaseModel):
