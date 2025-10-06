@@ -83,11 +83,8 @@ def test_upload_endpoint_returns_429_on_queue_overflow(
         )
         assert configured_service.queue.full() is True
 
-        upload = UploadFile(
-            filename="second.txt",
-            file=BytesIO(b"bravo"),
-            headers=MutableHeaders({"content-type": "text/plain"}),
-        )
+        upload = UploadFile(filename="second.txt", file=BytesIO(b"bravo"))
+        upload.content_type = "text/plain"
         limits = UploadLimits(max_upload_mb=10)
 
         with pytest.raises(HTTPException) as exc:
