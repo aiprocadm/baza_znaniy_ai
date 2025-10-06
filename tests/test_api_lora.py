@@ -44,8 +44,20 @@ def lora_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Tes
     monkeypatch.setenv("LLM_MODEL_NAME", str(base_model))
     monkeypatch.setenv("LLM_MODEL_PATH", str(base_model))
     monkeypatch.setenv("VECTOR_BACKEND", "faiss")
+    monkeypatch.setenv("AUTH_DISABLED_FOR_TESTS", "1")
 
     install_service_stubs()
+
+    import importlib
+
+    import app.api.v1.lora as lora_module
+    import app.core.deps as deps_module
+    import app.llm.manager as manager_module
+    import app.llm.llama_cpp_provider as provider_module
+    importlib.reload(provider_module)
+    importlib.reload(manager_module)
+    importlib.reload(deps_module)
+    importlib.reload(lora_module)
 
     from app.core import config as config_module
 
@@ -56,8 +68,15 @@ def lora_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Tes
     reload(app_main)
     app = app_main.app
     app.dependency_overrides = {}
-
     client = TestClient(app)
+    stub_llm = SimpleNamespace(
+        name="stub-llm",
+        ensure_ready=lambda: None,
+        ensure_model=lambda: None,
+        ensure_adapter=lambda: None,
+    )
+    app.state.llm_provider = stub_llm
+    app.state.llm_client = stub_llm
     try:
         yield client
     finally:
