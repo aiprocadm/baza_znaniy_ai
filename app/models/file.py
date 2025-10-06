@@ -332,7 +332,11 @@ def _synthesise_dialect(url: str) -> Any:
 def _ensure_engine_surface(engine: Engine, url: str) -> Engine:
     """Guarantee essential SQLModel-compatible attributes on ``engine``."""
 
-    dialect = getattr(engine, "dialect", None)
+    try:
+        dialect = engine.dialect  # type: ignore[attr-defined]
+    except AttributeError:
+        dialect = None
+
     if not (hasattr(dialect, "name") and hasattr(dialect, "driver")):
         fallback_dialect = _synthesise_dialect(url)
         try:
@@ -342,7 +346,15 @@ def _ensure_engine_surface(engine: Engine, url: str) -> Engine:
         else:
             dialect = fallback_dialect
 
-    if not hasattr(engine, "url"):
+    has_url = False
+    try:
+        candidate_url = engine.url  # type: ignore[attr-defined]
+    except AttributeError:
+        candidate_url = None
+    else:
+        has_url = candidate_url is not None
+
+    if not has_url:
         try:
             fallback_url = make_url(url)
         except Exception:
@@ -352,7 +364,11 @@ def _ensure_engine_surface(engine: Engine, url: str) -> Engine:
         except Exception:
             pass
 
-    dispose = getattr(engine, "dispose", None)
+    try:
+        dispose = engine.dispose  # type: ignore[attr-defined]
+    except AttributeError:
+        dispose = None
+
     if not callable(dispose):
 
         def _noop_dispose(*_: Any, **__: Any) -> None:
@@ -364,7 +380,11 @@ def _ensure_engine_surface(engine: Engine, url: str) -> Engine:
         except Exception:
             pass
 
-    connect = getattr(engine, "connect", None)
+    try:
+        connect = engine.connect  # type: ignore[attr-defined]
+    except AttributeError:
+        connect = None
+
     if not callable(connect):
 
         def _fallback_connect(*_: Any, **__: Any) -> _EngineFallbackConnection:
@@ -377,6 +397,24 @@ def _ensure_engine_surface(engine: Engine, url: str) -> Engine:
             pass
 
     return engine
+
+
+def _collect_sqlmodel_tables() -> list[tuple[type[Any], Any]]:
+    """Return a snapshot of currently declared SQLModel tables."""
+
+    tables: list[tuple[type[Any], Any]] = []
+
+    try:
+        subclasses = list(SQLModel.__subclasses__())
+    except Exception:
+        return tables
+
+    for model_cls in subclasses:
+        table = getattr(model_cls, "__table__", None)
+        if table is not None:
+            tables.append((model_cls, table))
+
+    return tables
 
 
 class _SQLAlchemySessionAdapter:
