@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 from fastapi import HTTPException, UploadFile, status
+from starlette.datastructures import MutableHeaders
 from sqlmodel import Session, select
 
 from app.api.v1.ingest import ingest_file
