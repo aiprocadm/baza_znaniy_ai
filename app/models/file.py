@@ -41,7 +41,9 @@ if getattr(SQLModel, "metadata", None) is None:
     try:
         SQLModel.metadata = MetaData()  # type: ignore[assignment]
     except Exception:  # pragma: no cover - defensive fallback when assignment fails
-        logger.warning("SQLModel.metadata is unavailable; schema creation may be skipped")
+        logger.warning(
+            "SQLModel.metadata is unavailable; schema creation may be skipped"
+        )
 
 def _record_sqlmodel_metadata_health(metadata: Any | None, *, origin: str) -> None:
     """Update Prometheus metrics describing the SQLModel metadata state."""
@@ -58,7 +60,40 @@ def _record_sqlmodel_metadata_health(metadata: Any | None, *, origin: str) -> No
     try:
         record_sqlmodel_metadata_alert(origin=origin, reason=reason)
     except Exception:  # pragma: no cover - best-effort alerting
-        logger.debug("Failed to increment SQLModel metadata alert counter", exc_info=True)
+        logger.debug(
+            "Failed to increment SQLModel metadata alert counter", exc_info=True
+        )
+
+
+def _ensure_sqlmodel_metadata(metadata: Any | None) -> MetaData:
+    """Return a valid SQLModel metadata instance, creating one if required."""
+
+    if isinstance(metadata, MetaData):
+        return metadata
+
+    candidate = getattr(SQLModel, "metadata", None) if metadata is None else metadata
+    if candidate is not None and not isinstance(candidate, MetaData):
+        create_all_attr = getattr(candidate, "create_all", None)
+        if create_all_attr is not None and not callable(create_all_attr):
+            logger.error(
+                "SQLModel.metadata.create_all is not callable; cannot create schema"
+            )
+            raise RuntimeError(
+                "SQLModel metadata initialisation failed: metadata.create_all is not callable"
+            )
+
+    candidate = getattr(SQLModel, "metadata", None)
+    if isinstance(candidate, MetaData):
+        return candidate
+
+    fallback = MetaData()
+    try:
+        setattr(SQLModel, "metadata", fallback)
+    except Exception:  # pragma: no cover - best-effort assignment
+        logger.warning(
+            "Unable to attach fallback SQLModel metadata; schema creation may fail"
+        )
+    return fallback
 
 
 def _collect_sqlmodel_tables() -> list[tuple[type[Any], Any]]:
@@ -559,10 +594,7 @@ def get_engine(url: Optional[str] = None, *, create_schema: bool = True) -> Engi
     # Ensure additional SQLModel definitions are imported before metadata creation
     __import__("app.models.entities")
 
-    metadata = getattr(SQLModel, "metadata", None)
-    if metadata is None:
-        metadata = MetaData()
-        setattr(SQLModel, "metadata", metadata)
+    metadata = _ensure_sqlmodel_metadata(getattr(SQLModel, "metadata", None))
 
     engine_url = db_url_str
 
@@ -633,10 +665,18 @@ def get_engine(url: Optional[str] = None, *, create_schema: bool = True) -> Engi
     engine = _ensure_engine_surface(engine, engine_url)
 
     if create_schema:
-        schema_metadata = _create_schema_if_possible(engine, metadata)
-        if schema_metadata is not None:
-            metadata = schema_metadata
-        current_metadata = getattr(SQLModel, "metadata", metadata)
+        meta = _ensure_sqlmodel_metadata(metadata)
+        create_all = getattr(meta, "create_all", None)
+        if callable(create_all):
+            create_all(engine)
+        else:
+            logger.error(
+                "SQLModel.metadata.create_all is not callable; cannot create schema"
+            )
+            raise RuntimeError(
+                "SQLModel metadata initialisation failed: metadata.create_all is not callable"
+            )
+        current_metadata = getattr(SQLModel, "metadata", meta)
         _record_sqlmodel_metadata_health(current_metadata, origin="get_engine")
     else:
         _record_sqlmodel_metadata_health(
