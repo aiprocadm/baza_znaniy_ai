@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 from fastapi import HTTPException, UploadFile, status
-from starlette.datastructures import Headers
+from starlette.datastructures import MutableHeaders
 from sqlmodel import Session, select
 
 from app.api.v1.ingest import ingest_file
@@ -83,12 +83,8 @@ def test_upload_endpoint_returns_429_on_queue_overflow(
         )
         assert configured_service.queue.full() is True
 
-        upload = UploadFile(
-            filename="second.txt",
-            file=BytesIO(b"bravo"),
-            headers=Headers({"content-type": "text/plain"}),
-        )
-        assert upload.headers.get("content-type") == "text/plain"
+        upload = UploadFile(filename="second.txt", file=BytesIO(b"bravo"))
+        upload.content_type = "text/plain"
         limits = UploadLimits(max_upload_mb=10)
 
         with pytest.raises(HTTPException) as exc:
