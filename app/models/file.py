@@ -36,7 +36,9 @@ if getattr(SQLModel, "metadata", None) is None:
     try:
         SQLModel.metadata = MetaData()  # type: ignore[assignment]
     except Exception:  # pragma: no cover - defensive fallback when assignment fails
-        logger.warning("SQLModel.metadata is unavailable; schema creation may be skipped")
+        logger.warning(
+            "SQLModel.metadata is unavailable; schema creation may be skipped"
+        )
 
 
 def _record_sqlmodel_metadata_health(metadata: Any | None, *, origin: str) -> None:
@@ -54,7 +56,40 @@ def _record_sqlmodel_metadata_health(metadata: Any | None, *, origin: str) -> No
     try:
         record_sqlmodel_metadata_alert(origin=origin, reason=reason)
     except Exception:  # pragma: no cover - best-effort alerting
-        logger.debug("Failed to increment SQLModel metadata alert counter", exc_info=True)
+        logger.debug(
+            "Failed to increment SQLModel metadata alert counter", exc_info=True
+        )
+
+
+def _ensure_sqlmodel_metadata(metadata: Any | None) -> MetaData:
+    """Return a valid SQLModel metadata instance, creating one if required."""
+
+    if isinstance(metadata, MetaData):
+        return metadata
+
+    candidate = getattr(SQLModel, "metadata", None) if metadata is None else metadata
+    if candidate is not None and not isinstance(candidate, MetaData):
+        create_all_attr = getattr(candidate, "create_all", None)
+        if create_all_attr is not None and not callable(create_all_attr):
+            logger.error(
+                "SQLModel.metadata.create_all is not callable; cannot create schema"
+            )
+            raise RuntimeError(
+                "SQLModel metadata initialisation failed: metadata.create_all is not callable"
+            )
+
+    candidate = getattr(SQLModel, "metadata", None)
+    if isinstance(candidate, MetaData):
+        return candidate
+
+    fallback = MetaData()
+    try:
+        setattr(SQLModel, "metadata", fallback)
+    except Exception:  # pragma: no cover - best-effort assignment
+        logger.warning(
+            "Unable to attach fallback SQLModel metadata; schema creation may fail"
+        )
+    return fallback
 
 
 class FileStatus(str):
@@ -296,67 +331,6 @@ class _SQLAlchemySessionAdapter:
         return getattr(self._session, item)
 
 
-def _create_schema_if_possible(engine: Engine, metadata: Any | None) -> MetaData | None:
-    """Create database schema when ``SQLModel.metadata`` exposes ``create_all``."""
-
-    meta: MetaData | None
-    tables_snapshot: list[tuple[type[Any], Any]] | None = None
-
-    if isinstance(metadata, MetaData):
-        meta = metadata
-    else:
-        candidate = getattr(SQLModel, "metadata", None)
-        meta = candidate if isinstance(candidate, MetaData) else None
-
-    if meta is None:
-        tables_snapshot = _collect_sqlmodel_tables()
-        logger.warning(
-            "SQLModel.metadata is missing or invalid; reinitialising metadata"
-        )
-        try:
-            meta = MetaData()
-            setattr(SQLModel, "metadata", meta)
-        except Exception:
-            logger.exception(
-                "Failed to attach fallback MetaData to SQLModel; skipping schema creation"
-            )
-            return None
-
-        if tables_snapshot:
-            for model_cls, table in tables_snapshot:
-                migrate = getattr(table, "to_metadata", None)
-                if not callable(migrate):
-                    migrate = getattr(table, "tometadata", None)
-                if not callable(migrate):
-                    continue
-                try:
-                    new_table = migrate(meta)
-                except Exception:
-                    logger.exception(
-                        "Failed to migrate SQLModel table %s to new metadata",
-                        getattr(model_cls, "__name__", repr(model_cls)),
-                    )
-                    continue
-                try:
-                    setattr(model_cls, "__table__", new_table)
-                except Exception:
-                    logger.debug(
-                        "Unable to update __table__ for %s during metadata migration",
-                        getattr(model_cls, "__name__", repr(model_cls)),
-                        exc_info=True,
-                    )
-
-    create_all = getattr(meta, "create_all", None)
-    if not callable(create_all):
-        logger.error(
-            "SQLModel.metadata.create_all is not callable; cannot create schema"
-        )
-        return None
-
-    create_all(engine)
-    return meta
-
-
 @lru_cache(maxsize=1)
 def get_engine(url: Optional[str] = None, *, create_schema: bool = True) -> Engine:
     """Return a synchronous SQLAlchemy engine configured for SQLModel models."""
@@ -371,10 +345,7 @@ def get_engine(url: Optional[str] = None, *, create_schema: bool = True) -> Engi
     # Ensure additional SQLModel definitions are imported before metadata creation
     __import__("app.models.entities")
 
-    metadata = getattr(SQLModel, "metadata", None)
-    if metadata is None:
-        metadata = MetaData()
-        setattr(SQLModel, "metadata", metadata)
+    metadata = _ensure_sqlmodel_metadata(getattr(SQLModel, "metadata", None))
 
     engine_url = db_url_str
 
@@ -444,10 +415,18 @@ def get_engine(url: Optional[str] = None, *, create_schema: bool = True) -> Engi
     engine = SyncEngineGuard(engine, engine_url).ensure_sync()
 
     if create_schema:
-        schema_metadata = _create_schema_if_possible(engine, metadata)
-        if schema_metadata is not None:
-            metadata = schema_metadata
-        current_metadata = getattr(SQLModel, "metadata", metadata)
+        meta = _ensure_sqlmodel_metadata(metadata)
+        create_all = getattr(meta, "create_all", None)
+        if callable(create_all):
+            create_all(engine)
+        else:
+            logger.error(
+                "SQLModel.metadata.create_all is not callable; cannot create schema"
+            )
+            raise RuntimeError(
+                "SQLModel metadata initialisation failed: metadata.create_all is not callable"
+            )
+        current_metadata = getattr(SQLModel, "metadata", meta)
         _record_sqlmodel_metadata_health(current_metadata, origin="get_engine")
     else:
         _record_sqlmodel_metadata_health(
