@@ -8,6 +8,7 @@ from types import SimpleNamespace
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import ValidationError
 
 from app.core.auth import require_admin_user
 from app.core.deps import get_lora_manager
@@ -70,6 +71,7 @@ def _coerce_scaling_value(candidate: object) -> float:
 
     unwrapped = _unwrap_scaling_candidate(candidate)
 
+    scaling_candidate = getattr(payload_copy, "scaling", None)
     try:
         numeric = float(unwrapped)
     except (TypeError, ValueError) as exc:
