@@ -8,12 +8,13 @@ import logging
 import os
 from asyncio import QueueEmpty, QueueFull
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import timedelta
 from typing import Any, Optional, Tuple, TYPE_CHECKING
 
 from sqlmodel import Session, delete, select
 
 from app.core.config import get_settings
+from app.core.datetime_utils import utc_now
 from app.ingest.chunking import _chunk, _get_tokenizer, iter_document_pages
 from app.models.entities import JobStatus
 from app.models.file import (
@@ -208,7 +209,7 @@ class IngestService:
     def _perform_maintenance(self) -> None:
         """Prune stale job records and reset stuck files."""
 
-        cutoff = datetime.utcnow() - timedelta(days=self.job_retention_days)
+        cutoff = utc_now() - timedelta(days=self.job_retention_days)
         removed_jobs = 0
         reset_files = 0
         with Session(self.engine) as session:
@@ -233,14 +234,14 @@ class IngestService:
             for file_obj in stale_files:
                 file_obj.status = FileStatus.FAILED
                 file_obj.error = "STALE_PROCESSING"
-                file_obj.updated_at = datetime.utcnow()
+                file_obj.updated_at = utc_now()
                 session.add(file_obj)
                 if file_obj.document_id is not None:
                     document = session.get(DocumentRecord, file_obj.document_id)
                     if document:
                         document.status = DocumentStatus.FAILED
                         document.error = "STALE_PROCESSING"
-                        document.updated_at = datetime.utcnow()
+                        document.updated_at = utc_now()
                         session.add(document)
             reset_files = len(stale_files)
             if removed_jobs or reset_files:
@@ -383,7 +384,7 @@ class IngestService:
                     )
                     session.add(document)
                 else:
-                    document.updated_at = datetime.utcnow()
+                    document.updated_at = utc_now()
                     if mime_type and document.mime_type != mime_type:
                         document.mime_type = mime_type
                     if document.status == DocumentStatus.FAILED:
@@ -414,7 +415,7 @@ class IngestService:
                     session.add(file_obj)
                     queued = True
                 else:
-                    file_obj.updated_at = datetime.utcnow()
+                    file_obj.updated_at = utc_now()
                     file_obj.document_id = document.id
                     if file_obj.status == FileStatus.FAILED:
                         file_obj.path = path
@@ -523,8 +524,8 @@ class IngestWorker:
                 if job_record:
                     job_record.status = JobStatus.FAILED
                     job_record.error = "FILE_MISSING"
-                    job_record.finished_at = datetime.utcnow()
-                    job_record.updated_at = datetime.utcnow()
+                    job_record.finished_at = utc_now()
+                    job_record.updated_at = utc_now()
                     session.add(job_record)
                     session.commit()
                 return
@@ -537,26 +538,26 @@ class IngestWorker:
             if file_obj.status == FileStatus.COMPLETED:
                 if job_record and job_record.status == JobStatus.QUEUED:
                     job_record.status = JobStatus.COMPLETED
-                    job_record.finished_at = datetime.utcnow()
-                    job_record.updated_at = datetime.utcnow()
+                    job_record.finished_at = utc_now()
+                    job_record.updated_at = utc_now()
                     session.add(job_record)
                     session.commit()
                 return
             file_obj.status = FileStatus.PROCESSING
             file_obj.error = None
             file_obj.chunks = None
-            file_obj.updated_at = datetime.utcnow()
+            file_obj.updated_at = utc_now()
             session.add(file_obj)
             if document:
                 document.status = DocumentStatus.PROCESSING
                 document.error = None
                 document.chunks = None
-                document.updated_at = datetime.utcnow()
+                document.updated_at = utc_now()
                 session.add(document)
             if job_record:
                 job_record.status = JobStatus.PROCESSING
-                job_record.started_at = datetime.utcnow()
-                job_record.updated_at = datetime.utcnow()
+                job_record.started_at = utc_now()
+                job_record.updated_at = utc_now()
                 session.add(job_record)
             session.commit()
 
@@ -595,19 +596,19 @@ class IngestWorker:
                     return
                 if success:
                     file_obj.status = FileStatus.COMPLETED
-                    file_obj.updated_at = datetime.utcnow()
+                    file_obj.updated_at = utc_now()
                     file_obj.error = None
                     file_obj.chunks = chunk_count
                     if document:
                         document.status = DocumentStatus.COMPLETED
-                        document.updated_at = datetime.utcnow()
+                        document.updated_at = utc_now()
                         document.error = None
                         document.chunks = chunk_count
                         session.add(document)
                     if job_record:
                         job_record.status = JobStatus.COMPLETED
-                        job_record.finished_at = datetime.utcnow()
-                        job_record.updated_at = datetime.utcnow()
+                        job_record.finished_at = utc_now()
+                        job_record.updated_at = utc_now()
                         payload = dict(job_record.payload or {})
                         payload.update({"chunks": chunk_count, "attempt": job.attempt})
                         job_record.payload = payload
@@ -616,19 +617,19 @@ class IngestWorker:
                 else:
                     file_obj.status = FileStatus.FAILED
                     file_obj.retries = job.attempt + 1
-                    file_obj.updated_at = datetime.utcnow()
+                    file_obj.updated_at = utc_now()
                     file_obj.error = error_message
                     file_obj.chunks = chunk_count or 0
                     if document:
                         document.status = DocumentStatus.FAILED
-                        document.updated_at = datetime.utcnow()
+                        document.updated_at = utc_now()
                         document.error = error_message
                         document.chunks = chunk_count or 0
                         session.add(document)
                     if job_record:
                         job_record.status = JobStatus.FAILED
-                        job_record.finished_at = datetime.utcnow()
-                        job_record.updated_at = datetime.utcnow()
+                        job_record.finished_at = utc_now()
+                        job_record.updated_at = utc_now()
                         payload = dict(job_record.payload or {})
                         payload.update({"chunks": chunk_count or 0, "attempt": job.attempt})
                         job_record.payload = payload
@@ -737,7 +738,7 @@ class IngestWorker:
             if file_obj:
                 file_obj.status = FileStatus.QUEUED
                 file_obj.retries = job.attempt
-                file_obj.updated_at = datetime.utcnow()
+                file_obj.updated_at = utc_now()
                 session.add(file_obj)
                 document = (
                     session.get(DocumentRecord, file_obj.document_id)
@@ -748,7 +749,7 @@ class IngestWorker:
                     document.status = DocumentStatus.QUEUED
                     document.error = None
                     document.chunks = None
-                    document.updated_at = datetime.utcnow()
+                    document.updated_at = utc_now()
                     session.add(document)
                 session.commit()
                 session.refresh(file_obj)

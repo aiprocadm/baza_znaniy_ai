@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-from datetime import datetime
-
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlmodel import Session, select
 
 from app.core.auth import require_admin_user
+from app.core.datetime_utils import utc_now
 from app.core.deps import get_ingest_session
 from app.models.tenant import TenantCreate, TenantRecord, TenantResponse
 
@@ -44,7 +43,7 @@ def create_tenant(
     if existing is not None:
         raise HTTPException(status.HTTP_409_CONFLICT, detail="TENANT_EXISTS")
 
-    now = datetime.utcnow()
+    now = utc_now()
     record = TenantRecord(
         slug=payload.slug,
         name=payload.name,

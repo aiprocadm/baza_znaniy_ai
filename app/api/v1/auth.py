@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-from datetime import datetime
-
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, EmailStr, Field
 from sqlmodel import Session, select
 
+from app.core.datetime_utils import utc_now
 from app.core.auth import (
     TokenPair,
     _extract_bearer_token,
@@ -69,8 +68,9 @@ def login(
     if tenant is None or not tenant.is_active:
         raise HTTPException(status.HTTP_403_FORBIDDEN, detail="TENANT_DISABLED")
 
-    user.last_login_at = datetime.utcnow()
-    user.updated_at = datetime.utcnow()
+    now = utc_now()
+    user.last_login_at = now
+    user.updated_at = now
     session.add(user)
     session.commit()
     session.refresh(user)
