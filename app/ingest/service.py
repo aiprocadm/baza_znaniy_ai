@@ -9,12 +9,7 @@ import os
 from asyncio import QueueEmpty, QueueFull
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Optional, Tuple
-
-from apscheduler.jobstores.base import JobLookupError
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from apscheduler.triggers.cron import CronTrigger
-from apscheduler.triggers.interval import IntervalTrigger
+from typing import Any, Optional, Tuple, TYPE_CHECKING
 
 from sqlmodel import Session, delete, select
 
@@ -32,6 +27,39 @@ from app.models.file import (
     get_engine,
 )
 from app.services import vectorstore
+
+try:  # pragma: no cover - optional dependency resolution
+    from apscheduler.jobstores.base import JobLookupError as _ApsJobLookupError
+except ModuleNotFoundError:  # pragma: no cover - optional dependency fallback
+    class _ApsJobLookupError(Exception):
+        """Fallback exception when APScheduler is unavailable."""
+
+
+JobLookupError = _ApsJobLookupError
+
+if TYPE_CHECKING:  # pragma: no cover - typing helpers
+    from apscheduler.schedulers.asyncio import AsyncIOScheduler
+    from apscheduler.triggers.cron import CronTrigger
+    from apscheduler.triggers.interval import IntervalTrigger
+else:  # pragma: no cover - runtime placeholders
+    AsyncIOScheduler = Any  # type: ignore
+    CronTrigger = Any  # type: ignore
+    IntervalTrigger = Any  # type: ignore
+
+
+def _load_scheduler_artifacts():
+    """Dynamically import APScheduler components when available."""
+
+    try:
+        from apscheduler.schedulers.asyncio import AsyncIOScheduler as scheduler_cls
+        from apscheduler.triggers.cron import CronTrigger as cron_cls
+        from apscheduler.triggers.interval import IntervalTrigger as interval_cls
+    except ModuleNotFoundError as exc:  # pragma: no cover - optional dependency
+        raise RuntimeError(
+            "APScheduler is required for background ingest processing. "
+            "Install it with 'pip install apscheduler'."
+        ) from exc
+    return scheduler_cls, cron_cls, interval_cls
 
 
 logger = logging.getLogger(__name__)
@@ -120,8 +148,9 @@ class IngestService:
             self.worker = IngestWorker(self)
         if self._scheduler is None:
             raise RuntimeError("Ingest scheduler has not been configured")
+        _, cron_cls, interval_cls = _load_scheduler_artifacts()
         if self._worker_job_id is None:
-            trigger = IntervalTrigger(seconds=self.worker_interval_seconds)
+            trigger = interval_cls(seconds=self.worker_interval_seconds)
             job = self._scheduler.add_job(
                 self.worker.drain,
                 trigger=trigger,
@@ -132,7 +161,7 @@ class IngestService:
             self._worker_job_id = job.id
         if self.maintenance_cron and self._maintenance_job_id is None:
             try:
-                trigger = CronTrigger.from_crontab(self.maintenance_cron)
+                trigger = cron_cls.from_crontab(self.maintenance_cron)
             except ValueError:
                 logger.error(
                     "Invalid ingest maintenance cron expression: %s",

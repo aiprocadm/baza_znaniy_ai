@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import hashlib
 import json
 import logging
@@ -13,8 +14,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable, Iterator, Mapping
-
-import httpx
+from urllib import error as url_error, request as url_request
 
 try:  # pragma: no cover - optional dependency resolved at runtime
     from huggingface_hub import HfHubHTTPError, hf_hub_download, model_info
@@ -163,15 +163,27 @@ def download_via_http(
     last_error: Exception | None = None
     for attempt in _iter_with_backoff(max_retries):
         try:
-            with httpx.stream("GET", url, follow_redirects=True, timeout=timeout) as response:
-                response.raise_for_status()
+            request = url_request.Request(url, method="GET")
+            with contextlib.closing(url_request.urlopen(request, timeout=timeout)) as response:
+                status_code = getattr(response, "status", None)
+                if status_code is None:
+                    status_code = response.getcode()
+                if status_code is None or status_code >= 400:
+                    raise DownloadError(
+                        f"Unexpected HTTP status {status_code} when downloading {url}"
+                    )
+
                 digest = hashlib.sha256()
                 bytes_written = 0
                 with tmp_path.open("wb") as temp_file:
-                    for chunk in response.iter_bytes():
+                    while True:
+                        chunk = response.read(1024 * 1024)
+                        if not chunk:
+                            break
                         temp_file.write(chunk)
                         digest.update(chunk)
                         bytes_written += len(chunk)
+
             sha_value = digest.hexdigest()
             if expected_sha and sha_value.lower() != expected_sha.lower():
                 raise DownloadError(
@@ -181,7 +193,7 @@ def download_via_http(
             return DownloadResult(
                 path=output, sha256=sha_value, bytes_written=bytes_written, from_cache=False
             )
-        except (httpx.HTTPError, OSError, DownloadError) as exc:  # pragma: no cover - network path
+        except (url_error.URLError, url_error.HTTPError, OSError, DownloadError) as exc:
             last_error = exc
             _LOGGER.warning("Attempt %s failed to download %s: %s", attempt, url, exc)
             if attempt >= max_retries:

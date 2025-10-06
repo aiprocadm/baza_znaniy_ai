@@ -6,7 +6,6 @@ fastapi
 apscheduler
 gguf
 html2text
-httpx
 jinja2
 huggingface-hub
 llama-cpp-python

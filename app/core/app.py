@@ -9,7 +9,10 @@ from typing import Sequence
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
+try:  # pragma: no cover - optional dependency resolution
+    from apscheduler.schedulers.asyncio import AsyncIOScheduler
+except ModuleNotFoundError:  # pragma: no cover - optional dependency fallback
+    AsyncIOScheduler = None  # type: ignore[assignment]
 from app.api.router import api_router
 from app.chat.summarizer import ConversationSummarizer
 from app.core.auth import TokenRegistry
@@ -82,6 +85,12 @@ def create_app(provider: LLMProvider | None = None) -> FastAPI:
 
     file_store = FileStore()
     ingest_queue = IngestQueue()
+    if AsyncIOScheduler is None:  # pragma: no cover - optional dependency guard
+        raise RuntimeError(
+            "APScheduler is required to run background ingest processing. "
+            "Install it with 'pip install apscheduler'."
+        )
+
     scheduler = AsyncIOScheduler(timezone=timezone.utc)
     schedule_sqlmodel_metadata_guard(scheduler)
 
