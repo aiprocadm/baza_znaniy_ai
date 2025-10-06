@@ -9,6 +9,8 @@ from pydantic import field_validator, model_validator
 from sqlalchemy import Column, JSON, UniqueConstraint
 from sqlmodel import Field, SQLModel
 
+from app.models.sqlmodel_compat import install_stub_model_initializers
+
 
 class TenantStatus(str):
     """Lifecycle states tracked for tenants."""
@@ -23,6 +25,15 @@ class TenantRecord(SQLModel, table=True):
 
     __tablename__ = "tenants"
     __table_args__ = (UniqueConstraint("slug", name="uq_tenants_slug"),)
+
+    def __init__(self, **data: Any) -> None:
+        slug = data.get("slug")
+        tenant_id = data.get("tenant_id")
+        if tenant_id in (None, "") and slug:
+            data["tenant_id"] = str(slug)
+        elif slug in (None, "") and tenant_id:
+            data["slug"] = str(tenant_id)
+        super().__init__(**data)
 
     tenant_id: Optional[str] = Field(default=None, primary_key=True)
     slug: str = Field(index=True)
@@ -48,6 +59,16 @@ class TenantRecord(SQLModel, table=True):
         elif slug and not tenant_id:
             values["tenant_id"] = str(slug)
         return values
+
+    @model_validator(mode="after")
+    def _sync_identifiers(self) -> "TenantRecord":
+        tenant_id = getattr(self, "tenant_id", None)
+        slug = getattr(self, "slug", None)
+        if tenant_id in (None, "") and slug:
+            object.__setattr__(self, "tenant_id", str(slug))
+        elif slug in (None, "") and tenant_id:
+            object.__setattr__(self, "slug", str(tenant_id))
+        return self
 
     @field_validator("slug")
     @classmethod
@@ -82,6 +103,15 @@ class UserRecord(SQLModel, table=True):
         UniqueConstraint("tenant_id", "external_id", name="uq_users_tenant_external"),
         UniqueConstraint("tenant_id", "email", name="uq_users_tenant_email"),
     )
+
+    def __init__(self, **data: Any) -> None:
+        tenant_id = data.get("tenant_id")
+        tenant_slug = data.get("tenant_slug")
+        if tenant_id in (None, "") and tenant_slug:
+            data["tenant_id"] = str(tenant_slug)
+        elif tenant_slug in (None, "") and tenant_id:
+            data["tenant_slug"] = str(tenant_id)
+        super().__init__(**data)
 
     id: Optional[int] = Field(default=None, primary_key=True)
     tenant_id: str = Field(foreign_key="tenants.tenant_id", index=True)
@@ -149,6 +179,9 @@ class SettingRecord(SQLModel, table=True):
     error: Optional[str] = Field(default=None)
     created_at: datetime = Field(default_factory=datetime.utcnow, nullable=False)
     updated_at: datetime = Field(default_factory=datetime.utcnow, nullable=False)
+
+
+install_stub_model_initializers([TenantRecord, UserRecord, JobRecord, SettingRecord])
 
 
 __all__ = [

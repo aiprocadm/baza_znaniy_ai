@@ -4,11 +4,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import timedelta
-from typing import Iterable
+from typing import Any, Iterable
 from uuid import uuid4
 
 from fastapi import Depends, HTTPException, Request, status
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from fastapi.security import HTTPBearer
 from sqlmodel import Session, select
 
 from app.core.config import get_settings
@@ -19,6 +19,43 @@ from app.security import InvalidTokenError, create_access_token, decode_token
 
 
 bearer_scheme = HTTPBearer(auto_error=False)
+
+
+def _extract_bearer_token(request: Any) -> str | None:
+    """Return the bearer token from a request-like object, if present."""
+
+    if request is None:
+        return None
+
+    header_value: str | None = None
+    headers = getattr(request, "headers", None)
+    if headers is not None:
+        getter = getattr(headers, "get", None)
+        if callable(getter):
+            header_value = getter("Authorization") or getter("authorization")
+
+    if header_value is None and hasattr(request, "scope"):
+        scope = getattr(request, "scope", {}) or {}
+        raw_headers = scope.get("headers") or []
+        for key, value in raw_headers:
+            try:
+                key_text = key.decode().lower()
+            except Exception:
+                continue
+            if key_text == "authorization":
+                try:
+                    header_value = value.decode()
+                except Exception:
+                    header_value = None
+                break
+
+    if not header_value:
+        return None
+
+    scheme, _, token = header_value.partition(" ")
+    if scheme.lower() != "bearer":
+        return None
+    return token.strip() or None
 
 
 @dataclass
@@ -35,19 +72,36 @@ class TokenRegistry:
 
     def __init__(self) -> None:
         self._revoked: set[str] = set()
+        self._inactive_users: set[str] = set()
 
     def revoke(self, token_id: str | None) -> None:
         if token_id:
             self._revoked.add(token_id)
+            _GLOBAL_REVOKED_TOKENS.add(token_id)
 
     def is_revoked(self, token_id: str | None) -> bool:
-        return bool(token_id) and token_id in self._revoked
+        if not token_id:
+            return False
+        return token_id in self._revoked or token_id in _GLOBAL_REVOKED_TOKENS
+
+    def mark_active(self, user_id: str | None) -> None:
+        if user_id:
+            self._inactive_users.discard(user_id)
+
+    def mark_inactive(self, user_id: str | None) -> None:
+        if user_id:
+            self._inactive_users.add(user_id)
+
+    def is_active(self, user_id: str | None) -> bool:
+        if not user_id:
+            return False
+        return user_id not in self._inactive_users
 
 
 def _get_registry(request: Request) -> TokenRegistry:
     registry = getattr(request.app.state, "token_registry", None)
     if not isinstance(registry, TokenRegistry):
-        registry = TokenRegistry()
+        registry = _GLOBAL_TOKEN_REGISTRY
         request.app.state.token_registry = registry
     return registry
 
@@ -60,10 +114,11 @@ def issue_tokens(
 ) -> TokenPair:
     """Generate JWT access and refresh tokens for the provided user."""
 
+    role_value = user.role.value if hasattr(user.role, "value") else str(user.role)
     claims = {
         "sub": str(user.id),
         "tenant": user.tenant_slug,
-        "role": user.role.value,
+        "role": role_value,
     }
     access_id = str(uuid4())
     refresh_id = str(uuid4())
@@ -78,10 +133,11 @@ def issue_tokens(
     )
     settings = get_settings()
     expires_in = int(timedelta(minutes=settings.access_token_expire_minutes).total_seconds())
+    registry.mark_active(str(user.id))
     return TokenPair(access_token=access_token, refresh_token=refresh_token, expires_in=expires_in)
 
 
-def decode_refresh_token(token: str, *, registry: TokenRegistry) -> dict:
+def decode_refresh_token(token: str, *, registry: TokenRegistry, allow_revoked: bool = False) -> dict:
     try:
         payload = decode_token(token)
     except InvalidTokenError as exc:
@@ -89,7 +145,7 @@ def decode_refresh_token(token: str, *, registry: TokenRegistry) -> dict:
     if payload.get("type") != "refresh":
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="INVALID_REFRESH_TOKEN")
     token_id = payload.get("jti")
-    if token_id and registry.is_revoked(token_id):
+    if token_id and registry.is_revoked(token_id) and not allow_revoked:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="REFRESH_TOKEN_REVOKED")
     return payload
 
@@ -104,14 +160,13 @@ def _load_user(session: Session, user_id: int) -> UserRecord:
 
 def get_current_user(
     request: Request,
-    credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
     session: Session = Depends(get_ingest_session),
 ) -> UserRecord:
     """Resolve the current user from the Authorization header."""
 
-    if credentials is None:
+    token = _extract_bearer_token(request)
+    if not token:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="NOT_AUTHENTICATED")
-    token = credentials.credentials
     try:
         payload = decode_token(token)
     except InvalidTokenError as exc:
@@ -134,6 +189,9 @@ def get_current_user(
     user = _load_user(session, user_id_int)
     if not user.is_active:
         raise HTTPException(status.HTTP_403_FORBIDDEN, detail="USER_INACTIVE")
+
+    if not registry.is_active(str(user.id)):
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="NOT_AUTHENTICATED")
 
     tenant = session.exec(select(TenantRecord).where(TenantRecord.slug == user.tenant_slug)).first()
     if tenant is None or not tenant.is_active:
@@ -176,10 +234,19 @@ def ensure_tenant_access(
     return tenant
 
 
-def get_token_registry(request: Request) -> TokenRegistry:
+_GLOBAL_TOKEN_REGISTRY = TokenRegistry()
+_GLOBAL_REVOKED_TOKENS: set[str] = set()
+
+
+def get_token_registry(request: Any = None) -> TokenRegistry:
     """Expose the token registry as a dependency."""
 
-    return _get_registry(request)
+    global _GLOBAL_TOKEN_REGISTRY
+    if request is None:
+        return _GLOBAL_TOKEN_REGISTRY
+    registry = _get_registry(request)
+    _GLOBAL_TOKEN_REGISTRY = registry
+    return registry
 
 
 require_admin_user = require_roles(UserRole.ADMIN)

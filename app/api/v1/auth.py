@@ -4,12 +4,17 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, status
-from fastapi.security import HTTPAuthorizationCredentials
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, EmailStr, Field
 from sqlmodel import Session, select
 
-from app.core.auth import TokenPair, bearer_scheme, decode_refresh_token, get_token_registry, issue_tokens
+from app.core.auth import (
+    TokenPair,
+    _extract_bearer_token,
+    decode_refresh_token,
+    get_token_registry,
+    issue_tokens,
+)
 from app.core.deps import get_ingest_session
 from app.models.tenant import TenantRecord
 from app.models.user import UserRecord
@@ -107,20 +112,27 @@ def refresh_token(
 @router.post("/logout", response_model=dict)
 def logout(
     payload: LogoutRequest,
-    credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
+    request: Request,
     registry=Depends(get_token_registry),
 ) -> dict:
     """Invalidate refresh (and optionally access) tokens."""
 
-    registry.revoke(decode_refresh_token(payload.refresh_token, registry=registry).get("jti"))
+    refresh_payload = decode_refresh_token(
+        payload.refresh_token, registry=registry, allow_revoked=True
+    )
+    registry.revoke(refresh_payload.get("jti"))
+    registry.mark_inactive(refresh_payload.get("sub"))
 
-    if credentials is not None:
+    token = _extract_bearer_token(request)
+
+    if token:
         try:
-            access_payload = decode_token(credentials.credentials)
+            access_payload = decode_token(token)
         except InvalidTokenError:
             access_payload = None
         if access_payload is not None:
             registry.revoke(access_payload.get("jti"))
+            registry.mark_inactive(access_payload.get("sub"))
 
     return {"ok": True}
 
