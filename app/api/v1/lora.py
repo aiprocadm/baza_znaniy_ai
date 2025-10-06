@@ -5,9 +5,9 @@ from __future__ import annotations
 import math
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Body, Depends, HTTPException, status
 from pydantic import ValidationError
 
 from app.core.auth import require_admin_user
@@ -29,6 +29,31 @@ HTTP_NOT_FOUND = getattr(status, "HTTP_404_NOT_FOUND", 404)
 HTTP_CONFLICT = getattr(status, "HTTP_409_CONFLICT", 409)
 HTTP_UNPROCESSABLE_ENTITY = getattr(status, "HTTP_422_UNPROCESSABLE_ENTITY", 422)
 HTTP_SERVER_ERROR = getattr(status, "HTTP_500_INTERNAL_SERVER_ERROR", 500)
+
+
+RawLoadPayload = Annotated[dict[str, Any], Body(..., embed=False)]
+
+
+def _raise_from_load_validation(exc: ValidationError) -> None:
+    """Translate request validation errors into HTTP exceptions."""
+
+    errors = exc.errors()
+    for error in errors:
+        location = error.get("loc") or ()
+        field = location[-1] if location else None
+        if field == "scaling":
+            raise HTTPException(HTTP_UNPROCESSABLE_ENTITY, detail="INVALID_SCALING") from exc
+    raise HTTPException(HTTP_UNPROCESSABLE_ENTITY, detail=errors) from exc
+
+
+def _parse_load_payload(payload: RawLoadPayload) -> object:
+    """Return the decoded LoRA load payload, preserving monkeypatched behaviour."""
+
+    try:
+        return LoraLoadRequest.model_validate(payload)
+    except ValidationError as exc:
+        _raise_from_load_validation(exc)
+        raise AssertionError("_raise_from_load_validation must raise") from exc  # pragma: no cover
 
 
 def _serialise_payload(payload: object) -> dict[str, Any]:
@@ -70,8 +95,6 @@ def _coerce_scaling_value(candidate: object) -> float:
     """Validate and normalise the supplied scaling candidate."""
 
     unwrapped = _unwrap_scaling_candidate(candidate)
-
-    scaling_candidate = getattr(payload_copy, "scaling", None)
     try:
         numeric = float(unwrapped)
     except (TypeError, ValueError) as exc:
@@ -98,15 +121,17 @@ def _coerce_adapter_path(raw_path: object) -> Path:
         raise HTTPException(HTTP_UNPROCESSABLE_ENTITY, detail="INVALID_SCALING") from exc
 
 
+LoadRequest = Annotated[object, Depends(_parse_load_payload)]
+
+
 @router.post("/load", response_model=LoraStatusResponse)
 async def load_lora_adapter(
-    payload: LoraLoadRequest,
+    payload: LoadRequest,
     manager: LlamaLoraManager = Depends(get_lora_manager),
 ) -> LoraStatusResponse:
     """Load a LoRA adapter into the configured llama.cpp instance."""
 
     payload_data = _serialise_payload(payload)
-
     adapter_path = _coerce_adapter_path(payload_data.get("path"))
     scaling_value = _coerce_scaling_value(payload_data.get("scaling"))
 

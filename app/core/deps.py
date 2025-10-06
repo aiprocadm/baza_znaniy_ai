@@ -143,9 +143,15 @@ def get_lora_manager(request: Request = None) -> LlamaLoraManager:
     if app_state is None:
         raise RuntimeError('LoRA manager is not configured')
     manager = getattr(app_state, 'lora_manager', None)
-    if not isinstance(manager, LlamaLoraManager):
+    if isinstance(manager, LlamaLoraManager):
+        return manager
+
+    if manager is None or not all(
+        hasattr(manager, attr) for attr in ("load_adapter", "unload_adapter")
+    ):
         raise RuntimeError('LoRA manager is not configured')
-    return manager
+
+    return manager  # type: ignore[return-value]
 
 
 __all__ = [

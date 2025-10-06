@@ -42,6 +42,22 @@ except ImportError:  # pragma: no cover - minimal shim for tests
     PydanticBaseSettings = None  # type: ignore[assignment]
 
 
+def _default_auth_disabled() -> bool:
+    """Return whether authentication should be bypassed by default."""
+
+    raw_value = (
+        os.getenv("AUTH_DISABLED_FOR_TESTS")
+        or os.getenv("AUTH_DISABLED")
+        or os.getenv("DISABLE_AUTH")
+        or os.getenv("AUTH_DISABLE")
+        or os.getenv("KB_DISABLE_AUTH")
+    )
+    if raw_value is None:
+        return False
+
+    return raw_value.strip().lower() in {"1", "true", "yes", "on"}
+
+
 def _flatten_aliases(source: object) -> list[str]:
     """Return a flattened list of alias names from arbitrary structures."""
 
@@ -409,6 +425,16 @@ class Settings(BaseSettings):
     log_level: str = Field(default="INFO", validation_alias=AliasChoices("LOG_LEVEL"))
     rate_limit: str | None = Field(default=None, validation_alias=AliasChoices("RATE_LIMIT"))
     rate_burst: int = Field(default=0, validation_alias=AliasChoices("RATE_BURST"))
+    auth_disabled: bool = Field(
+        default_factory=_default_auth_disabled,
+        validation_alias=AliasChoices(
+            "AUTH_DISABLED",
+            "DISABLE_AUTH",
+            "AUTH_DISABLE",
+            "KB_DISABLE_AUTH",
+            "AUTH_DISABLED_FOR_TESTS",
+        ),
+    )
 
     # Core paths ---------------------------------------------------------
     data_dir: Path = Field(
