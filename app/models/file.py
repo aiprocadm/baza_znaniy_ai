@@ -58,6 +58,35 @@ def _record_sqlmodel_metadata_health(metadata: Any | None, *, origin: str) -> No
         logger.debug("Failed to increment SQLModel metadata alert counter", exc_info=True)
 
 
+def _collect_sqlmodel_tables() -> list[tuple[type[Any], Any]]:
+    """Return pairs of ``(model_class, table)`` registered with SQLModel."""
+
+    try:
+        subclasses = list(getattr(SQLModel, "__subclasses__", lambda: [])())
+    except Exception:  # pragma: no cover - defensive fallback when introspection fails
+        return []
+
+    tables: list[tuple[type[Any], Any]] = []
+    seen: set[type[Any]] = set()
+
+    def _visit(model: type[Any]) -> None:
+        if model in seen:
+            return
+        seen.add(model)
+
+        table = getattr(model, "__table__", None)
+        if table is not None:
+            tables.append((model, table))
+
+        for child in getattr(model, "__subclasses__", lambda: [])():
+            _visit(child)
+
+    for model_cls in subclasses:
+        _visit(model_cls)
+
+    return tables
+
+
 class FileStatus(str):
     QUEUED = "queued"
     PROCESSING = "processing"
@@ -449,7 +478,16 @@ def _create_schema_if_possible(engine: Engine, metadata: Any | None) -> MetaData
     if isinstance(metadata, MetaData):
         meta = metadata
     else:
-        candidate = getattr(SQLModel, "metadata", None)
+        candidate = metadata if metadata is not None else getattr(SQLModel, "metadata", None)
+        if candidate is not None and not isinstance(candidate, MetaData):
+            create_all_attr = getattr(candidate, "create_all", None)
+            if create_all_attr is not None and not callable(create_all_attr):
+                logger.error(
+                    "SQLModel.metadata.create_all is not callable; cannot create schema"
+                )
+                raise RuntimeError(
+                    "SQLModel metadata initialisation failed: metadata.create_all is not callable"
+                )
         meta = candidate if isinstance(candidate, MetaData) else None
 
     if meta is None:
@@ -495,7 +533,7 @@ def _create_schema_if_possible(engine: Engine, metadata: Any | None) -> MetaData
         logger.error(
             "SQLModel.metadata.create_all is not callable; cannot create schema"
         )
-        return None
+        raise RuntimeError("SQLModel metadata initialisation failed: metadata.create_all is not callable")
 
     create_all(engine)
     return meta

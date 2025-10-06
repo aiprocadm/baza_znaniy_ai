@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import math
+from typing import Any, Callable
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import ValidationError
 
 from app.core.auth import require_admin_user
 from app.core.deps import get_lora_manager
@@ -32,24 +34,38 @@ async def load_lora_adapter(
 ) -> LoraStatusResponse:
     """Load a LoRA adapter into the configured llama.cpp instance."""
 
+    payload_dict: dict[str, Any]
+    model_dump: Callable[[], dict[str, Any]] | None = getattr(payload, "model_dump", None)
+    if callable(model_dump):
+        payload_dict = model_dump()
+    else:
+        as_dict: Callable[[], dict[str, Any]] | None = getattr(payload, "dict", None)
+        if callable(as_dict):
+            payload_dict = as_dict()
+        else:
+            payload_dict = {
+                "path": getattr(payload, "path", None),
+                "scaling": getattr(payload, "scaling", None),
+            }
+
+    validator: Callable[[Any], Any] | None = getattr(LoraLoadRequest, "model_validate", None)
     try:
-        scaling_candidate = ensure_valid_scaling(payload.scaling)
-    except ValueError as exc:
+        payload_copy = (
+            validator(payload_dict)
+            if callable(validator)
+            else LoraLoadRequest(**payload_dict)
+        )
+    except (ValidationError, ValueError, TypeError) as exc:
         raise HTTPException(HTTP_UNPROCESSABLE_ENTITY, detail="INVALID_SCALING") from exc
 
+    scaling_candidate = getattr(payload_copy, "scaling", None)
     try:
         scaling_value = float(scaling_candidate)
     except (TypeError, ValueError) as exc:
         raise HTTPException(HTTP_UNPROCESSABLE_ENTITY, detail="INVALID_SCALING") from exc
 
-    try:
-        if not math.isfinite(scaling_value):  # Defensive guard for unexpected NaN/Inf
-            raise HTTPException(HTTP_UNPROCESSABLE_ENTITY, detail="INVALID_SCALING")
-
-        if scaling_value <= 0:  # Defensive guard for bypassed validation
-            raise HTTPException(HTTP_UNPROCESSABLE_ENTITY, detail="INVALID_SCALING")
-    except (TypeError, ValueError) as exc:  # Defensive guard for non-numeric inputs
-        raise HTTPException(HTTP_UNPROCESSABLE_ENTITY, detail="INVALID_SCALING") from exc
+    if not math.isfinite(scaling_value) or scaling_value <= 0:
+        raise HTTPException(HTTP_UNPROCESSABLE_ENTITY, detail="INVALID_SCALING")
 
     try:
         scaling_value = ensure_valid_scaling(scaling_value)
@@ -58,7 +74,7 @@ async def load_lora_adapter(
 
     try:
         adapter_status = await manager.load_adapter(
-            payload_copy.path, payload_copy.scaling
+            getattr(payload_copy, "path"), scaling_value
         )
     except FileNotFoundError as exc:
         raise HTTPException(HTTP_NOT_FOUND, detail="ADAPTER_NOT_FOUND") from exc
