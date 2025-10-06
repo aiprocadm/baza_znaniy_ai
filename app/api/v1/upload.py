@@ -20,6 +20,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, status
 from fastapi import UploadFile as FastAPIUploadFile
 from starlette.datastructures import MutableHeaders
 
+from app.api.status_codes import HTTP_CONTENT_TOO_LARGE
 from app.api.upload_utils import create_upload_file
 from app.core.auth import ensure_tenant_access, get_current_active_user
 from app.core.deps import (
@@ -194,7 +195,7 @@ async def _read_file(upload: UploadFile, limits: UploadLimits) -> bytes:
     if not data:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="UPLOAD_EMPTY")
     if len(data) > limits.max_size:
-        raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="UPLOAD_TOO_LARGE")
+        raise HTTPException(HTTP_CONTENT_TOO_LARGE, detail="UPLOAD_TOO_LARGE")
     return data
 
 

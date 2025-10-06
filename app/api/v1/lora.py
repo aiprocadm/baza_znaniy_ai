@@ -10,6 +10,7 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Body, Depends, HTTPException, status
 from pydantic import ValidationError
 
+from app.api.status_codes import HTTP_UNPROCESSABLE_CONTENT
 from app.core.auth import require_admin_user
 from app.core.deps import get_lora_manager
 from app.llm.manager import (
@@ -27,7 +28,7 @@ router = APIRouter(prefix="/lora", tags=["lora"], dependencies=[Depends(require_
 
 HTTP_NOT_FOUND = getattr(status, "HTTP_404_NOT_FOUND", 404)
 HTTP_CONFLICT = getattr(status, "HTTP_409_CONFLICT", 409)
-HTTP_UNPROCESSABLE_ENTITY = getattr(status, "HTTP_422_UNPROCESSABLE_ENTITY", 422)
+HTTP_UNPROCESSABLE_CONTENT_CODE = HTTP_UNPROCESSABLE_CONTENT
 HTTP_SERVER_ERROR = getattr(status, "HTTP_500_INTERNAL_SERVER_ERROR", 500)
 
 
@@ -42,8 +43,8 @@ def _raise_from_load_validation(exc: ValidationError) -> None:
         location = error.get("loc") or ()
         field = location[-1] if location else None
         if field == "scaling":
-            raise HTTPException(HTTP_UNPROCESSABLE_ENTITY, detail="INVALID_SCALING") from exc
-    raise HTTPException(HTTP_UNPROCESSABLE_ENTITY, detail=errors) from exc
+            raise HTTPException(HTTP_UNPROCESSABLE_CONTENT_CODE, detail="INVALID_SCALING") from exc
+    raise HTTPException(HTTP_UNPROCESSABLE_CONTENT_CODE, detail=errors) from exc
 
 
 def _parse_load_payload(payload: RawLoadPayload) -> object:
@@ -98,27 +99,27 @@ def _coerce_scaling_value(candidate: object) -> float:
     try:
         numeric = float(unwrapped)
     except (TypeError, ValueError) as exc:
-        raise HTTPException(HTTP_UNPROCESSABLE_ENTITY, detail="INVALID_SCALING") from exc
+        raise HTTPException(HTTP_UNPROCESSABLE_CONTENT_CODE, detail="INVALID_SCALING") from exc
 
     if not math.isfinite(numeric) or numeric <= SCALING_MIN or numeric > SCALING_MAX:
-        raise HTTPException(HTTP_UNPROCESSABLE_ENTITY, detail="INVALID_SCALING")
+        raise HTTPException(HTTP_UNPROCESSABLE_CONTENT_CODE, detail="INVALID_SCALING")
 
     try:
         return ensure_valid_scaling(numeric)
     except ValueError as exc:
-        raise HTTPException(HTTP_UNPROCESSABLE_ENTITY, detail="INVALID_SCALING") from exc
+        raise HTTPException(HTTP_UNPROCESSABLE_CONTENT_CODE, detail="INVALID_SCALING") from exc
 
 
 def _coerce_adapter_path(raw_path: object) -> Path:
     """Return ``raw_path`` as a normalised :class:`Path`."""
 
     if raw_path in {None, "", Ellipsis}:
-        raise HTTPException(HTTP_UNPROCESSABLE_ENTITY, detail="INVALID_SCALING")
+        raise HTTPException(HTTP_UNPROCESSABLE_CONTENT_CODE, detail="INVALID_SCALING")
 
     try:
         return Path(str(raw_path)).expanduser()
     except (TypeError, ValueError) as exc:
-        raise HTTPException(HTTP_UNPROCESSABLE_ENTITY, detail="INVALID_SCALING") from exc
+        raise HTTPException(HTTP_UNPROCESSABLE_CONTENT_CODE, detail="INVALID_SCALING") from exc
 
 
 LoadRequest = Annotated[object, Depends(_parse_load_payload)]
@@ -142,7 +143,7 @@ async def load_lora_adapter(
     except AdapterAlreadyLoadedError as exc:
         raise HTTPException(HTTP_CONFLICT, detail="ADAPTER_ALREADY_LOADED") from exc
     except (InvalidScalingError, ValueError) as exc:
-        raise HTTPException(HTTP_UNPROCESSABLE_ENTITY, detail="INVALID_SCALING") from exc
+        raise HTTPException(HTTP_UNPROCESSABLE_CONTENT_CODE, detail="INVALID_SCALING") from exc
     except Exception as exc:  # pragma: no cover - defensive guard for unexpected errors
         raise HTTPException(HTTP_SERVER_ERROR, detail="ADAPTER_LOAD_FAILED") from exc
 
