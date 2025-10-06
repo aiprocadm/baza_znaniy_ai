@@ -35,6 +35,7 @@ from app.observability.metrics import (
     record_search_operation,
 )
 from app.retriever.rerank import apply_rerank
+from app.api.status_codes import HTTP_CONTENT_TOO_LARGE
 from app.api.upload_utils import create_upload_file
 from app.services import vectorstore as vectorstore_service
 
@@ -42,7 +43,7 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 _SERVICE_UNAVAILABLE = getattr(status, "HTTP_503_SERVICE_UNAVAILABLE", 503)
-_REQUEST_TOO_LARGE = getattr(status, "HTTP_413_REQUEST_ENTITY_TOO_LARGE", 413)
+_REQUEST_TOO_LARGE = HTTP_CONTENT_TOO_LARGE
 
 
 @router.get("/metrics")
