@@ -25,6 +25,7 @@ def list_tenants(session: Session = Depends(get_ingest_session)) -> list[TenantR
             name=tenant.name,
             is_active=tenant.is_active,
             contact_email=tenant.contact_email,
+            status=tenant.status,
             created_at=tenant.created_at,
             updated_at=tenant.updated_at,
         )
@@ -61,6 +62,7 @@ def create_tenant(
         name=record.name,
         is_active=record.is_active,
         contact_email=record.contact_email,
+        status=record.status,
         created_at=record.created_at,
         updated_at=record.updated_at,
     )
