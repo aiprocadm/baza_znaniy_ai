@@ -194,21 +194,23 @@ def test_full_pipeline(api_client: TestClient) -> None:
     assert any(job.get("status") == "completed" for job in jobs_payload["jobs"])
 
 
-def test_ingest_endpoint_returns_quickly(api_client: TestClient) -> None:
-    """Ensure ingest API responds immediately while work continues."""
+def test_ingest_endpoint_waits_for_completion(api_client: TestClient) -> None:
+    """Ensure ingest API blocks until processing completes when auto-processing is enabled."""
 
     worker = api_client.app.state.ingest_worker
     original_process = worker._process
     started = threading.Event()
-    release = threading.Event()
+    finished = threading.Event()
 
-    async def blocked_process(self, job):
+    async def observed_process(self, job):
         started.set()
-        while not release.is_set():
-            await asyncio.sleep(0.01)
-        return await original_process(job)
+        await asyncio.sleep(0.05)
+        try:
+            return await original_process(job)
+        finally:
+            finished.set()
 
-    worker._process = blocked_process.__get__(worker, worker.__class__)
+    worker._process = observed_process.__get__(worker, worker.__class__)
 
     upload_data = b"Background ingestion test"
     response = api_client.post(
@@ -226,31 +228,29 @@ def test_ingest_endpoint_returns_quickly(api_client: TestClient) -> None:
             "/api/v1/ingest",
             json={"file_id": file_id, "force": True},
         )
-        duration = time.perf_counter() - start
-        assert ingest_response.status_code == 200
-        assert duration < 0.2
-        ingest_payload = ingest_response.json()
-        assert ingest_payload["status"] in {"queued", "processing"}
-
-        files_response = api_client.get("/api/v1/files")
-        assert files_response.status_code == 200
-        files_payload = files_response.json()
-        pending_status = None
-        for entry in files_payload.get("files", []):
-            identifier = entry.get("id") if isinstance(entry, dict) else getattr(entry, "id", None)
-            if identifier == file_id:
-                pending_status = (
-                    entry.get("status")
-                    if isinstance(entry, dict)
-                    else getattr(entry, "status", None)
-                )
-                break
-        assert pending_status in {"queued", "processing"}
     finally:
-        release.set()
         worker._process = original_process
 
-    _wait_for_completion(api_client, file_id, timeout=3.0)
+    duration = time.perf_counter() - start
+    assert ingest_response.status_code == 200
+    assert finished.wait(timeout=1.0)
+    assert duration >= 0.05
+
+    ingest_payload = ingest_response.json()
+    assert ingest_payload["status"] == "completed"
+
+    files_response = api_client.get("/api/v1/files")
+    assert files_response.status_code == 200
+    files_payload = files_response.json()
+    completed_status = None
+    for entry in files_payload.get("files", []):
+        identifier = entry.get("id") if isinstance(entry, dict) else getattr(entry, "id", None)
+        if identifier == file_id:
+            completed_status = (
+                entry.get("status") if isinstance(entry, dict) else getattr(entry, "status", None)
+            )
+            break
+    assert completed_status == "completed"
 
 
 def test_chat_returns_503_when_model_missing(api_client: TestClient) -> None:
