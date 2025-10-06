@@ -30,3 +30,5 @@ var/data/*
 models/*
 !models/.gitkeep
 !models/model_manifest.json
+.vscode/
+TEST_RESULTS.md
