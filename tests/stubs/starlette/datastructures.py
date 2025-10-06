@@ -153,11 +153,17 @@ class UploadFile:
             mapping = headers if headers is not None else None
             self.headers = MutableHeaders(mapping)
         if content_type is not None:
-            self.content_type = content_type
             if content_type:
                 self.headers["content-type"] = content_type
-        else:
-            self.content_type = self.headers.get("content-type")
+            else:
+                try:
+                    self.headers.pop("content-type")
+                except KeyError:
+                    pass
+
+    @property
+    def content_type(self) -> str | None:
+        return self.headers.get("content-type")
 
     async def read(self, size: int = -1) -> bytes:
         data = self.file.read(size)
