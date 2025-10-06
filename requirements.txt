@@ -24,6 +24,7 @@ pymupdf==1.26.4
 pypdf==6.1.1
 pypdfium2==4.30.0
 pytest-postgresql==7.0.2
+pytest-cov==5.0.0
 pytesseract==0.3.13
 python-docx==1.2.0
 python-dotenv==1.1.1
