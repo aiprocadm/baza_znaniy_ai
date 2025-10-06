@@ -7,6 +7,7 @@ import logging
 import os
 from datetime import datetime
 from functools import lru_cache
+from types import SimpleNamespace
 from typing import Any, Optional
 
 import sqlite3
@@ -25,7 +26,7 @@ from app.observability.metrics import (
     record_sqlmodel_metadata_alert,
     record_sqlmodel_metadata_state,
 )
-from app.models.engine_guard import SyncEngineGuard
+from app.models.engine_guard import SyncEngineGuard, mark_fallback
 from app.models.entities import JobRecord, SettingRecord
 
 
@@ -244,6 +245,111 @@ def _sqlite_aiosqlite_to_sync_url(async_url: str) -> str:
     return f"{sync_scheme}{separator}{remainder}"
 
 
+class _EngineFallbackResult:
+    """Lightweight result wrapper mirroring ``Result.scalar``."""
+
+    __slots__ = ("_value",)
+
+    def __init__(self, value: Any) -> None:
+        self._value = value
+
+    def scalar(self) -> Any:
+        return self._value
+
+
+class _EngineFallbackConnection:
+    """Context manager compatible connection used by sync fallbacks."""
+
+    __slots__ = ()
+
+    def __enter__(self) -> "_EngineFallbackConnection":  # pragma: no cover - trivial
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> bool:  # pragma: no cover - trivial
+        return False
+
+    def execute(self, statement: Any) -> _EngineFallbackResult:
+        return _EngineFallbackResult(statement)
+
+
+def _synthesise_dialect(url: str) -> Any:
+    """Create a minimal dialect object exposing ``name``/``driver`` attributes."""
+
+    try:
+        parsed = make_url(url)
+    except Exception:
+        parsed = url
+
+    backend: str
+    driver: str
+
+    if parsed is not None and hasattr(parsed, "get_backend_name"):
+        backend = parsed.get_backend_name()  # type: ignore[assignment]
+        get_driver = getattr(parsed, "get_driver_name", lambda: backend)
+        driver = get_driver() or backend
+    else:
+        scheme = str(parsed).split(":", 1)[0]
+        if "+" in scheme:
+            backend, driver = scheme.split("+", 1)
+        else:
+            backend = driver = scheme or "sqlite"
+
+    dialect = SimpleNamespace(name=backend or "sqlite", driver=driver or backend)
+    setattr(dialect, "is_async", False)
+    mark_fallback(dialect)
+    return dialect
+
+
+def _ensure_engine_surface(engine: Engine, url: str) -> Engine:
+    """Guarantee essential SQLModel-compatible attributes on ``engine``."""
+
+    dialect = getattr(engine, "dialect", None)
+    if not (hasattr(dialect, "name") and hasattr(dialect, "driver")):
+        fallback_dialect = _synthesise_dialect(url)
+        try:
+            setattr(engine, "dialect", fallback_dialect)
+        except Exception:
+            pass
+        else:
+            dialect = fallback_dialect
+
+    if not hasattr(engine, "url"):
+        try:
+            fallback_url = make_url(url)
+        except Exception:
+            fallback_url = url
+        try:
+            setattr(engine, "url", fallback_url)
+        except Exception:
+            pass
+
+    dispose = getattr(engine, "dispose", None)
+    if not callable(dispose):
+
+        def _noop_dispose(*_: Any, **__: Any) -> None:
+            return None
+
+        mark_fallback(_noop_dispose)
+        try:
+            setattr(engine, "dispose", _noop_dispose)
+        except Exception:
+            pass
+
+    connect = getattr(engine, "connect", None)
+    if not callable(connect):
+
+        def _fallback_connect(*_: Any, **__: Any) -> _EngineFallbackConnection:
+            return _EngineFallbackConnection()
+
+        mark_fallback(_fallback_connect)
+        try:
+            setattr(engine, "connect", _fallback_connect)
+        except Exception:
+            pass
+
+    return engine
+
+
 class _SQLAlchemySessionAdapter:
     """Compatibility wrapper providing ``Session.exec`` for SQLAlchemy sessions."""
 
@@ -442,6 +548,7 @@ def get_engine(url: Optional[str] = None, *, create_schema: bool = True) -> Engi
 
     _maybe_configure_sqlite_engine(engine, engine_url)
     engine = SyncEngineGuard(engine, engine_url).ensure_sync()
+    engine = _ensure_engine_surface(engine, engine_url)
 
     if create_schema:
         schema_metadata = _create_schema_if_possible(engine, metadata)
