@@ -64,15 +64,36 @@ except ImportError:  # pragma: no cover - fallback used in tests
     tiktoken = None  # type: ignore[assignment]
 
 
-from app.core.config import get_settings
+try:  # pragma: no cover - optional dependency shim for lightweight environments
+    from app.core.config import get_settings
+except ModuleNotFoundError as exc:  # pragma: no cover - triggered in minimal test envs
+    from typing import NoReturn
+
+    _IMPORT_ERROR = exc
+
+    def _missing_get_settings() -> NoReturn:
+        raise RuntimeError(
+            "app.core.config.get_settings is unavailable because optional dependencies "
+            "were not installed. Install the project's runtime requirements to enable "
+            "OCR configuration support."
+        ) from _IMPORT_ERROR
+
+    def get_settings():  # type: ignore[override]
+        return _missing_get_settings()
+
 from app.ingest.ocr import OCRError, OCRConfig, iter_pdf_pages_with_ocr
 
 
 from app.ingest.html import html_to_plain_text, html_to_text_sections
 
-from app.observability.metrics import record_document_parse
+try:  # pragma: no cover - metrics are optional during lightweight testing
+    from app.observability.metrics import record_document_parse, record_document_ocr_pages
+except ModuleNotFoundError:  # pragma: no cover - executed when metrics deps missing
+    def record_document_parse(*args, **kwargs):  # type: ignore[override]
+        return None
 
-from app.observability.metrics import record_document_parse, record_document_ocr_pages
+    def record_document_ocr_pages(*args, **kwargs):  # type: ignore[override]
+        return None
 
 
 LOGGER = logging.getLogger(__name__)
@@ -186,9 +207,28 @@ def _markdown_to_plain_text(markdown_content: str) -> str:
         return ""
 
     html_content = (
-        markdown_lib.markdown(markdown_content) if markdown_lib is not None else markdown_content
+        markdown_lib.markdown(markdown_content)
+        if markdown_lib is not None
+        else _markdown_fallback_to_html(markdown_content)
     )
     return html_to_plain_text(html_content)
+
+
+def _markdown_fallback_to_html(markdown_content: str) -> str:
+    """Convert basic Markdown into lightweight HTML without external deps."""
+
+    text = markdown_content
+    text = re.sub(r"^#{1,6}\s*", "", text, flags=re.MULTILINE)
+    text = re.sub(r"\*\*([^*]+)\*\*", r"<strong>\1</strong>", text)
+    text = re.sub(r"__([^_]+)__", r"<strong>\1</strong>", text)
+    text = re.sub(r"\*([^*]+)\*", r"<em>\1</em>", text)
+    text = re.sub(r"_([^_]+)_", r"<em>\1</em>", text)
+    text = re.sub(r"`([^`]+)`", r"<code>\1</code>", text)
+    text = re.sub(r"\[(.*?)\]\([^\)]+\)", r"<a>\1</a>", text)
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    text = text.replace("\n\n", "</p><p>")
+    text = text.replace("\n", "<br/>")
+    return f"<p>{text}</p>"
 
 
 def _read_stream_to_bytes(stream: BinaryIO) -> bytes:
