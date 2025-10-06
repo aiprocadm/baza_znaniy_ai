@@ -28,6 +28,10 @@ from app.observability.metrics import (
 )
 from app.models.engine_guard import SyncEngineGuard, mark_fallback
 from app.models.entities import JobRecord, SettingRecord
+from app.models.sqlmodel_compat import (
+    collect_sqlmodel_tables,
+    install_stub_model_initializers,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -38,7 +42,6 @@ if getattr(SQLModel, "metadata", None) is None:
         SQLModel.metadata = MetaData()  # type: ignore[assignment]
     except Exception:  # pragma: no cover - defensive fallback when assignment fails
         logger.warning("SQLModel.metadata is unavailable; schema creation may be skipped")
-
 
 def _record_sqlmodel_metadata_health(metadata: Any | None, *, origin: str) -> None:
     """Update Prometheus metrics describing the SQLModel metadata state."""
@@ -181,6 +184,9 @@ class ChunkRecord(SQLModel, table=True):
     tokens: int = Field(default=0, ge=0)
     meta: Optional[dict[str, Any]] = Field(default=None, sa_column=Column(JSON, nullable=True))
     created_at: datetime = Field(default_factory=datetime.utcnow, nullable=False)
+
+
+install_stub_model_initializers([DocumentRecord, FileRecord, PageRecord, ChunkRecord])
 
 
 def _connect_args(url: str) -> dict[str, object]:
@@ -490,8 +496,8 @@ def _create_schema_if_possible(engine: Engine, metadata: Any | None) -> MetaData
                 )
         meta = candidate if isinstance(candidate, MetaData) else None
 
-    if meta is None:
-        tables_snapshot = _collect_sqlmodel_tables()
+        if meta is None:
+            tables_snapshot = collect_sqlmodel_tables()
         logger.warning(
             "SQLModel.metadata is missing or invalid; reinitialising metadata"
         )
