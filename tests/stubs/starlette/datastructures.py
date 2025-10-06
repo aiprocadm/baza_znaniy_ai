@@ -119,6 +119,18 @@ class MutableHeaders(MutableMapping[str, str]):
         return f"MutableHeaders({{{items}}})"
 
 
+class Headers(MutableHeaders):
+    """Compatibility shim for :class:`starlette.datastructures.Headers`."""
+
+    def __init__(
+        self,
+        headers: Iterable[tuple[str, str]] | MutableMapping[str, str] | None = None,
+        *,
+        raw: Iterable[tuple[str | bytes, str | bytes]] | None = None,
+    ) -> None:
+        super().__init__(headers=headers, raw=raw)
+
+
 class UploadFile:
     """Simplified asynchronous interface mirroring Starlette's UploadFile."""
 
