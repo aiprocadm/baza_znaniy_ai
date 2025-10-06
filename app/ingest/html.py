@@ -13,15 +13,16 @@ try:  # pragma: no cover - optional dependency
 except Exception:  # pragma: no cover - graceful fallback when unavailable
     html2text = None  # type: ignore[assignment]
 
-_SCRIPT_STYLE_RE = re.compile(r"<(script|style)(?:\\s[^>]*)?>.*?</\\1>", re.IGNORECASE | re.DOTALL)
+_SCRIPT_STYLE_RE = re.compile(r"<(script|style)(?:\s[^>]*)?>.*?</\1>", re.IGNORECASE | re.DOTALL)
 _BLOCK_BREAK_RE = re.compile(
     r"</(?:p|div|h[1-6]|section|article|li|tr|table|blockquote|pre|br|hr)>",
     re.IGNORECASE,
 )
 _TAG_RE = re.compile(r"<[^>]+>")
-_HEADING_UNDERLINE_RE = re.compile(r"^\\s*=+\\s*$", re.MULTILINE)
-_LEADING_HASH_RE = re.compile(r"^\\s*#+\\s*", re.MULTILINE)
-_WHITESPACE_RE = re.compile(r"\\s+")
+_HEADING_UNDERLINE_RE = re.compile(r"^\s*=+\s*$", re.MULTILINE)
+_LEADING_HASH_RE = re.compile(r"^\s*#+\s*", re.MULTILINE)
+_WHITESPACE_RE = re.compile(r"\s+")
+_PUNCT_GAP_RE = re.compile(r"\s+([,.;:!?])")
 
 
 def _clean(text: str) -> str:
@@ -56,6 +57,7 @@ def _post_process_text(text: str) -> str:
     text = _HEADING_UNDERLINE_RE.sub(" ", text)
     text = _LEADING_HASH_RE.sub("", text)
     text = text.replace("\r\n", "\n").replace("\r", "\n")
+    text = _PUNCT_GAP_RE.sub(r"\1", text)
     return html.unescape(text)
 
 
@@ -66,14 +68,14 @@ def _split_sections(text: str) -> List[str]:
         line = raw_line.strip()
         if not line:
             if buffer:
-                merged = _clean(" ".join(buffer))
+                merged = _PUNCT_GAP_RE.sub(r"\1", _clean(" ".join(buffer)))
                 if merged:
                     sections.append(merged)
                 buffer = []
             continue
         buffer.append(line)
     if buffer:
-        merged = _clean(" ".join(buffer))
+        merged = _PUNCT_GAP_RE.sub(r"\1", _clean(" ".join(buffer)))
         if merged:
             sections.append(merged)
     return sections
