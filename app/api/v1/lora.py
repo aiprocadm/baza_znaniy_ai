@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import math
-from collections.abc import Mapping
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import ValidationError
 
 from app.core.auth import require_admin_user
 from app.core.deps import get_lora_manager
@@ -31,39 +31,24 @@ HTTP_UNPROCESSABLE_ENTITY = getattr(status, "HTTP_422_UNPROCESSABLE_ENTITY", 422
 HTTP_SERVER_ERROR = getattr(status, "HTTP_500_INTERNAL_SERVER_ERROR", 500)
 
 
-_MISSING = object()
+def _serialise_payload(payload: object) -> dict[str, Any]:
+    """Return a shallow serialisation of *payload* without mutating it."""
 
+    if isinstance(payload, LoraLoadRequest):
+        return payload.model_dump()
 
-def _extract_payload_value(payload: object, field: str) -> Any:
-    """Return ``field`` from *payload* without mutating it."""
+    model_dump = getattr(payload, "model_dump", None)
+    if callable(model_dump):
+        return dict(model_dump())
 
-    if isinstance(payload, Mapping):
-        try:
-            return payload.get(field)
-        except Exception:  # pragma: no cover - defensive guard
-            return None
+    as_dict = getattr(payload, "dict", None)
+    if callable(as_dict):
+        return dict(as_dict())
 
-    try:
-        value = getattr(payload, field)
-    except AttributeError:
-        value = _MISSING
-    if value is not _MISSING:
-        return value
-
-    for accessor_name in ("model_dump", "dict"):
-        accessor = getattr(payload, accessor_name, None)
-        if not callable(accessor):
-            continue
-        try:
-            data = accessor()
-        except Exception:  # pragma: no cover - accessor raised unexpectedly
-            continue
-        if isinstance(data, Mapping):
-            try:
-                return data.get(field)
-            except Exception:  # pragma: no cover - defensive guard
-                continue
-    return None
+    return {
+        "path": getattr(payload, "path", None),
+        "scaling": getattr(payload, "scaling", None),
+    }
 
 
 def _unwrap_scaling_candidate(candidate: object, *, _depth: int = 0) -> object:
@@ -86,6 +71,7 @@ def _coerce_scaling_value(candidate: object) -> float:
 
     unwrapped = _unwrap_scaling_candidate(candidate)
 
+    scaling_candidate = getattr(payload_copy, "scaling", None)
     try:
         numeric = float(unwrapped)
     except (TypeError, ValueError) as exc:
@@ -119,11 +105,10 @@ async def load_lora_adapter(
 ) -> LoraStatusResponse:
     """Load a LoRA adapter into the configured llama.cpp instance."""
 
-    raw_path = _extract_payload_value(payload, "path")
-    raw_scaling = _extract_payload_value(payload, "scaling")
+    payload_data = _serialise_payload(payload)
 
-    adapter_path = _coerce_adapter_path(raw_path)
-    scaling_value = _coerce_scaling_value(raw_scaling)
+    adapter_path = _coerce_adapter_path(payload_data.get("path"))
+    scaling_value = _coerce_scaling_value(payload_data.get("scaling"))
 
     try:
         adapter_status = await manager.load_adapter(adapter_path, scaling_value)
