@@ -441,23 +441,29 @@ def _extract_disposition_filename(source: object) -> str | None:
 
 
 def _coerce_upload_argument(item: object) -> UploadFile:
-    candidate_types: tuple[type[Any], ...] = (UploadFile, FastAPIUploadFile)
-    if StarletteUploadFile is not None:
-        candidate_types = (*candidate_types, StarletteUploadFile)
-
-    if isinstance(item, candidate_types):
-        filename = getattr(item, "filename", None)
+    if isinstance(item, FastAPIUploadFile):
+        filename = getattr(item, "filename", None) or _extract_disposition_filename(item)
         if not filename:
-            filename = _extract_disposition_filename(item) or "uploaded"
-        content_type = getattr(item, "content_type", None)
-        file_obj = getattr(item, "file", item)
+            filename = "uploaded"
+        if getattr(item, "filename", None) != filename:
+            try:
+                item.filename = filename
+            except Exception:  # pragma: no cover - defensive attribute update
+                pass
+        file_obj = getattr(item, "file", None)
         seek = getattr(file_obj, "seek", None)
         if callable(seek):
             try:
                 seek(0)
             except Exception:  # pragma: no cover - defensive seek
                 pass
-        return UploadFile(filename=filename or "uploaded", file=file_obj, content_type=content_type)
+        return item
+
+    if StarletteUploadFile is not None and isinstance(item, StarletteUploadFile):
+        filename = getattr(item, "filename", None) or _extract_disposition_filename(item) or "uploaded"
+        content_type = getattr(item, "content_type", None)
+        file_obj = getattr(item, "file", item)
+        return create_upload_file(filename, file_obj, content_type)
 
     filename = "uploaded"
     content: object = b""
