@@ -217,6 +217,7 @@ def test_hash_is_based_on_contents(sqlite_db: str, tmp_path: Path) -> None:
 def test_service_uses_settings_for_retry(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("INGEST_MAX_RETRIES", "5")
     monkeypatch.setenv("INGEST_BACKOFF_SECONDS", "2.5")
+    monkeypatch.setenv("INGEST_QUEUE_SIZE", "0")
     from app.core import config as config_module
 
     config_module.get_settings.cache_clear()
@@ -225,5 +226,7 @@ def test_service_uses_settings_for_retry(monkeypatch: pytest.MonkeyPatch) -> Non
 
     assert service.max_retries == 5
     assert service.backoff_seconds == 2.5
+    assert service.queue_maxsize == 0
+    assert service.queue.maxsize == 0
 
     config_module.get_settings.cache_clear()
