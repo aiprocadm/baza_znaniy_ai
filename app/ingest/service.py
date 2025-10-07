@@ -152,31 +152,38 @@ class IngestService:
         _, cron_cls, interval_cls = _load_scheduler_artifacts()
         if self._worker_job_id is None:
             trigger = interval_cls(seconds=self.worker_interval_seconds)
+            job_id = self._scheduler_job_name("worker")
             job = self._scheduler.add_job(
                 self.worker.drain,
                 trigger=trigger,
-                id=self._scheduler_job_name("worker"),
+                id=job_id,
                 max_instances=1,
                 coalesce=True,
             )
-            self._worker_job_id = job.id
+            job_identifier = getattr(job, "id", None) if job is not None else None
+            self._worker_job_id = job_identifier or job_id
         if self.maintenance_cron and self._maintenance_job_id is None:
             try:
-                trigger = cron_cls.from_crontab(self.maintenance_cron)
+                if hasattr(cron_cls, "from_crontab"):
+                    trigger = cron_cls.from_crontab(self.maintenance_cron)
+                else:
+                    trigger = cron_cls(self.maintenance_cron)
             except ValueError:
                 logger.error(
                     "Invalid ingest maintenance cron expression: %s",
                     self.maintenance_cron,
                 )
             else:
+                job_id = self._scheduler_job_name("maintenance")
                 job = self._scheduler.add_job(
                     self.run_maintenance,
                     trigger=trigger,
-                    id=self._scheduler_job_name("maintenance"),
+                    id=job_id,
                     max_instances=1,
                     coalesce=True,
                 )
-                self._maintenance_job_id = job.id
+                job_identifier = getattr(job, "id", None) if job is not None else None
+                self._maintenance_job_id = job_identifier or job_id
 
     async def stop_background_worker(self) -> None:
         """Signal the background worker thread to shut down."""

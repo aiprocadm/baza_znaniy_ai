@@ -5,10 +5,11 @@ from __future__ import annotations
 import inspect
 import logging
 import sqlite3
+import sys
 import time
 from contextlib import closing
 from http import HTTPStatus
-from typing import Any, Iterable, Mapping, Tuple
+from typing import Any, Callable, Iterable, Mapping, Tuple
 
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile, status
 from fastapi.responses import JSONResponse, Response
@@ -367,6 +368,22 @@ def _resolve_upload_limits(request: Request) -> UploadLimits:
     return limits
 
 
+def _resolve_callable(state: Any, attribute: str, default: Callable | None = None):
+    candidate = getattr(state, attribute, None)
+    if callable(candidate):
+        return candidate
+
+    for module_name in ("kb_service_app.main", "app.main"):
+        module = sys.modules.get(module_name)
+        if module is None:
+            continue
+        candidate = getattr(module, attribute, None)
+        if callable(candidate):
+            return candidate
+
+    return default
+
+
 def _coerce_upload_file(value: Any) -> UploadFile:
     if isinstance(value, UploadFile):
         return value
@@ -505,6 +522,9 @@ def _index_chunks(request: Request, chunks: Iterable[dict[str, Any]]) -> int:
     return len(items)
 
 
+DEFAULT_INDEX_CHUNKS = _index_chunks
+
+
 def _citation_key(hit: dict[str, Any]) -> tuple[Any, ...]:
     file_id = hit.get("file")
     page = hit.get("page")
@@ -548,30 +568,51 @@ def _select_citations(
 @router.post("/api/docs/upload")
 async def upload(
     request: Request,
-    file: UploadFile = File(...),
+    files: list[UploadFile] = File(...),
     user_id: str = Form(...),
     conversation_id: str | None = Form(None),
 ) -> dict[str, Any]:
     limits = _resolve_upload_limits(request)
     allowed_extensions = set(limits.allowed_extensions)
 
-    upload_file = _coerce_upload_file(file)
-    filename = (upload_file.filename or "uploaded").strip()
-    ext = _normalise_extension(filename)
-    if ext not in allowed_extensions:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "UPLOAD_INVALID_EXT")
+    state = _resolve_app_state(request)
+    parser = _resolve_callable(state, "parse_and_chunk", parse_and_chunk)
+    upsert_override = _resolve_callable(state, "upsert_chunks", None)
 
-    data = await upload_file.read()
-    if not data:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "UPLOAD_EMPTY")
-    if len(data) > limits.max_size:
-        raise HTTPException(_REQUEST_TOO_LARGE, "UPLOAD_TOO_LARGE")
-    chunks = parse_and_chunk(filename, data)
-    if not chunks:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "NO_TEXT_FOUND")
+    upload_items = list(files or [])
+    if not upload_items:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "UPLOAD_INVALID_FILE")
 
-    indexed = _index_chunks(request, chunks)
-    return {"ok": True, "chunks": indexed}
+    stored_files: list[str] = []
+    total_chunks = 0
+
+    for upload_file in upload_items:
+        filename = (upload_file.filename or "uploaded").strip() or "uploaded"
+        ext = _normalise_extension(filename)
+        if ext not in allowed_extensions:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "UPLOAD_INVALID_EXT")
+
+        data = await upload_file.read()
+        if not data:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "UPLOAD_EMPTY")
+        if len(data) > limits.max_size:
+            raise HTTPException(_REQUEST_TOO_LARGE, "UPLOAD_TOO_LARGE")
+
+        chunks = parser(filename, data)
+        if not chunks:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "NO_TEXT_FOUND")
+
+        chunk_list = list(chunks)
+        index_fn = _index_chunks
+        if upsert_override is not None and index_fn is DEFAULT_INDEX_CHUNKS:
+            upsert_override(chunk_list)
+            total_chunks += len(chunk_list)
+        else:
+            total_chunks += index_fn(request, chunk_list)
+
+        stored_files.append(filename)
+
+    return {"ok": True, "files": stored_files, "chunks": total_chunks}
 
 
 @router.post("/api/chat")

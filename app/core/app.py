@@ -149,7 +149,8 @@ def create_app(provider: LLMProvider | None = None) -> FastAPI:
         try:
             service.ensure_background_worker()
             worker.ensure_started()
-            if not scheduler.running:
+            scheduler_running = bool(getattr(scheduler, "running", False))
+            if not scheduler_running and hasattr(scheduler, "start"):
                 scheduler.start()
             application.state.ingest_worker_task = None
         except Exception:  # pragma: no cover - defensive
@@ -163,7 +164,8 @@ def create_app(provider: LLMProvider | None = None) -> FastAPI:
             return
         try:
             await service.stop_background_worker()
-            if scheduler is not None and scheduler.running:
+            scheduler_running = bool(getattr(scheduler, "running", False))
+            if scheduler is not None and scheduler_running and hasattr(scheduler, "shutdown"):
                 await scheduler.shutdown(wait=True)
         except Exception:  # pragma: no cover - defensive
             logger.exception("Failed to stop ingestion worker")
