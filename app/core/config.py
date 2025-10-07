@@ -846,15 +846,25 @@ def get_version_info(settings: Settings | None = None) -> dict[str, Any]:
     """Return structured version information for API responses."""
 
     resolved = settings or get_settings()
+    app_version = (resolved.app_version or "0.0.0").strip() or "0.0.0"
+
+    def _clean(value: str | None, *, fallback: str = "unknown") -> str:
+        if value is None:
+            return fallback
+        cleaned = str(value).strip()
+        return cleaned or fallback
+
+    model_version = _clean(resolved.llm_model_version)
+    adapter_version = _clean(resolved.lora_adapter_version)
     payload: dict[str, Any] = {
-        "app": {"version": resolved.app_version},
+        "app": {"version": app_version},
         "model": {
             "name": resolved.llm_model_name,
-            "version": resolved.llm_model_version,
+            "version": model_version,
         },
         "lora": {
             "adapter": resolved.llm_lora_adapter,
-            "version": resolved.lora_adapter_version,
+            "version": adapter_version,
             "enabled": bool(resolved.llm_lora_adapter or resolved.lora_adapter_path),
         },
     }
