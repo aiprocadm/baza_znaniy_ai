@@ -92,9 +92,13 @@ class CrossEncoderReranker:
         if len(scores) < len(hits):
             scores.extend([0.0] * (len(hits) - len(scores)))
 
-        ranked = [dict(hit, score=float(score)) for hit, score in zip(hits, scores)]
-        ranked.sort(key=lambda item: float(item.get("score", 0.0)), reverse=True)
-        return ranked[:limit]
+        indexed: list[tuple[float, int, dict[str, object]]] = []
+        for index, (hit, score) in enumerate(zip(hits, scores)):
+            indexed.append((float(score), index, hit))
+
+        indexed.sort(key=lambda item: (item[0], -item[1]), reverse=True)
+
+        return [hit for _score, _index, hit in indexed[:limit]]
 
 
 def apply_rerank(
