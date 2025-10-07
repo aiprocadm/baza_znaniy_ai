@@ -13,7 +13,7 @@ from typing import Any, Optional
 import sqlite3
 from urllib.parse import unquote, urlparse
 
-from sqlalchemy import Column, JSON, MetaData, Text, UniqueConstraint, text
+from sqlalchemy import Column, JSON, MetaData, Text, UniqueConstraint
 from sqlalchemy.engine import Engine, make_url
 from sqlalchemy.ext.asyncio import create_async_engine
 try:  # pragma: no cover - optional dependency during lightweight test runs
@@ -254,16 +254,28 @@ def _maybe_configure_sqlite_engine(engine: Engine, url: str) -> None:
     )
 
     try:
-        with engine.connect() as connection:
-            for statement in pragmas:
-                connection.execute(text(statement))
-            connection.commit()
-            return
+        dbapi_connection = engine.raw_connection()
     except Exception:
         logger.debug(
             "SQLite engine connection is unavailable for PRAGMA configuration",
             exc_info=True,
         )
+    else:
+        try:
+            cursor = dbapi_connection.cursor()
+            for statement in pragmas:
+                cursor.execute(statement)
+            dbapi_connection.commit()
+        except Exception:
+            logger.debug(
+                "Failed to apply SQLite PRAGMAs via engine connection",
+                exc_info=True,
+            )
+        finally:
+            try:
+                dbapi_connection.close()
+            except Exception:
+                logger.debug("Failed to close SQLite engine connection", exc_info=True)
 
     database: str | None = None
 
