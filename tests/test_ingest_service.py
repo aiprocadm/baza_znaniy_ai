@@ -1,5 +1,6 @@
 import asyncio
 import hashlib
+from datetime import timedelta
 from pathlib import Path
 
 import pytest
@@ -7,7 +8,8 @@ from sqlmodel import Session, select
 
 from app.ingest.service import IngestService, IngestWorker
 from app.models import file as file_models
-from app.models.entities import JobStatus
+from app.core.datetime_utils import utc_now
+from app.models.entities import JobStatus, TenantRecord
 from app.models.file import (
     ChunkRecord,
     DocumentRecord,
@@ -230,3 +232,118 @@ def test_service_uses_settings_for_retry(monkeypatch: pytest.MonkeyPatch) -> Non
     assert service.queue.maxsize == 0
 
     config_module.get_settings.cache_clear()
+
+
+def test_perform_maintenance_resets_stale_processing(
+    monkeypatch: pytest.MonkeyPatch, sqlite_db: str
+) -> None:
+    monkeypatch.setenv("INGEST_JOB_RETENTION_DAYS", "1")
+    from app.core import config as config_module
+
+    config_module.get_settings.cache_clear()
+
+    service = IngestService(max_retries=0, backoff_seconds=0)
+    service.job_retention_days = 1
+
+    stale_timestamp = utc_now() - timedelta(days=2)
+    recent_timestamp = utc_now()
+    stale_naive = stale_timestamp.replace(tzinfo=None)
+    recent_naive = recent_timestamp.replace(tzinfo=None)
+
+    with Session(service.engine) as session:
+        tenant = TenantRecord(tenant_id="tenant", slug="tenant")
+        session.add(tenant)
+        session.commit()
+
+        document = DocumentRecord(
+            tenant_id="tenant",
+            tenant_slug="tenant",
+            sha256="sha",
+            mime_type="text/plain",
+            status=DocumentStatus.PROCESSING,
+            error="processing",
+            chunks=None,
+            created_at=stale_naive,
+            updated_at=stale_naive,
+        )
+        session.add(document)
+        session.flush()
+
+        file_obj = FileRecord(
+            tenant_id="tenant",
+            sha256="sha",
+            document_id=document.id,
+            path="/tmp/file.txt",
+            filename="file.txt",
+            size=128,
+            status=file_models.FileStatus.PROCESSING,
+            retries=1,
+            error="processing",
+            chunks=None,
+            created_at=stale_naive,
+            updated_at=stale_naive,
+        )
+        session.add(file_obj)
+        session.flush()
+
+        stale_job = JobRecord(
+            tenant_id="tenant",
+            tenant_slug="tenant",
+            job_type="ingest",
+            status=JobStatus.COMPLETED,
+            priority=0,
+            error=None,
+            resource_id=str(file_obj.id),
+            attempt=0,
+            payload={"kind": "stale"},
+            created_at=stale_naive,
+            updated_at=stale_naive,
+            started_at=stale_naive,
+            finished_at=stale_naive,
+        )
+
+        recent_job = JobRecord(
+            tenant_id="tenant",
+            tenant_slug="tenant",
+            job_type="ingest",
+            status=JobStatus.PROCESSING,
+            priority=0,
+            error=None,
+            resource_id=str(file_obj.id),
+            attempt=0,
+            payload={"kind": "recent"},
+            created_at=recent_naive,
+            updated_at=recent_naive,
+            started_at=recent_naive,
+            finished_at=None,
+        )
+
+        session.add(stale_job)
+        session.add(recent_job)
+        session.commit()
+
+        stale_job_id = stale_job.id
+        recent_job_id = recent_job.id
+        file_id = file_obj.id
+        document_id = document.id
+
+    try:
+        service._perform_maintenance()
+
+        with Session(service.engine) as session:
+            assert session.get(JobRecord, stale_job_id) is None
+            assert session.get(JobRecord, recent_job_id) is not None
+
+            refreshed_file = session.get(FileRecord, file_id)
+            assert refreshed_file is not None
+            assert refreshed_file.status == file_models.FileStatus.FAILED
+            assert refreshed_file.error == "STALE_PROCESSING"
+            assert refreshed_file.updated_at > stale_naive
+
+            refreshed_document = session.get(DocumentRecord, document_id)
+            assert refreshed_document is not None
+            assert refreshed_document.status == DocumentStatus.FAILED
+            assert refreshed_document.error == "STALE_PROCESSING"
+            assert refreshed_document.updated_at > stale_naive
+    finally:
+        config_module.get_settings.cache_clear()
