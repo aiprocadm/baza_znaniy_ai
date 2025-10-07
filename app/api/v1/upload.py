@@ -512,15 +512,34 @@ def _coerce_upload_argument(item: object) -> UploadFile:
                 pass
 
         # ``UploadFile`` instances originating from FastAPI already satisfy the
-        # contract expected by the rest of the pipeline.  Returning the original
-        # instance avoids unnecessary wrapping while ensuring objects without a
-        # filename derived from the request headers are still handled below.
-        if getattr(item, "filename", None) == filename and isinstance(item, UploadFile):
+        # contract expected by the rest of the pipeline.  When the caller has
+        # provided a usable filename and content type we can safely reuse the
+        # original object, avoiding unnecessary wrapping and preserving object
+        # identity.  If additional metadata needs to be inferred we construct a
+        # fresh instance instead of mutating the input object.
+        original_filename = getattr(item, "filename", None)
+        headers = getattr(item, "headers", None)
+        header_content_type: str | None = None
+        if headers is not None:
+            try:
+                header_content_type = headers.get("content-type")
+            except Exception:  # pragma: no cover - defensive header access
+                header_content_type = None
+
+        original_content_type = getattr(item, "content_type", None)
+        desired_content_type = original_content_type or header_content_type
+
+        if (
+            original_filename == filename
+            and (
+                desired_content_type is None
+                or desired_content_type == original_content_type
+            )
+        ):
             return item
 
-        content_type = getattr(item, "content_type", None)
         payload = file_obj if file_obj is not None else item
-        return create_upload_file(filename, payload, content_type)
+        return create_upload_file(filename, payload, desired_content_type)
 
     if StarletteUploadFile is not None and isinstance(item, StarletteUploadFile):
         filename = getattr(item, "filename", None) or _extract_disposition_filename(item) or "uploaded"
