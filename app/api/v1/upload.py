@@ -292,6 +292,19 @@ async def upload_file(
                     pass
             return UploadFile(filename=filename, file=file_obj, content_type=content_type)
 
+        filename_attr = getattr(item, "filename", None)
+        file_attr = getattr(item, "file", None)
+        if filename_attr is not None and file_attr is not None:
+            filename = str(filename_attr).strip() or "uploaded"
+            content_type = getattr(item, "content_type", None)
+            seek = getattr(file_attr, "seek", None)
+            if callable(seek):
+                try:
+                    seek(0)
+                except Exception:  # pragma: no cover - defensive seek
+                    pass
+            return UploadFile(filename=filename, file=file_attr, content_type=content_type)
+
         if StarletteUploadFile is not None and isinstance(item, StarletteUploadFile):
             filename = getattr(item, "filename", "uploaded") or "uploaded"
             content_type = getattr(item, "content_type", None)
