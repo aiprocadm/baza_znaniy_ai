@@ -159,16 +159,58 @@ def _ensure_fastapi_test_helpers() -> None:
                 "path": getattr(dependant, "path", ""),
             }
             request = Request(scope)
-            result = solve_dependencies(
-                request=request,
-                dependant=dependant,
-                body=body,
-                dependency_overrides_provider=app,
-            )
+
+            base_kwargs = {
+                "request": request,
+                "dependant": dependant,
+                "body": body,
+                "dependency_overrides_provider": app,
+            }
+
+            signature = inspect.signature(solve_dependencies)
+            parameters = signature.parameters
+
+            def _extract_values(result: object):
+                if hasattr(result, "values"):
+                    return getattr(result, "values")
+                if isinstance(result, tuple):
+                    values, *_ = result
+                    return values
+                return result
+
+            if "async_exit_stack" in parameters:
+                try:
+                    from contextlib import AsyncExitStack
+                except Exception:  # pragma: no cover - fallback for minimal environments
+                    AsyncExitStack = None  # type: ignore[assignment]
+
+                embed = False
+                if "embed_body_fields" in parameters:
+                    try:
+                        from fastapi.routing import _should_embed_body_fields
+
+                        body_params = list(getattr(dependant, "body_params", []) or [])
+                        embed = _should_embed_body_fields(body_params)
+                    except Exception:  # pragma: no cover - defensive default
+                        embed = bool(getattr(dependant, "body_params", []))
+
+                async def _resolve_async():
+                    if AsyncExitStack is None:
+                        raise RuntimeError("AsyncExitStack is required for FastAPI dependency resolution")
+                    async with AsyncExitStack() as stack:
+                        kwargs = dict(base_kwargs)
+                        kwargs["async_exit_stack"] = stack
+                        if "embed_body_fields" in parameters:
+                            kwargs["embed_body_fields"] = embed
+                        return await solve_dependencies(**kwargs)
+
+                result = asyncio.run(_resolve_async())
+                return _extract_values(result)
+
+            result = solve_dependencies(**base_kwargs)
             if inspect.isawaitable(result):
                 result = asyncio.run(result)
-            values, *_ = result
-            return values
+            return _extract_values(result)
 
         setattr(fastapi_module, "_build_call_arguments", _build_call_arguments)
 
