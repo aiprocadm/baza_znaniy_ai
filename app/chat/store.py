@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import secrets
 import sqlite3
 import time
 import uuid
 from pathlib import Path
-from typing import List, Optional, Protocol, Tuple
+from typing import List, Optional, Protocol, Tuple, Union
 
 __all__ = ["ChatStore", "ConversationAccessError", "ChatStoreProtocol"]
 
@@ -42,10 +43,25 @@ class ConversationAccessError(RuntimeError):
 class ChatStore:
     """Persist chat conversations and summaries in SQLite."""
 
-    def __init__(self, db_path: str) -> None:
+    def __init__(self, db_path: str, *, secret: Optional[Union[str, bytes]] = None) -> None:
         self.db_path = db_path
+        self._secret = self._prepare_secret(secret)
         self._ensure_directory()
         self._init_schema()
+
+    @staticmethod
+    def _prepare_secret(secret: Optional[Union[str, bytes]]) -> bytes:
+        if secret is None:
+            return secrets.token_bytes(32)
+        if isinstance(secret, str):
+            secret_bytes = secret.encode("utf-8")
+        elif isinstance(secret, bytes):
+            secret_bytes = secret
+        else:
+            raise TypeError("secret must be None, str, or bytes")
+        if not secret_bytes:
+            return secrets.token_bytes(32)
+        return secret_bytes
 
     def _ensure_directory(self) -> None:
         if self.db_path == ":memory:":
