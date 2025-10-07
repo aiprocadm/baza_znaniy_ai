@@ -159,16 +159,58 @@ def _ensure_fastapi_test_helpers() -> None:
                 "path": getattr(dependant, "path", ""),
             }
             request = Request(scope)
-            result = solve_dependencies(
-                request=request,
-                dependant=dependant,
-                body=body,
-                dependency_overrides_provider=app,
-            )
+
+            base_kwargs = {
+                "request": request,
+                "dependant": dependant,
+                "body": body,
+                "dependency_overrides_provider": app,
+            }
+
+            signature = inspect.signature(solve_dependencies)
+            parameters = signature.parameters
+
+            def _extract_values(result: object):
+                if hasattr(result, "values"):
+                    return getattr(result, "values")
+                if isinstance(result, tuple):
+                    values, *_ = result
+                    return values
+                return result
+
+            if "async_exit_stack" in parameters:
+                try:
+                    from contextlib import AsyncExitStack
+                except Exception:  # pragma: no cover - fallback for minimal environments
+                    AsyncExitStack = None  # type: ignore[assignment]
+
+                embed = False
+                if "embed_body_fields" in parameters:
+                    try:
+                        from fastapi.routing import _should_embed_body_fields
+
+                        body_params = list(getattr(dependant, "body_params", []) or [])
+                        embed = _should_embed_body_fields(body_params)
+                    except Exception:  # pragma: no cover - defensive default
+                        embed = bool(getattr(dependant, "body_params", []))
+
+                async def _resolve_async():
+                    if AsyncExitStack is None:
+                        raise RuntimeError("AsyncExitStack is required for FastAPI dependency resolution")
+                    async with AsyncExitStack() as stack:
+                        kwargs = dict(base_kwargs)
+                        kwargs["async_exit_stack"] = stack
+                        if "embed_body_fields" in parameters:
+                            kwargs["embed_body_fields"] = embed
+                        return await solve_dependencies(**kwargs)
+
+                result = asyncio.run(_resolve_async())
+                return _extract_values(result)
+
+            result = solve_dependencies(**base_kwargs)
             if inspect.isawaitable(result):
                 result = asyncio.run(result)
-            values, *_ = result
-            return values
+            return _extract_values(result)
 
         setattr(fastapi_module, "_build_call_arguments", _build_call_arguments)
 
@@ -291,6 +333,19 @@ async def upload_file(
                 except Exception:  # pragma: no cover - defensive seek
                     pass
             return UploadFile(filename=filename, file=file_obj, content_type=content_type)
+
+        filename_attr = getattr(item, "filename", None)
+        file_attr = getattr(item, "file", None)
+        if filename_attr is not None and file_attr is not None:
+            filename = str(filename_attr).strip() or "uploaded"
+            content_type = getattr(item, "content_type", None)
+            seek = getattr(file_attr, "seek", None)
+            if callable(seek):
+                try:
+                    seek(0)
+                except Exception:  # pragma: no cover - defensive seek
+                    pass
+            return UploadFile(filename=filename, file=file_attr, content_type=content_type)
 
         if StarletteUploadFile is not None and isinstance(item, StarletteUploadFile):
             filename = getattr(item, "filename", "uploaded") or "uploaded"
@@ -443,14 +498,11 @@ def _extract_disposition_filename(source: object) -> str | None:
 
 def _coerce_upload_argument(item: object) -> UploadFile:
     if isinstance(item, FastAPIUploadFile):
-        filename = getattr(item, "filename", None) or _extract_disposition_filename(item)
-        if not filename:
-            filename = "uploaded"
-        if getattr(item, "filename", None) != filename:
-            try:
-                item.filename = filename
-            except Exception:  # pragma: no cover - defensive attribute update
-                pass
+        filename = (
+            getattr(item, "filename", None)
+            or _extract_disposition_filename(item)
+            or "uploaded"
+        )
         file_obj = getattr(item, "file", None)
         seek = getattr(file_obj, "seek", None)
         if callable(seek):
@@ -458,7 +510,17 @@ def _coerce_upload_argument(item: object) -> UploadFile:
                 seek(0)
             except Exception:  # pragma: no cover - defensive seek
                 pass
-        return item
+
+        # ``UploadFile`` instances originating from FastAPI already satisfy the
+        # contract expected by the rest of the pipeline.  Returning the original
+        # instance avoids unnecessary wrapping while ensuring objects without a
+        # filename derived from the request headers are still handled below.
+        if getattr(item, "filename", None) == filename and isinstance(item, UploadFile):
+            return item
+
+        content_type = getattr(item, "content_type", None)
+        payload = file_obj if file_obj is not None else item
+        return create_upload_file(filename, payload, content_type)
 
     if StarletteUploadFile is not None and isinstance(item, StarletteUploadFile):
         filename = getattr(item, "filename", None) or _extract_disposition_filename(item) or "uploaded"
