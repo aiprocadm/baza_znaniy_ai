@@ -498,14 +498,11 @@ def _extract_disposition_filename(source: object) -> str | None:
 
 def _coerce_upload_argument(item: object) -> UploadFile:
     if isinstance(item, FastAPIUploadFile):
-        filename = getattr(item, "filename", None) or _extract_disposition_filename(item)
-        if not filename:
-            filename = "uploaded"
-        if getattr(item, "filename", None) != filename:
-            try:
-                item.filename = filename
-            except Exception:  # pragma: no cover - defensive attribute update
-                pass
+        filename = (
+            getattr(item, "filename", None)
+            or _extract_disposition_filename(item)
+            or "uploaded"
+        )
         file_obj = getattr(item, "file", None)
         seek = getattr(file_obj, "seek", None)
         if callable(seek):
@@ -513,7 +510,17 @@ def _coerce_upload_argument(item: object) -> UploadFile:
                 seek(0)
             except Exception:  # pragma: no cover - defensive seek
                 pass
-        return item
+
+        # ``UploadFile`` instances originating from FastAPI already satisfy the
+        # contract expected by the rest of the pipeline.  Returning the original
+        # instance avoids unnecessary wrapping while ensuring objects without a
+        # filename derived from the request headers are still handled below.
+        if getattr(item, "filename", None) == filename and isinstance(item, UploadFile):
+            return item
+
+        content_type = getattr(item, "content_type", None)
+        payload = file_obj if file_obj is not None else item
+        return create_upload_file(filename, payload, content_type)
 
     if StarletteUploadFile is not None and isinstance(item, StarletteUploadFile):
         filename = getattr(item, "filename", None) or _extract_disposition_filename(item) or "uploaded"
