@@ -133,7 +133,12 @@ def create_app(provider: LLMProvider | None = None) -> FastAPI:
     )
     ingest_worker = IngestWorker(ingest_service)
     ingest_service.set_worker(ingest_worker)
-    ingest_service.configure_scheduler(scheduler)
+
+    configure_scheduler = getattr(ingest_service, "configure_scheduler", None)
+    if callable(configure_scheduler):
+        configure_scheduler(scheduler)
+    else:  # pragma: no cover - compatibility fallback for simplified stubs
+        setattr(ingest_service, "scheduler", scheduler)
 
     min_citations, max_citations = settings.citations_bounds
 
