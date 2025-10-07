@@ -12,8 +12,10 @@ from fastapi.middleware.cors import CORSMiddleware
 
 try:  # pragma: no cover - optional dependency resolution
     from apscheduler.schedulers.asyncio import AsyncIOScheduler
+    from apscheduler.schedulers.base import STATE_RUNNING
 except ModuleNotFoundError:  # pragma: no cover - optional dependency fallback
     AsyncIOScheduler = None  # type: ignore[assignment]
+    STATE_RUNNING = None  # type: ignore[assignment]
 from app.api.router import api_router
 from app.chat.summarizer import ConversationSummarizer
 from app.core.auth import TokenRegistry
@@ -60,6 +62,23 @@ def _initialise_reranker(settings) -> CrossEncoderReranker | None:
         return None
 
 
+def _scheduler_is_running(scheduler: object) -> bool:
+    """Best-effort check for scheduler state across APScheduler versions."""
+
+    running = getattr(scheduler, "running", None)
+    if running is not None:
+        return bool(running)
+
+    state = getattr(scheduler, "state", None)
+    if state is not None and STATE_RUNNING is not None:
+        try:
+            return state == STATE_RUNNING
+        except Exception:  # pragma: no cover - defensive compatibility guard
+            logger.debug("Unexpected scheduler state value: %r", state)
+
+    return False
+
+
 def create_app(provider: LLMProvider | None = None) -> FastAPI:
     """Build and configure the FastAPI application instance."""
 
@@ -74,7 +93,7 @@ def create_app(provider: LLMProvider | None = None) -> FastAPI:
             try:  # pragma: no cover - startup coordination
                 service.ensure_background_worker()
                 worker.ensure_started()
-                if not scheduler.running:
+                if not _scheduler_is_running(scheduler):
                     scheduler.start()
                 app.state.ingest_worker_task = None
             except Exception:  # pragma: no cover - defensive startup logging
@@ -89,7 +108,7 @@ def create_app(provider: LLMProvider | None = None) -> FastAPI:
                     await service.stop_background_worker()
                 except Exception:  # pragma: no cover - defensive shutdown logging
                     logger.exception("Failed to stop ingestion worker")
-            if scheduler is not None and scheduler.running:
+            if scheduler is not None and _scheduler_is_running(scheduler):
                 try:  # pragma: no cover - scheduler shutdown
                     await scheduler.shutdown(wait=True)
                 except Exception:  # pragma: no cover - defensive scheduler logging
@@ -117,14 +136,14 @@ def create_app(provider: LLMProvider | None = None) -> FastAPI:
 
     file_store = FileStore()
     ingest_queue = IngestQueue()
+    scheduler = None
     if AsyncIOScheduler is None:  # pragma: no cover - optional dependency guard
-        raise RuntimeError(
-            "APScheduler is required to run background ingest processing. "
-            "Install it with 'pip install apscheduler'."
+        logger.warning(
+            "APScheduler is not installed; background scheduling is disabled"
         )
-
-    scheduler = AsyncIOScheduler(timezone=timezone.utc)
-    schedule_sqlmodel_metadata_guard(scheduler)
+    else:
+        scheduler = AsyncIOScheduler(timezone=timezone.utc)
+        schedule_sqlmodel_metadata_guard(scheduler)
 
     ingest_service = IngestService(
         max_retries=settings.ingest_max_retries,
@@ -134,7 +153,7 @@ def create_app(provider: LLMProvider | None = None) -> FastAPI:
     ingest_worker = IngestWorker(ingest_service)
     ingest_service.set_worker(ingest_worker)
     configure_scheduler = getattr(ingest_service, "configure_scheduler", None)
-    if callable(configure_scheduler):
+    if callable(configure_scheduler) and scheduler is not None:
         configure_scheduler(scheduler)
 
     min_citations, max_citations = settings.citations_bounds
