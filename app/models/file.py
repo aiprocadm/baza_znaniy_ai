@@ -66,11 +66,96 @@ def _record_sqlmodel_metadata_health(metadata: Any | None, *, origin: str) -> No
         )
 
 
+def _sanitize_metadata_tables(metadata: MetaData) -> MetaData:
+    """Return metadata with an intact table registry, rebuilding it if required."""
+
+    tables_attr = getattr(metadata, "tables", None)
+
+    if not isinstance(tables_attr, FacadeDict):
+        logger.warning(
+            "SQLModel metadata tables registry is corrupt; rebuilding metadata"
+        )
+        return _rebuild_sqlmodel_metadata()
+
+    invalid_keys: list[str] = []
+    for table_name, table in list(tables_attr.items()):
+        if getattr(table, "metadata", None) is not metadata:
+            invalid_keys.append(table_name)
+            continue
+        if not getattr(table, "name", None):
+            invalid_keys.append(table_name)
+
+    for table_name in invalid_keys:
+        tables_attr.pop(table_name, None)
+
+    if invalid_keys:
+        logger.warning(
+            "Removed %s invalid table entries from SQLModel metadata", len(invalid_keys)
+        )
+
+    if not tables_attr:
+        snapshot = collect_sqlmodel_tables()
+        if snapshot:
+            return _rebuild_sqlmodel_metadata(snapshot)
+
+    return metadata
+
+
+def _rebuild_sqlmodel_metadata(
+    snapshot: list[tuple[type[Any], Any]] | None = None,
+) -> MetaData:
+    """Recreate ``SQLModel.metadata`` from known model definitions."""
+
+    if snapshot is None:
+        snapshot = collect_sqlmodel_tables()
+
+    new_metadata = MetaData()
+
+    try:
+        setattr(SQLModel, "metadata", new_metadata)
+    except Exception:  # pragma: no cover - defensive best-effort assignment
+        logger.warning(
+            "Failed to assign rebuilt metadata to SQLModel; using local instance"
+        )
+
+    for model_cls, table in snapshot:
+        migrate = getattr(table, "to_metadata", None)
+        if not callable(migrate):
+            migrate = getattr(table, "tometadata", None)
+        if not callable(migrate):
+            logger.debug(
+                "Model %s table %r cannot migrate to rebuilt metadata",
+                getattr(model_cls, "__name__", repr(model_cls)),
+                getattr(table, "name", repr(table)),
+            )
+            continue
+
+        try:
+            new_table = migrate(new_metadata)
+        except Exception:  # pragma: no cover - defensive migration
+            logger.exception(
+                "Failed to migrate table %s during metadata rebuild",
+                getattr(table, "name", repr(table)),
+            )
+            continue
+
+        try:
+            setattr(model_cls, "__table__", new_table)
+        except Exception:  # pragma: no cover - best-effort attribute update
+            logger.debug(
+                "Unable to refresh __table__ for %s after metadata rebuild",
+                getattr(model_cls, "__name__", repr(model_cls)),
+                exc_info=True,
+            )
+
+    return new_metadata
+
+
 def _ensure_sqlmodel_metadata(metadata: Any | None) -> MetaData:
     """Return a valid SQLModel metadata instance, creating one if required."""
 
     if isinstance(metadata, MetaData):
-        return metadata
+        return _sanitize_metadata_tables(metadata)
 
     candidate = getattr(SQLModel, "metadata", None) if metadata is None else metadata
     if candidate is not None and not isinstance(candidate, MetaData):
@@ -85,7 +170,7 @@ def _ensure_sqlmodel_metadata(metadata: Any | None) -> MetaData:
 
     candidate = getattr(SQLModel, "metadata", None)
     if isinstance(candidate, MetaData):
-        return candidate
+        return _sanitize_metadata_tables(candidate)
 
     fallback = MetaData()
     try:
@@ -94,7 +179,7 @@ def _ensure_sqlmodel_metadata(metadata: Any | None) -> MetaData:
         logger.warning(
             "Unable to attach fallback SQLModel metadata; schema creation may fail"
         )
-    return fallback
+    return _sanitize_metadata_tables(fallback)
 
 
 def _collect_sqlmodel_tables() -> list[tuple[type[Any], Any]]:
