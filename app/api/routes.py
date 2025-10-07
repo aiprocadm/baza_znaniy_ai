@@ -37,6 +37,11 @@ from app.observability.metrics import (
 from app.retriever.rerank import apply_rerank
 from app.api.status_codes import HTTP_CONTENT_TOO_LARGE
 from app.api.upload_utils import create_upload_file
+
+try:  # pragma: no cover - optional Starlette dependency in some environments
+    from starlette.datastructures import UploadFile as StarletteUploadFile
+except ModuleNotFoundError:  # pragma: no cover - Starlette not installed in some tests
+    StarletteUploadFile = None  # type: ignore[assignment]
 from app.services import vectorstore as vectorstore_service
 
 router = APIRouter()
@@ -370,6 +375,17 @@ def _resolve_upload_limits(request: Request) -> UploadLimits:
 def _coerce_upload_file(value: Any) -> UploadFile:
     if isinstance(value, UploadFile):
         return value
+    if StarletteUploadFile is not None and isinstance(value, StarletteUploadFile):
+        filename = getattr(value, "filename", None)
+        content_type = getattr(value, "content_type", None)
+        file_obj = getattr(value, "file", value)
+        seek = getattr(file_obj, "seek", None)
+        if callable(seek):
+            try:
+                seek(0)
+            except Exception:  # pragma: no cover - defensive seek reset
+                pass
+        return create_upload_file(filename, file_obj, content_type)
     if isinstance(value, dict):
         candidate = value.get("files") or value.get("file")
         if candidate is not None:
