@@ -27,7 +27,7 @@ from app.observability.metrics import (
     record_sqlmodel_metadata_alert,
     record_sqlmodel_metadata_state,
 )
-from app.models.engine_guard import SyncEngineGuard, mark_fallback
+from app.models.engine_guard import SyncEngineGuard, is_fallback_value, mark_fallback
 from app.models.entities import JobRecord, SettingRecord
 from app.models.sqlmodel_compat import (
     collect_sqlmodel_tables,
@@ -453,6 +453,21 @@ def _ensure_engine_surface(engine: Engine, url: str) -> Engine:
     return engine
 
 
+def _ensure_sync_engine(engine: Engine, url: str) -> Engine:
+    """Return an engine guaranteed to expose the synchronous SQLModel API."""
+
+    guarded = SyncEngineGuard(engine, url).ensure_sync()
+    dialect = getattr(guarded, "dialect", None)
+    if dialect is not None and is_fallback_value(dialect):
+        driver = getattr(dialect, "driver", None)
+        if isinstance(driver, str) and driver.lower() == "pysqlite":
+            try:
+                setattr(dialect, "driver", "sqlite")
+            except Exception:
+                pass
+    return _ensure_engine_surface(guarded, url)
+
+
 def _collect_sqlmodel_tables() -> list[tuple[type[Any], Any]]:
     """Return a snapshot of currently declared SQLModel tables."""
 
@@ -729,6 +744,9 @@ def get_session(url: Optional[str] = None, *, engine: Engine | None = None):
 
 
 __all__ = [
+    "MetaData",
+    "create_engine",
+    "text",
     "ChunkRecord",
     "DocumentRecord",
     "DocumentStatus",
@@ -739,4 +757,5 @@ __all__ = [
     "SettingRecord",
     "get_engine",
     "get_session",
+    "_ensure_sync_engine",
 ]
