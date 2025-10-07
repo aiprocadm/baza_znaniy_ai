@@ -16,7 +16,8 @@ from fastapi.responses import JSONResponse, Response
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
 from app.chat.store import ChatStore, ConversationAccessError
-from app.core.config import get_settings, get_version_info
+from app.core.config import get_settings
+from app.core.versioning import build_version_payload
 from app.core.deps import UploadLimits, get_upload_limits
 from app.ingest import parse_and_chunk
 from app.llm import (
@@ -78,7 +79,7 @@ def version(request: Request) -> JSONResponse:
     if settings is None:
         settings = get_settings()
 
-    payload = get_version_info(settings)
+    payload = build_version_payload(settings)
     payload["ts"] = int(time.time())
     return JSONResponse(payload)
 
