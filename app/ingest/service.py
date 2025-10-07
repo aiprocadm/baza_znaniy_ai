@@ -102,11 +102,37 @@ class IngestService:
         backoff = (
             settings.ingest_backoff_seconds if backoff_seconds is None else backoff_seconds
         )
-        queue_size = queue_maxsize or settings.ingest_queue_size
-        self.queue_maxsize = max(1, int(queue_size))
-        self.queue: asyncio.Queue[Optional[IngestJob]] = queue or asyncio.Queue(
-            maxsize=self.queue_maxsize
-        )
+        queue_size_raw: int | float | None
+        if queue_maxsize is not None:
+            queue_size_raw = queue_maxsize
+        elif queue is not None:
+            queue_size_raw = getattr(queue, "maxsize", None)
+        else:
+            queue_size_raw = settings.ingest_queue_size
+
+        try:
+            queue_size = int(queue_size_raw) if queue_size_raw is not None else 0
+        except (TypeError, ValueError):
+            logger.warning(
+                "Invalid ingest queue size %r; falling back to settings value %s",
+                queue_size_raw,
+                settings.ingest_queue_size,
+            )
+            queue_size = int(settings.ingest_queue_size)
+
+        if queue_size < 0:
+            logger.info(
+                "Configured ingest queue size %s is negative; treating as unlimited",
+                queue_size,
+            )
+            queue_size = 0
+
+        self.queue_maxsize = queue_size
+        self.queue: asyncio.Queue[Optional[IngestJob]]
+        if queue is not None:
+            self.queue = queue
+        else:
+            self.queue = asyncio.Queue(maxsize=queue_size)
         self.max_retries = max(0, int(retries))
         self.backoff_seconds = max(0.0, float(backoff))
         self._engine = engine

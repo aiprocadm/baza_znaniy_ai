@@ -521,8 +521,8 @@ class Settings(BaseSettings):
     @classmethod
     def _validate_ingest_queue_size(cls, value: object) -> int:
         candidate = int(value)
-        if candidate <= 0:
-            raise ValueError("ingest_queue_size must be greater than zero")
+        if candidate < 0:
+            raise ValueError("ingest_queue_size must be zero or positive")
         return candidate
 
     @field_validator("ingest_worker_interval_seconds", mode="before")
