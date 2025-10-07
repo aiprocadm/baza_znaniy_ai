@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from contextlib import asynccontextmanager
 from datetime import timezone
 from typing import Sequence
 
@@ -63,7 +64,38 @@ def create_app(provider: LLMProvider | None = None) -> FastAPI:
     """Build and configure the FastAPI application instance."""
 
     settings = get_settings()
-    application = FastAPI(title="kb")
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        worker = getattr(app.state, "ingest_worker", None)
+        service = getattr(app.state, "ingest_service", None)
+        scheduler = getattr(app.state, "scheduler", None)
+        if worker is not None and service is not None and scheduler is not None:
+            try:  # pragma: no cover - startup coordination
+                service.ensure_background_worker()
+                worker.ensure_started()
+                if not scheduler.running:
+                    scheduler.start()
+                app.state.ingest_worker_task = None
+            except Exception:  # pragma: no cover - defensive startup logging
+                logger.exception("Failed to start ingestion worker")
+        try:
+            yield
+        finally:
+            service = getattr(app.state, "ingest_service", None)
+            scheduler = getattr(app.state, "scheduler", None)
+            if service is not None:
+                try:  # pragma: no cover - shutdown coordination
+                    await service.stop_background_worker()
+                except Exception:  # pragma: no cover - defensive shutdown logging
+                    logger.exception("Failed to stop ingestion worker")
+            if scheduler is not None and scheduler.running:
+                try:  # pragma: no cover - scheduler shutdown
+                    await scheduler.shutdown(wait=True)
+                except Exception:  # pragma: no cover - defensive scheduler logging
+                    logger.exception("Failed to shut down scheduler")
+
+    application = FastAPI(title="kb", lifespan=lifespan)
 
     cors_origins = _prepare_cors_origins(settings.cors_allow_origins)
     application.add_middleware(
@@ -138,35 +170,6 @@ def create_app(provider: LLMProvider | None = None) -> FastAPI:
     # Prime the metadata guard once during application construction so metrics are
     # populated even before the first scheduler tick.
     check_sqlmodel_metadata(origin="startup")
-
-    @application.on_event("startup")
-    async def _startup_ingestion_worker() -> None:  # pragma: no cover - I/O heavy
-        worker = getattr(application.state, "ingest_worker", None)
-        service = getattr(application.state, "ingest_service", None)
-        scheduler = getattr(application.state, "scheduler", None)
-        if worker is None or service is None or scheduler is None:
-            return
-        try:
-            service.ensure_background_worker()
-            worker.ensure_started()
-            if not scheduler.running:
-                scheduler.start()
-            application.state.ingest_worker_task = None
-        except Exception:  # pragma: no cover - defensive
-            logger.exception("Failed to start ingestion worker")
-
-    @application.on_event("shutdown")
-    async def _shutdown_ingestion_worker() -> None:  # pragma: no cover - I/O heavy
-        service = getattr(application.state, "ingest_service", None)
-        scheduler = getattr(application.state, "scheduler", None)
-        if service is None:
-            return
-        try:
-            await service.stop_background_worker()
-            if scheduler is not None and scheduler.running:
-                await scheduler.shutdown(wait=True)
-        except Exception:  # pragma: no cover - defensive
-            logger.exception("Failed to stop ingestion worker")
 
     return application
 
