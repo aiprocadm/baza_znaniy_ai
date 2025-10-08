@@ -625,7 +625,8 @@ def _select_citations(
 @router.post("/api/docs/upload")
 async def upload(
     request: Request,
-    files: list[UploadFile] = File(...),
+    files: list[UploadFile] | None = File(None),
+    file: UploadFile | None = File(None, alias="file"),
     user_id: str = Form(...),
     conversation_id: str | None = Form(None),
 ) -> dict[str, Any]:
@@ -636,7 +637,11 @@ async def upload(
     parser = _resolve_callable(state, "parse_and_chunk", parse_and_chunk)
     upsert_override = _resolve_callable(state, "upsert_chunks", None)
 
-    upload_items = list(files or [])
+    upload_items = []
+    if file is not None:
+        upload_items.append(file)
+    if files:
+        upload_items.extend(files)
     if not upload_items:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "UPLOAD_INVALID_FILE")
 
