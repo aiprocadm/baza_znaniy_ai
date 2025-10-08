@@ -8,8 +8,18 @@ import json
 from typing import TYPE_CHECKING, Any, Iterable
 
 from . import BackgroundTasks, HTTPException, UploadFile, _build_call_arguments, _serialise
+from . import responses as _responses
 from .uploads import coerce_uploads, ensure_list
-from .responses import HTMLResponse, JSONResponse, Response, StreamingResponse
+
+HTMLResponse = _responses.HTMLResponse
+JSONResponse = _responses.JSONResponse
+Response = _responses.Response
+StreamingResponse = getattr(_responses, "StreamingResponse", None)
+
+if TYPE_CHECKING:  # pragma: no cover - typing aid only
+    from .responses import StreamingResponse as StreamingResponseType
+else:  # pragma: no cover - runtime fallback when streaming support is unavailable
+    StreamingResponseType = Any
 
 if TYPE_CHECKING:  # pragma: no cover - typing aid only
     from . import FastAPI
@@ -176,7 +186,7 @@ class TestClient:
                     collected.append(candidate)
             return collected
 
-        if isinstance(result, StreamingResponse):
+        if StreamingResponse is not None and isinstance(result, StreamingResponse):
             content = self._consume_streaming_response(result)
             return self._finalise_response(
                 content,
@@ -242,7 +252,9 @@ class TestClient:
             for func, args, kwargs in background.drain():
                 self._execute_callable(func, *args, **kwargs)
 
-    def _consume_streaming_response(self, response: StreamingResponse) -> bytes:
+    def _consume_streaming_response(self, response: StreamingResponseType) -> bytes:
+        if StreamingResponse is None:
+            raise RuntimeError("StreamingResponse support is unavailable in this stub")
         return self._run_async(response.read())
 
     def _execute_callable(self, func: Any, *args: Any, **kwargs: Any) -> None:
