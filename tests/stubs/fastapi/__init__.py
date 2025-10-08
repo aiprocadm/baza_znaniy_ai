@@ -186,15 +186,34 @@ class _RouterBase:
     def post(self, path: str, **options: Any) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
         return self._add_route("POST", path, **options)
 
+    def put(self, path: str, **options: Any) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+        return self._add_route("PUT", path, **options)
+
+    def patch(self, path: str, **options: Any) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+        return self._add_route("PATCH", path, **options)
+
     def delete(self, path: str, **options: Any) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
         return self._add_route("DELETE", path, **options)
+
+    def options(self, path: str, **options: Any) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+        return self._add_route("OPTIONS", path, **options)
 
     def head(self, path: str, **options: Any) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
         return self._add_route("HEAD", path, **options)
 
-    def include_router(self, router: "APIRouter") -> None:
+    def include_router(
+        self,
+        router: "APIRouter",
+        *,
+        prefix: str = "",
+        **_: Any,
+    ) -> None:
+        normalised_prefix = prefix.rstrip("/")
         for route in router._routes:
-            self._routes.append(route)
+            path = route.path
+            if normalised_prefix:
+                path = f"{normalised_prefix}{path}".replace("//", "/")
+            self._routes.append(_Route(route.method, path, route.handler, route.status_code))
         for key, handlers in router._event_handlers.items():
             self._event_handlers[key].extend(handlers)
 
