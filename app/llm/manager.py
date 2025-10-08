@@ -64,7 +64,7 @@ def _ensure_llm_package_exports() -> None:
 
     exports = {
         "LLMProvider": LLMProvider,
-        "get_llm_provider": get_llm_provider,
+        "get_llm_provider": _cache.get_llm_provider,
         "get_cached_provider": _cache.get_cached_provider,
         "reset_provider_cache": _cache.reset_provider_cache,
         "get_llm_client": _cache.get_llm_client,
