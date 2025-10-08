@@ -51,11 +51,16 @@ def _load_real_module() -> object | None:
     return None
 
 
-_EXISTING = sys.modules.get("pydantic")
-if _EXISTING is not None and getattr(_EXISTING, "__file__", "") != __file__:
-    _REAL = _EXISTING
+_PREFER_LOCAL_IMPLEMENTATION = __name__.startswith("tests.stubs.")
+
+if _PREFER_LOCAL_IMPLEMENTATION:
+    _REAL = None
 else:
-    _REAL = _load_real_module()
+    _EXISTING = sys.modules.get("pydantic")
+    if _EXISTING is not None and getattr(_EXISTING, "__file__", "") != __file__:
+        _REAL = _EXISTING
+    else:
+        _REAL = _load_real_module()
 
 if _REAL is not None:  # pragma: no cover - exercised when real dependency available
     globals().update(_REAL.__dict__)
