@@ -234,13 +234,15 @@ def test_service_uses_settings_for_retry(monkeypatch: pytest.MonkeyPatch) -> Non
     config_module.get_settings.cache_clear()
 
 
-def test_service_allows_unbounded_queue_override(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("INGEST_QUEUE_SIZE", "3")
+def test_service_accepts_unbounded_queue_size_keyword(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("INGEST_QUEUE_SIZE", "unbounded")
     from app.core import config as config_module
 
     config_module.get_settings.cache_clear()
 
-    service = IngestService(queue_maxsize="unbounded")
+    service = IngestService()
 
     assert service.queue_maxsize == 0
     assert service.queue.maxsize == 0
@@ -248,21 +250,42 @@ def test_service_allows_unbounded_queue_override(monkeypatch: pytest.MonkeyPatch
     config_module.get_settings.cache_clear()
 
 
-def test_service_prefers_existing_queue_capacity_on_conflict(
+def test_service_accepts_unbounded_queue_size_parameter(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("INGEST_QUEUE_SIZE", "7")
+    monkeypatch.setenv("INGEST_QUEUE_SIZE", "4")
     from app.core import config as config_module
 
     config_module.get_settings.cache_clear()
 
-    external_queue: asyncio.Queue[IngestJob | None] = asyncio.Queue(maxsize=2)
-    service = IngestService(queue=external_queue, queue_maxsize="invalid")
+    service = IngestService(queue_maxsize="infinite")
 
-    assert service.queue is external_queue
-    assert service.queue_maxsize == 2
+    assert service.queue_maxsize == 0
+    assert service.queue.maxsize == 0
 
     config_module.get_settings.cache_clear()
+
+
+def test_service_rejects_queue_mismatch(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("INGEST_QUEUE_SIZE", "1")
+    from app.core import config as config_module
+
+    config_module.get_settings.cache_clear()
+
+    loop = asyncio.new_event_loop()
+    try:
+        try:
+            previous_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            previous_loop = None
+        asyncio.set_event_loop(loop)
+        queue = asyncio.Queue(maxsize=1)
+        with pytest.raises(ValueError):
+            IngestService(queue=queue, queue_maxsize=2)
+    finally:
+        asyncio.set_event_loop(previous_loop)
+        loop.close()
+        config_module.get_settings.cache_clear()
 
 
 def test_perform_maintenance_resets_stale_processing(

@@ -520,6 +520,18 @@ class Settings(BaseSettings):
     @field_validator("ingest_queue_size", mode="before")
     @classmethod
     def _validate_ingest_queue_size(cls, value: object) -> int:
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized in {
+                "unbounded",
+                "unlimited",
+                "infinite",
+                "inf",
+                "none",
+                "no-limit",
+                "nolimit",
+            }:
+                return 0
         candidate = int(value)
         if candidate < 0:
             raise ValueError("ingest_queue_size must be zero or positive")

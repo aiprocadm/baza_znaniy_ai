@@ -299,6 +299,15 @@ def test_warmup_endpoint_preloads_components(
     provider = api_client.app.state.llm_provider
     vector_store = api_client.app.state.vector_store
 
+    import app.api.routes as routes_module
+
+    def fake_perf_counter() -> float:
+        fake_perf_counter.counter += 1
+        return fake_perf_counter.counter * 0.001
+
+    fake_perf_counter.counter = -1  # type: ignore[attr-defined]
+    monkeypatch.setattr(routes_module.time, "perf_counter", fake_perf_counter)
+
     vector_calls = {"count": 0}
     original_ensure_ready = vector_store.ensure_ready
 
@@ -314,14 +323,21 @@ def test_warmup_endpoint_preloads_components(
 
     assert payload["status"] == "ok"
     assert payload["message"] == "Warmup completed"
+    assert payload["elapsed_ms"] == pytest.approx(9.0)
 
     llm_details = payload["details"]["llm"]
     assert llm_details["actions"]["ensure_model"]["status"] == "ok"
     assert llm_details["actions"]["ensure_ready"]["status"] == "ok"
     assert llm_details["actions"]["ensure_adapter"]["status"] == "ok"
+    assert llm_details["actions"]["ensure_model"]["duration_ms"] == pytest.approx(1.0)
+    assert llm_details["actions"]["ensure_ready"]["duration_ms"] == pytest.approx(1.0)
+    assert llm_details["actions"]["ensure_adapter"]["duration_ms"] == pytest.approx(1.0)
+    assert llm_details["elapsed_ms"] == pytest.approx(3.0)
 
     vector_details = payload["details"]["vector_store"]
     assert vector_details["actions"]["ensure_ready"]["status"] == "ok"
+    assert vector_details["actions"]["ensure_ready"]["duration_ms"] == pytest.approx(1.0)
+    assert vector_details["elapsed_ms"] == pytest.approx(1.0)
 
     assert provider.ensure_model_calls == 1
     assert provider.ensure_ready_calls == 1
