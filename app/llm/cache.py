@@ -1,29 +1,14 @@
-"""Helpers for caching and reusing LLM provider instances."""
+"""Caching helpers for language model providers."""
 
 from __future__ import annotations
 
 import sys
-
-from typing import TYPE_CHECKING, Callable, Optional, cast
-
-
-from typing import TYPE_CHECKING, Any, Callable, Optional
-
-from app.core.config import get_settings
-
-if TYPE_CHECKING:  # pragma: no cover - used only for static analysis
-    from app.core.config import Settings
-else:  # pragma: no cover - runtime fallback when ``Settings`` is absent
-    Settings = Any
-
-from typing import Any, Callable, Optional, TYPE_CHECKING, cast
-
+from typing import TYPE_CHECKING, Any, Callable, Optional, cast
 
 if TYPE_CHECKING:  # pragma: no cover - import for static analysis only
     from app.core.config import Settings as SettingsType
-else:  # pragma: no cover - ``typing`` fallback used during runtime
-    from typing import Any as SettingsType
-
+else:  # pragma: no cover - runtime fallback when ``Settings`` is absent
+    SettingsType = Any
 
 from .exceptions import (
     LLMProviderError,
@@ -48,15 +33,15 @@ __all__ = [
 ]
 
 _cached_provider: Optional[LLMProvider] = None
+_DEFAULT_MARKER = "_llm_cache_default"
 
 
 def _get_settings() -> SettingsType:
     """Return configured settings, deferring the import until runtime."""
 
-    from app.core.config import get_settings as _get_settings  # local import for flexibility
+    from app.core.config import get_settings as _config_get_settings
 
-    settings = _get_settings()
-    return cast(SettingsType, settings)
+    return cast(SettingsType, _config_get_settings())
 
 
 def _resolve_factory() -> Callable[[SettingsType], LLMProvider]:
@@ -64,8 +49,13 @@ def _resolve_factory() -> Callable[[SettingsType], LLMProvider]:
 
     package = sys.modules.get("app.llm")
     candidate = getattr(package, "get_llm_provider", None) if package else None
-    if callable(candidate) and candidate is not get_llm_provider:
-        return candidate  # type: ignore[return-value]
+    if callable(candidate):
+        if getattr(candidate, _DEFAULT_MARKER, False):
+            pass
+        elif getattr(candidate, "__module__", None) == __name__:
+            pass
+        else:
+            return candidate  # type: ignore[return-value]
     return _providers_get_llm_provider
 
 
@@ -73,6 +63,9 @@ def get_llm_provider(settings: SettingsType) -> LLMProvider:
     """Expose the default provider factory used by the cache module."""
 
     return _providers_get_llm_provider(settings)
+
+
+setattr(get_llm_provider, _DEFAULT_MARKER, True)
 
 
 def get_cached_provider(settings: SettingsType | None = None) -> LLMProvider:
