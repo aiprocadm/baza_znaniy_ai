@@ -415,6 +415,21 @@ def _resolve_upload_limits(request: Request) -> UploadLimits:
     return limits
 
 
+def _content_length_exceeds_limits(request: Request, limits: UploadLimits) -> bool:
+    """Return ``True`` when the declared body size is larger than allowed."""
+
+    header_value = request.headers.get("content-length")
+    if not header_value:
+        return False
+
+    try:
+        content_length = int(header_value)
+    except (TypeError, ValueError):  # pragma: no cover - defensive branch
+        return False
+
+    return content_length > limits.max_bytes
+
+
 def _resolve_callable(state: Any, attribute: str, default: Callable | None = None):
     candidate = getattr(state, attribute, None)
     if callable(candidate):
@@ -632,6 +647,8 @@ async def upload(
     conversation_id: str | None = Form(None),
 ) -> dict[str, Any]:
     limits = _resolve_upload_limits(request)
+    if _content_length_exceeds_limits(request, limits):
+        raise HTTPException(_REQUEST_TOO_LARGE, "UPLOAD_TOO_LARGE")
     allowed_extensions = set(limits.allowed_extensions)
 
     state = _resolve_app_state(request)
@@ -661,6 +678,8 @@ async def upload(
     if files:
         _add_upload(files)
     if not upload_items:
+        if _content_length_exceeds_limits(request, limits):
+            raise HTTPException(_REQUEST_TOO_LARGE, "UPLOAD_TOO_LARGE")
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "UPLOAD_INVALID_FILE")
 
     stored_files: list[str] = []
