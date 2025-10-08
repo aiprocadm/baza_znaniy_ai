@@ -7,6 +7,7 @@ import time
 from typing import Iterable, List, Mapping
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi.params import Depends as DependsMarker
 
 from app.chat.store import ChatStoreProtocol, ConversationAccessError
 from app.core.auth import ensure_tenant_access, get_current_active_user
@@ -43,6 +44,26 @@ def _format_answer(answer: str, citations: Iterable[Citation]) -> str:
     return "\n\n".join([answer_text, "Источники:", "\n".join(entries)])
 
 
+def _resolve_user_identifier(user: UserRecord | DependsMarker | None) -> str:
+    """Return a safe identifier for logging even if dependency resolution did not run."""
+
+    if user is None:
+        return "anonymous"
+    if isinstance(user, DependsMarker):
+        return "unresolved-user"
+    return getattr(user, "email", None) or getattr(user, "id", "unknown-user")
+
+
+def _resolve_tenant(tenant: str | DependsMarker | None) -> str:
+    """Return a tenant label resilient to skipped dependency evaluation."""
+
+    if tenant is None:
+        return "unknown-tenant"
+    if isinstance(tenant, DependsMarker):
+        return "unresolved-tenant"
+    return str(tenant)
+
+
 @router.post("/chat", response_model=ChatResponse)
 def chat(
     payload: ChatRequest,
@@ -52,7 +73,13 @@ def chat(
 ) -> ChatResponse:
     """Return an assistant answer generated via RAG pipeline."""
 
-    LOGGER.debug("Handling chat request", extra={"tenant": tenant, "user": getattr(user, "email", user.id)})
+    LOGGER.debug(
+        "Handling chat request",
+        extra={
+            "tenant": _resolve_tenant(tenant),
+            "user": _resolve_user_identifier(user),
+        },
+    )
 
     if request is None:
         from app.main import app as main_app  # lazy import to avoid cycles
