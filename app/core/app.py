@@ -52,7 +52,7 @@ def _prepare_cors_origins(origins: Sequence[str] | None) -> list[str]:
 def _initialise_reranker(settings) -> CrossEncoderReranker | None:
     """Create a reranker instance when enabled in configuration."""
 
-    if not settings.rerank_enabled:
+    if not getattr(settings, "rerank_enabled", False):
         return None
 
     try:  # pragma: no cover - optional dependency initialisation
@@ -60,6 +60,18 @@ def _initialise_reranker(settings) -> CrossEncoderReranker | None:
     except Exception:  # pragma: no cover - defensive logging
         logger.exception("Failed to initialise cross-encoder reranker")
         return None
+
+
+def _create_lora_manager(settings) -> LlamaLoraManager:
+    """Instantiate the Lora manager, tolerating lightweight stubs in tests."""
+
+    try:
+        return LlamaLoraManager(settings)
+    except TypeError as exc:  # pragma: no cover - compatibility shim for stubs
+        try:
+            return LlamaLoraManager()
+        except TypeError:
+            raise exc
 
 
 def _scheduler_is_running(scheduler: object) -> bool:
@@ -83,6 +95,9 @@ def create_app(provider: LLMProvider | None = None) -> FastAPI:
     """Build and configure the FastAPI application instance."""
 
     settings = get_settings()
+
+    def setting(name: str, default):
+        return getattr(settings, name, default)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -116,7 +131,7 @@ def create_app(provider: LLMProvider | None = None) -> FastAPI:
 
     application = FastAPI(title="kb", lifespan=lifespan)
 
-    cors_origins = _prepare_cors_origins(settings.cors_allow_origins)
+    cors_origins = _prepare_cors_origins(setting("cors_allow_origins", None))
     application.add_middleware(
         CORSMiddleware,
         allow_origins=cors_origins,
@@ -130,7 +145,7 @@ def create_app(provider: LLMProvider | None = None) -> FastAPI:
     memory_store = init_memory_store(settings)
     llm_provider = provider or get_cached_provider(settings)
     vector_store = get_vector_store(settings)
-    lora_manager = LlamaLoraManager(settings)
+    lora_manager = _create_lora_manager(settings)
     reranker = _initialise_reranker(settings)
     summarizer = ConversationSummarizer(chat_store, llm_provider.generate)
 
@@ -146,8 +161,8 @@ def create_app(provider: LLMProvider | None = None) -> FastAPI:
         schedule_sqlmodel_metadata_guard(scheduler)
 
     ingest_service = IngestService(
-        max_retries=settings.ingest_max_retries,
-        backoff_seconds=settings.ingest_backoff_seconds,
+        max_retries=setting("ingest_max_retries", 3),
+        backoff_seconds=setting("ingest_backoff_seconds", 1.0),
         auto_process=True,
     )
     ingest_worker = IngestWorker(ingest_service)
@@ -156,7 +171,7 @@ def create_app(provider: LLMProvider | None = None) -> FastAPI:
     if callable(configure_scheduler) and scheduler is not None:
         configure_scheduler(scheduler)
 
-    min_citations, max_citations = settings.citations_bounds
+    min_citations, max_citations = setting("citations_bounds", (3, 5))
 
     application.state.settings = settings
     application.state.chat_store = chat_store
@@ -176,11 +191,11 @@ def create_app(provider: LLMProvider | None = None) -> FastAPI:
     fallback_index: list[dict[str, object]] = []
     vectorstore_service.set_fallback_storage(fallback_index)
     application.state.fallback_index = fallback_index
-    application.state.chat_history_limit = settings.chat_history_limit
-    application.state.retrieve_topk = settings.retrieve_topk
-    application.state.rerank_topk = settings.rerank_topk
-    application.state.rerank_enabled = settings.rerank_enabled
-    application.state.chat_summary_trigger = settings.chat_summary_trigger
+    application.state.chat_history_limit = setting("chat_history_limit", 12)
+    application.state.retrieve_topk = setting("retrieve_topk", 10)
+    application.state.rerank_topk = setting("rerank_topk", 50)
+    application.state.rerank_enabled = setting("rerank_enabled", True)
+    application.state.chat_summary_trigger = setting("chat_summary_trigger", 10)
     application.state.min_citations = min_citations
     application.state.max_citations = max_citations
     application.state.token_registry = TokenRegistry()
