@@ -1,4 +1,4 @@
-name: Run Python tests
+name: Python test matrix
 
 on:
   push:
@@ -8,19 +8,25 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
-    name: Test (Python ${{ matrix.python-version }})
+    name: Python ${{ matrix.python-version }} tests
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
         python-version: ['3.11', '3.12']
     env:
       DATA_DIR: ${{ runner.temp }}/storage
+      DB_URL: sqlite+aiosqlite:///./var/data/test.sqlite
       PIP_DISABLE_PIP_VERSION_CHECK: '1'
       PYTHONDONTWRITEBYTECODE: '1'
+      PYTHONUNBUFFERED: '1'
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -35,16 +41,51 @@ jobs:
             pyproject.toml
             poetry.lock
 
-      - name: Install dependencies
+      - name: Upgrade pip and install binary wheels
         run: |
           python -m pip install --upgrade pip
+          python -m pip install --only-binary=:all: numpy faiss-cpu sentence-transformers llama-cpp-python
+
+      - name: Install project dependencies
+        run: |
+          set -euo pipefail
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
           if [ -f requirements-dev.txt ]; then pip install -r requirements-dev.txt; fi
           if [ -f pyproject.toml ]; then pip install -e .; fi
-          pip install pytest
+          pip install coverage pytest
 
-      - name: Prepare test storage directory
-        run: mkdir -p "$DATA_DIR"
+      - name: Restore GGUF cache
+        uses: actions/cache@v4
+        with:
+          path: models/model.gguf
+          key: gguf-${{ hashFiles('models/model_manifest.json') }}
+          restore-keys: |
+            gguf-
 
-      - name: Run all tests
-        run: python -m pytest -vv --maxfail=1 --disable-warnings
+      - name: Download GGUF model
+        run: |
+          mkdir -p models
+          python -m scripts.download_model --manifest models/model_manifest.json --output models/model.gguf --allow-missing-hash --max-retries 5
+
+      - name: Prepare runtime directories
+        run: |
+          mkdir -p "$DATA_DIR" var/data
+
+      - name: Run database migrations
+        run: alembic upgrade head
+
+      - name: Run pytest with coverage
+        run: |
+          coverage run -m pytest -vv --maxfail=1 --disable-warnings
+          coverage xml
+          coverage html -d cov_html
+
+      - name: Upload coverage artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-python-${{ matrix.python-version }}
+          path: |
+            coverage.xml
+            cov_html
+          if-no-files-found: warn
