@@ -137,7 +137,24 @@ def create_app(provider: LLMProvider | None = None) -> FastAPI:
                 except Exception:  # pragma: no cover - defensive scheduler logging
                     logger.exception("Failed to shut down scheduler")
 
-    application = FastAPI(title="kb", lifespan=lifespan)
+    try:
+        application = FastAPI(title="kb", lifespan=lifespan)
+    except TypeError:
+        application = FastAPI(title="kb")
+
+        async def _startup_lifespan() -> None:
+            context = lifespan(application)
+            application.state._kb_lifespan_context = context  # type: ignore[attr-defined]
+            await context.__aenter__()
+
+        async def _shutdown_lifespan() -> None:
+            context = getattr(application.state, "_kb_lifespan_context", None)
+            if context is None:
+                return
+            await context.__aexit__(None, None, None)
+
+        application.on_event("startup")(_startup_lifespan)
+        application.on_event("shutdown")(_shutdown_lifespan)
 
     cors_origins = _prepare_cors_origins(setting("cors_allow_origins", None))
     application.add_middleware(

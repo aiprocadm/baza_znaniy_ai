@@ -673,6 +673,21 @@ def _resolve_upload_limits(request: Request) -> UploadLimits:
     return limits
 
 
+def _content_length_exceeds_limits(request: Request, limits: UploadLimits) -> bool:
+    """Return ``True`` when the declared body size is larger than allowed."""
+
+    header_value = request.headers.get("content-length")
+    if not header_value:
+        return False
+
+    try:
+        content_length = int(header_value)
+    except (TypeError, ValueError):  # pragma: no cover - defensive branch
+        return False
+
+    return content_length > limits.max_bytes
+
+
 def _resolve_callable(state: Any, attribute: str, default: Callable | None = None):
     candidate = getattr(state, attribute, None)
     if callable(candidate):
@@ -890,18 +905,39 @@ async def upload(
     conversation_id: str | None = Form(None),
 ) -> dict[str, Any]:
     limits = _resolve_upload_limits(request)
+    if _content_length_exceeds_limits(request, limits):
+        raise HTTPException(_REQUEST_TOO_LARGE, "UPLOAD_TOO_LARGE")
     allowed_extensions = set(limits.allowed_extensions)
 
     state = _resolve_app_state(request)
     parser = _resolve_callable(state, "parse_and_chunk", parse_and_chunk)
     upsert_override = _resolve_callable(state, "upsert_chunks", None)
 
-    upload_items = []
+    upload_items: list[UploadFile] = []
+
+    def _add_upload(candidate: Any) -> None:
+        if isinstance(candidate, UploadFile):
+            upload_items.append(candidate)
+            return
+        if isinstance(candidate, (list, tuple, set)):
+            for item in candidate:
+                _add_upload(item)
+            return
+        if isinstance(candidate, dict):
+            maybe_file = candidate.get("file") or candidate.get("upload")
+            if isinstance(maybe_file, (list, tuple)):
+                for item in maybe_file:
+                    _add_upload(item)
+            elif isinstance(maybe_file, UploadFile):
+                upload_items.append(maybe_file)
+
     if file is not None:
-        upload_items.append(file)
+        _add_upload(file)
     if files:
-        upload_items.extend(files)
+        _add_upload(files)
     if not upload_items:
+        if _content_length_exceeds_limits(request, limits):
+            raise HTTPException(_REQUEST_TOO_LARGE, "UPLOAD_TOO_LARGE")
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "UPLOAD_INVALID_FILE")
 
     stored_files: list[str] = []

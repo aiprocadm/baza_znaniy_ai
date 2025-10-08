@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import math
 import logging
 import os
 from asyncio import QueueEmpty, QueueFull
 from dataclasses import dataclass
 from datetime import timedelta
+from decimal import Decimal
 from typing import Any, Optional, Tuple, TYPE_CHECKING
 
 from sqlmodel import Session, delete, select
@@ -102,6 +104,38 @@ class IngestService:
         }
         if raw is None:
             return default
+        if isinstance(raw, (int, float)):
+            if math.isinf(raw):
+                logger.info(
+                    "Configured ingest queue size %s from %s is infinite; treating as unlimited",
+                    raw,
+                    source,
+                )
+                return 0
+            if isinstance(raw, float) and math.isnan(raw):
+                logger.warning(
+                    "Configured ingest queue size %s from %s is NaN; using fallback %s",
+                    raw,
+                    source,
+                    default,
+                )
+                return default
+        if isinstance(raw, Decimal):
+            if raw.is_infinite():
+                logger.info(
+                    "Configured ingest queue size %s from %s is infinite; treating as unlimited",
+                    raw,
+                    source,
+                )
+                return 0
+            if not raw.is_finite():
+                logger.warning(
+                    "Configured ingest queue size %s from %s is not finite; using fallback %s",
+                    raw,
+                    source,
+                    default,
+                )
+                return default
         if isinstance(raw, str):
             normalized = raw.strip().lower()
             if normalized in sentinel_values:
@@ -116,7 +150,7 @@ class IngestService:
             raw = normalized
         try:
             value = int(raw)
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             logger.warning(
                 "Invalid ingest queue size %r from %s; falling back to %s",
                 raw,
@@ -145,42 +179,63 @@ class IngestService:
     ) -> None:
         settings = get_settings()
 
-        if max_retries is None:
-            env_retries = os.getenv("INGEST_MAX_RETRIES")
-            try:
-                retries = int(env_retries) if env_retries is not None else settings.ingest_max_retries
-            except (TypeError, ValueError):
-                retries = settings.ingest_max_retries
-        else:
+        if max_retries is not None:
             retries = max_retries
-
-        if backoff_seconds is None:
-            env_backoff = os.getenv("INGEST_BACKOFF_SECONDS") or os.getenv("INGEST_BACKOFF_BASE")
-            try:
-                backoff = float(env_backoff) if env_backoff is not None else settings.ingest_backoff_seconds
-            except (TypeError, ValueError):
-                backoff = settings.ingest_backoff_seconds
         else:
-            backoff = backoff_seconds
+            env_retries = os.getenv("INGEST_MAX_RETRIES")
+            if env_retries is not None:
+                try:
+                    retries = int(env_retries)
+                except ValueError:
+                    logger.warning(
+                        "Invalid ingest retry count %r from environment; using settings value",
+                        env_retries,
+                    )
+                    retries = settings.ingest_max_retries
+            else:
+                retries = settings.ingest_max_retries
 
-        default_queue_size = int(settings.ingest_queue_size)
-        env_queue = os.getenv("INGEST_QUEUE_SIZE") or os.getenv("INGEST_MAX_QUEUE")
-        if env_queue is not None:
-            default_queue_size = self._coerce_queue_size(
-                env_queue,
-                default=default_queue_size,
-                source="environment",
+        if backoff_seconds is not None:
+            backoff = backoff_seconds
+        else:
+            env_backoff = os.getenv("INGEST_BACKOFF_SECONDS") or os.getenv(
+                "INGEST_BACKOFF_BASE"
             )
-        queue_size_source = "settings"
-        queue_size_raw: object
+            if env_backoff is not None:
+                try:
+                    backoff = float(env_backoff)
+                except ValueError:
+                    logger.warning(
+                        "Invalid ingest backoff %r from environment; using settings value",
+                        env_backoff,
+                    )
+                    backoff = settings.ingest_backoff_seconds
+            else:
+                backoff = settings.ingest_backoff_seconds
+
+        env_queue_raw = None
+        env_queue_source = "settings"
+        for candidate_name in ("INGEST_QUEUE_SIZE", "INGEST_MAX_QUEUE"):
+            raw_value = os.getenv(candidate_name)
+            if raw_value is not None:
+                env_queue_raw = raw_value
+                env_queue_source = f"environment {candidate_name}"
+                break
+
+        default_queue_size = self._coerce_queue_size(
+            env_queue_raw if env_queue_raw is not None else settings.ingest_queue_size,
+            default=int(settings.ingest_queue_size),
+            source=env_queue_source if env_queue_raw is not None else "settings",
+        )
+
+        queue_size_source = env_queue_source if env_queue_raw is not None else "settings"
+        queue_size_raw: object = default_queue_size
         if queue_maxsize is not None:
             queue_size_source = "queue_maxsize parameter"
             queue_size_raw = queue_maxsize
         elif queue is not None:
             queue_size_source = "provided queue"
             queue_size_raw = getattr(queue, "maxsize", default_queue_size)
-        else:
-            queue_size_raw = default_queue_size
 
         queue_size = self._coerce_queue_size(
             queue_size_raw, default=default_queue_size, source=queue_size_source
