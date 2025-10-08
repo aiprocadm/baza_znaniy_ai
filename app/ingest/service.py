@@ -13,6 +13,10 @@ from typing import Any, Optional, Tuple, TYPE_CHECKING
 
 from sqlmodel import Session, delete, select
 
+from app._module_reset import ensure_core_modules
+
+ensure_core_modules()
+
 from app.core.config import get_settings
 from app.core.datetime_utils import utc_now
 from app.ingest.chunking import _chunk, _get_tokenizer, iter_document_pages
@@ -144,11 +148,44 @@ class IngestService:
         auto_process: bool = False,
     ) -> None:
         settings = get_settings()
+
         retries = settings.ingest_max_retries if max_retries is None else max_retries
+        if max_retries is None:
+            env_retries = os.getenv("INGEST_MAX_RETRIES")
+            if env_retries is not None:
+                try:
+                    retries = int(env_retries)
+                except (TypeError, ValueError):
+                    logger.warning(
+                        "Invalid INGEST_MAX_RETRIES %r; using settings value %s",
+                        env_retries,
+                        retries,
+                    )
+
         backoff = (
             settings.ingest_backoff_seconds if backoff_seconds is None else backoff_seconds
         )
+        if backoff_seconds is None:
+            env_backoff = os.getenv("INGEST_BACKOFF_SECONDS")
+            if env_backoff is not None:
+                try:
+                    backoff = float(env_backoff)
+                except (TypeError, ValueError):
+                    logger.warning(
+                        "Invalid INGEST_BACKOFF_SECONDS %r; using settings value %s",
+                        env_backoff,
+                        backoff,
+                    )
+
         default_queue_size = int(settings.ingest_queue_size)
+        env_queue_size = os.getenv("INGEST_QUEUE_SIZE")
+        if env_queue_size is not None:
+            default_queue_size = self._coerce_queue_size(
+                env_queue_size,
+                default=default_queue_size,
+                source="INGEST_QUEUE_SIZE environment variable",
+            )
+
         queue_size_source = "settings"
         queue_size_raw: object
         if queue_maxsize is not None:
