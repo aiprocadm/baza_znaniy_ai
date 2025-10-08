@@ -51,9 +51,9 @@ if _llama_module is None:
     if _llama_spec is not None:
         try:
             llama_module = import_module("llama_cpp")
-        except ImportError as exc:  # pragma: no cover - optional dependency
+        except Exception as exc:  # pragma: no cover - optional dependency
             logging.getLogger(__name__).warning(
-                "llama_cpp import failed; skipping fallback completion setup: %s", exc
+                "llama_cpp import failed; skipping fallback completion setup: %s", exc,
             )
             llama_module = None
     else:
