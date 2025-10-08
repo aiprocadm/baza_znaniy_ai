@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import math
 import logging
 import os
 from asyncio import QueueEmpty, QueueFull
 from dataclasses import dataclass
 from datetime import timedelta
+from decimal import Decimal
 from typing import Any, Optional, Tuple, TYPE_CHECKING
 
 from sqlmodel import Session, delete, select
@@ -102,6 +104,38 @@ class IngestService:
         }
         if raw is None:
             return default
+        if isinstance(raw, (int, float)):
+            if math.isinf(raw):
+                logger.info(
+                    "Configured ingest queue size %s from %s is infinite; treating as unlimited",
+                    raw,
+                    source,
+                )
+                return 0
+            if isinstance(raw, float) and math.isnan(raw):
+                logger.warning(
+                    "Configured ingest queue size %s from %s is NaN; using fallback %s",
+                    raw,
+                    source,
+                    default,
+                )
+                return default
+        if isinstance(raw, Decimal):
+            if raw.is_infinite():
+                logger.info(
+                    "Configured ingest queue size %s from %s is infinite; treating as unlimited",
+                    raw,
+                    source,
+                )
+                return 0
+            if not raw.is_finite():
+                logger.warning(
+                    "Configured ingest queue size %s from %s is not finite; using fallback %s",
+                    raw,
+                    source,
+                    default,
+                )
+                return default
         if isinstance(raw, str):
             normalized = raw.strip().lower()
             if normalized in sentinel_values:
@@ -116,7 +150,7 @@ class IngestService:
             raw = normalized
         try:
             value = int(raw)
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             logger.warning(
                 "Invalid ingest queue size %r from %s; falling back to %s",
                 raw,

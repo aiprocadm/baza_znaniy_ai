@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import os
 
 from collections.abc import Iterable, Sequence
@@ -13,6 +14,8 @@ try:  # pragma: no cover - Python 3.10 compatibility shim
     from importlib import metadata as importlib_metadata
 except ImportError:  # pragma: no cover - fallback for older interpreters
     import importlib_metadata  # type: ignore[import-not-found]
+
+from decimal import Decimal
 
 from pydantic import AliasChoices, Field
 
@@ -520,6 +523,16 @@ class Settings(BaseSettings):
     @field_validator("ingest_queue_size", mode="before")
     @classmethod
     def _validate_ingest_queue_size(cls, value: object) -> int:
+        if isinstance(value, (int, float)):
+            if math.isinf(value):
+                return 0
+            if isinstance(value, float) and math.isnan(value):
+                raise ValueError("ingest_queue_size cannot be NaN")
+        if isinstance(value, Decimal):
+            if value.is_infinite():
+                return 0
+            if not value.is_finite():
+                raise ValueError("ingest_queue_size must be finite")
         if isinstance(value, str):
             normalized = value.strip().lower()
             if normalized in {
