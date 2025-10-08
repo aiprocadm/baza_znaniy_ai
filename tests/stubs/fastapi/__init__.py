@@ -28,7 +28,7 @@ from tempfile import SpooledTemporaryFile
 from pydantic import BaseModel
 
 from . import status
-from .responses import HTMLResponse, JSONResponse
+from .responses import HTMLResponse, JSONResponse, StreamingResponse
 
 try:  # pragma: no cover - optional dependency
     from starlette.requests import Request as StarletteRequest
@@ -113,6 +113,23 @@ class UploadFile:
             self.file.close()
 
 
+class BackgroundTasks:
+    """Collect and execute callables after the response is returned."""
+
+    def __init__(self) -> None:
+        self._tasks: list[tuple[Callable[..., Any], tuple[Any, ...], dict[str, Any]]] = []
+
+    def add_task(self, func: Callable[..., Any], *args: Any, **kwargs: Any) -> None:
+        self._tasks.append((func, args, kwargs))
+
+    def drain(self) -> list[tuple[Callable[..., Any], tuple[Any, ...], dict[str, Any]]]:
+        tasks, self._tasks = self._tasks, []
+        return tasks
+
+    def has_tasks(self) -> bool:
+        return bool(self._tasks)
+
+
 def Depends(dependency: Callable[..., Any] | None = None) -> Callable[..., Any] | None:
     return dependency
 
@@ -186,15 +203,34 @@ class _RouterBase:
     def post(self, path: str, **options: Any) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
         return self._add_route("POST", path, **options)
 
+    def put(self, path: str, **options: Any) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+        return self._add_route("PUT", path, **options)
+
+    def patch(self, path: str, **options: Any) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+        return self._add_route("PATCH", path, **options)
+
     def delete(self, path: str, **options: Any) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
         return self._add_route("DELETE", path, **options)
+
+    def options(self, path: str, **options: Any) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+        return self._add_route("OPTIONS", path, **options)
 
     def head(self, path: str, **options: Any) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
         return self._add_route("HEAD", path, **options)
 
-    def include_router(self, router: "APIRouter") -> None:
+    def include_router(
+        self,
+        router: "APIRouter",
+        *,
+        prefix: str = "",
+        **_: Any,
+    ) -> None:
+        normalised_prefix = prefix.rstrip("/")
         for route in router._routes:
-            self._routes.append(route)
+            path = route.path
+            if normalised_prefix:
+                path = f"{normalised_prefix}{path}".replace("//", "/")
+            self._routes.append(_Route(route.method, path, route.handler, route.status_code))
         for key, handlers in router._event_handlers.items():
             self._event_handlers[key].extend(handlers)
 
@@ -295,11 +331,12 @@ def _resolve_dependency(
 
 def _build_call_arguments(
     handler: Callable[..., Any], body: Any, path_params: Dict[str, str], app: "FastAPI"
-) -> Dict[str, Any]:
+) -> tuple[Dict[str, Any], BackgroundTasks | None]:
     signature = inspect.signature(handler)
     type_hints = get_type_hints(handler, include_extras=True)
     kwargs: Dict[str, Any] = {}
     body_assigned = False
+    background_tasks: BackgroundTasks | None = None
     for name, parameter in signature.parameters.items():
         if name in path_params:
             kwargs[name] = path_params[name]
@@ -316,6 +353,11 @@ def _build_call_arguments(
         dependency_callable = next((meta for meta in metadata if callable(meta)), None)
         if dependency_callable is not None:
             kwargs[name] = _resolve_dependency(dependency_callable, app)
+            continue
+
+        if annotation is BackgroundTasks:
+            background_tasks = background_tasks or BackgroundTasks()
+            kwargs[name] = background_tasks
             continue
 
         if annotation in {Request, StarletteRequest}:
@@ -336,11 +378,12 @@ def _build_call_arguments(
 
         if parameter.default is not inspect._empty:
             kwargs[name] = _resolve_dependency(parameter.default, app)
-    return kwargs
+    return kwargs, background_tasks
 
 
 __all__ = [
     "APIRouter",
+    "BackgroundTasks",
     "Depends",
     "FastAPI",
     "File",
@@ -349,6 +392,7 @@ __all__ = [
     "JSONResponse",
     "Query",
     "Request",
+    "StreamingResponse",
     "UploadFile",
     "status",
 ]

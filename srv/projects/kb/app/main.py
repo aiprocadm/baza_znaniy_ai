@@ -14,13 +14,16 @@ from fastapi import HTTPException, UploadFile, status
 from fastapi.responses import HTMLResponse
 from fastapi.testclient import TestClient as _FastAPITestClient
 
-from app._module_reset import ensure_core_modules
+_original_request = getattr(_FastAPITestClient, "_kb_original_request", None)
+if _original_request is None:
+    _original_request = getattr(_FastAPITestClient, "request", None)
+if _original_request is None:
+    _original_request = getattr(_FastAPITestClient, "_request", None)
 
-ensure_core_modules()
+if _original_request is None:  # pragma: no cover - defensive fallback for exotic stubs
 
-from app.api import routes as api_routes
-
-_original_request = getattr(_FastAPITestClient, "_kb_original_request", _FastAPITestClient.request)
+    def _original_request(*args: Any, **kwargs: Any):  # type: ignore[no-redef]
+        raise AttributeError("fastapi.testclient.TestClient is missing a request implementation")
 
 
 def _compat_request(self, method: str, url: str, *args: Any, **kwargs: Any):  # type: ignore[override]
@@ -35,13 +38,22 @@ def _compat_request(self, method: str, url: str, *args: Any, **kwargs: Any):  # 
                 store = _init_memory_store(settings)
                 if store is not None:
                     state.memory_store = store
+            _resolve_upload_limits(state)
     response = _original_request(self, method, url, *args, **kwargs)
-    if method.upper() == "HEAD" and not response.content:
+    response_body = getattr(response, "content", getattr(response, "_content", b""))
+    if method.upper() == "HEAD" and not response_body:
         clone = _original_request(self, "GET", url, *args, **kwargs)
-        response._content = clone.content  # type: ignore[attr-defined]
-        content_type = clone.headers.get("content-type")
-        if content_type:
-            response.headers["content-type"] = content_type
+        clone_body = getattr(clone, "content", getattr(clone, "_content", b""))
+        if hasattr(response, "content"):
+            setattr(response, "content", clone_body)
+        else:
+            setattr(response, "_content", clone_body)
+        clone_headers = getattr(clone, "headers", None)
+        response_headers = getattr(response, "headers", None)
+        if clone_headers and response_headers is not None:
+            content_type = clone_headers.get("content-type")
+            if content_type:
+                response_headers["content-type"] = content_type
     return response
 
 
@@ -53,7 +65,16 @@ _FastAPITestClient._request = _compat_request  # type: ignore[attr-defined]
 _llama_module = sys.modules.get("llama_cpp")
 if _llama_module is None:
     _llama_spec = util.find_spec("llama_cpp")
-    llama_module = import_module("llama_cpp") if _llama_spec is not None else None
+    if _llama_spec is not None:
+        try:
+            llama_module = import_module("llama_cpp")
+        except Exception as exc:  # pragma: no cover - optional dependency
+            logging.getLogger(__name__).warning(
+                "llama_cpp import failed; skipping fallback completion setup: %s", exc,
+            )
+            llama_module = None
+    else:
+        llama_module = None
 else:
     llama_module = _llama_module
 
@@ -71,6 +92,11 @@ from app.chat.store import ChatStoreProtocol, ConversationAccessError
 from app.chat.summarizer import ConversationSummarizer
 from app.core.app import create_app
 from app.core.config import Settings, get_settings
+from app.core.deps import (
+    DEFAULT_ALLOWED_EXTENSIONS,
+    UploadLimits,
+    get_upload_limits,
+)
 from app.core.services import init_chat_store
 from app.ingest import parse_and_chunk
 from app.llm import get_cached_provider
@@ -190,6 +216,25 @@ def _normalise_extension(filename: str) -> str:
     return name.rsplit(".", 1)[-1].lower()
 
 
+def _resolve_upload_limits(state: Any | None = None) -> UploadLimits:
+    """Return cached upload configuration, defaulting when unavailable."""
+
+    if state is not None:
+        cached = getattr(state, "upload_limits", None)
+        if isinstance(cached, UploadLimits):
+            return cached
+
+    try:
+        limits = get_upload_limits()
+    except Exception:  # pragma: no cover - defensive fallback
+        limits = UploadLimits()
+
+    if state is not None:
+        setattr(state, "upload_limits", limits)
+
+    return limits
+
+
 def _load_index_html() -> str:
     index_path = WEB_ROOT / "index.html"
     if index_path.is_file():
@@ -204,14 +249,28 @@ def _register_root_route() -> None:
     def _serve_index() -> HTMLResponse:
         return HTMLResponse(_load_index_html())
 
-    app.add_api_route(
-        "/",
-        _serve_index,
-        methods=["GET"],
-        include_in_schema=False,
-        response_class=HTMLResponse,
-    )
-    app.router.routes.insert(0, app.router.routes.pop())
+    add_api_route = getattr(app, "add_api_route", None)
+    if callable(add_api_route):
+        add_api_route(
+            "/",
+            _serve_index,
+            methods=["GET"],
+            include_in_schema=False,
+            response_class=HTMLResponse,
+        )
+        routes = getattr(app, "router", None)
+        route_list = getattr(routes, "routes", None)
+        if isinstance(route_list, list) and route_list:
+            route_list.insert(0, route_list.pop())
+    else:
+        get_route = getattr(app, "get", None)
+        if callable(get_route):
+            get_route("/", include_in_schema=False)(
+                _serve_index
+            )
+        route_list = getattr(app, "_routes", None)
+        if isinstance(route_list, list) and route_list:
+            route_list.insert(0, route_list.pop())
 
 
 _register_root_route()
@@ -392,18 +451,31 @@ async def upload_document(
     settings = get_settings()
     ensure_collection()
 
+    state = getattr(app, "state", None)
+    limits = _resolve_upload_limits(state)
+    allowed_extensions = set(getattr(limits, "allowed_extensions", ())) or set(
+        DEFAULT_ALLOWED_EXTENSIONS
+    )
+    max_bytes = int(getattr(limits, "max_size", getattr(limits, "max_bytes", 0)) or 0)
+
     stored: list[str] = []
     total_chunks = 0
 
     for file in files:
         filename = (getattr(file, "filename", "uploaded") or "uploaded").strip() or "uploaded"
         ext = _normalise_extension(filename)
-        if ext not in {"pdf", "docx", "txt"}:
+        if ext not in allowed_extensions:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "UPLOAD_INVALID_EXT")
 
         data = await file.read()
         if not data:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "NO_TEXT_FOUND")
+
+        if max_bytes and len(data) > max_bytes:
+            raise HTTPException(
+                status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                "UPLOAD_TOO_LARGE",
+            )
 
         chunks = parse_and_chunk(filename, data)
         if not chunks:

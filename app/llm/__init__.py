@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import sys
-import types
+from types import ModuleType
 
 from .cache import (
     LLMProvider,
@@ -12,6 +12,8 @@ from .cache import (
     LoRAAdapterNotFoundError,
     ModelNotFoundError,
     ModelNotReadyError,
+    _register_llm_module,
+    _sync_external_factory,
     get_cached_provider,
     get_llm_client,
     get_llm_provider,
@@ -34,18 +36,16 @@ __all__ = [
 ]
 
 
-class _LLMModule(types.ModuleType):
-    """Module proxy that tracks overrides for ``get_llm_provider``."""
+class _LlmModule(ModuleType):
+    """Custom module type capturing external factory overrides."""
 
-    def __setattr__(self, name: str, value: object) -> None:  # pragma: no cover - simple setter
+    def __setattr__(self, name: str, value: object) -> None:
         if name == "get_llm_provider":
-            if callable(value) and value is not get_llm_provider:
-                set_provider_factory_override(value)
-            else:
-                set_provider_factory_override(None)
+            _sync_external_factory(value)
         super().__setattr__(name, value)
 
 
-_current_module = sys.modules.get(__name__)
-if _current_module is not None and not isinstance(_current_module, _LLMModule):
-    _current_module.__class__ = _LLMModule  # type: ignore[misc]
+_module = sys.modules[__name__]
+if not isinstance(_module, _LlmModule):
+    _module.__class__ = _LlmModule  # type: ignore[misc]
+    _register_llm_module(_module)

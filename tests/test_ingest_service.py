@@ -1,14 +1,15 @@
 import asyncio
 import hashlib
+from decimal import Decimal
 from datetime import timedelta
 from pathlib import Path
 
 import pytest
 from sqlmodel import Session, select
 
+from app.core.datetime_utils import utc_now
 from app.ingest.service import IngestJob, IngestService, IngestWorker
 from app.models import file as file_models
-from app.core.datetime_utils import utc_now
 from app.models.entities import JobStatus, TenantRecord
 from app.models.file import (
     ChunkRecord,
@@ -264,6 +265,47 @@ def test_service_accepts_unbounded_queue_size_parameter(
     assert service.queue.maxsize == 0
 
     config_module.get_settings.cache_clear()
+
+
+def test_service_accepts_infinite_queue_size_parameter(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("INGEST_QUEUE_SIZE", "4")
+    from app.core import config as config_module
+
+    config_module.get_settings.cache_clear()
+
+    service = IngestService(queue_maxsize=float("inf"))
+
+    assert service.queue_maxsize == 0
+    assert service.queue.maxsize == 0
+
+    config_module.get_settings.cache_clear()
+
+
+def test_service_accepts_decimal_infinite_queue_size_parameter(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("INGEST_QUEUE_SIZE", "4")
+    from app.core import config as config_module
+
+    config_module.get_settings.cache_clear()
+
+    service = IngestService(queue_maxsize=Decimal("Infinity"))
+
+    assert service.queue_maxsize == 0
+    assert service.queue.maxsize == 0
+
+    config_module.get_settings.cache_clear()
+
+
+def test_settings_accept_decimal_infinite_queue_size(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("INGEST_QUEUE_SIZE", raising=False)
+    from app.core.config import Settings
+
+    settings = Settings(ingest_queue_size=Decimal("Infinity"))
+
+    assert settings.ingest_queue_size == 0
 
 
 def test_service_rejects_queue_mismatch(monkeypatch: pytest.MonkeyPatch) -> None:
