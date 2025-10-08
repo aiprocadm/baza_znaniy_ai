@@ -93,32 +93,49 @@ def warmup(request: Request) -> JSONResponse:
     llm_provider = getattr(state, "llm_provider", None)
     vector_store = getattr(state, "vector_store", None)
 
+    warmup_started = time.perf_counter()
     details: dict[str, Any] = {}
     problems: list[str] = []
 
     if llm_provider is None:
-        details["llm"] = {"status": "skipped", "detail": "LLM provider not configured"}
+        details["llm"] = {
+            "status": "skipped",
+            "detail": "LLM provider not configured",
+            "elapsed_ms": 0.0,
+        }
     else:
         actions: dict[str, dict[str, Any]] = {}
         component_status = "ok"
+        elapsed_ms = 0.0
 
         for action_name in ("ensure_model", "ensure_ready", "ensure_adapter"):
             operation = getattr(llm_provider, action_name, None)
             if not callable(operation):
-                actions[action_name] = {"status": "skipped", "detail": "not available"}
+                actions[action_name] = {
+                    "status": "skipped",
+                    "detail": "not available",
+                    "duration_ms": 0.0,
+                }
                 continue
+
+            action_started = time.perf_counter()
             try:
                 operation()
             except Exception as exc:  # pragma: no cover - defensive logging
                 logger.exception("LLM warmup failed during %s", action_name)
+                duration_ms = _elapsed_ms(action_started)
                 actions[action_name] = {
                     "status": "error",
                     "detail": str(exc),
+                    "duration_ms": duration_ms,
                 }
                 component_status = "error"
                 problems.append(f"llm.{action_name}: {exc}")
             else:
-                actions[action_name] = {"status": "ok"}
+                duration_ms = _elapsed_ms(action_started)
+                actions[action_name] = {"status": "ok", "duration_ms": duration_ms}
+
+            elapsed_ms += duration_ms
 
         if actions and all(result["status"] == "skipped" for result in actions.values()):
             component_status = "skipped"
@@ -127,38 +144,52 @@ def warmup(request: Request) -> JSONResponse:
             "status": component_status,
             "provider": getattr(llm_provider, "name", "unknown"),
             "actions": actions,
+            "elapsed_ms": round(elapsed_ms, 3),
         }
 
     if vector_store is None:
         details["vector_store"] = {
             "status": "skipped",
             "detail": "Vector store not configured",
+            "elapsed_ms": 0.0,
         }
     else:
         store_actions: dict[str, dict[str, Any]] = {}
         store_status = "ok"
+        elapsed_ms = 0.0
         ensure_ready = getattr(vector_store, "ensure_ready", None)
         if not callable(ensure_ready):
-            store_actions["ensure_ready"] = {"status": "skipped", "detail": "not available"}
+            store_actions["ensure_ready"] = {
+                "status": "skipped",
+                "detail": "not available",
+                "duration_ms": 0.0,
+            }
             store_status = "skipped"
         else:
+            action_started = time.perf_counter()
             try:
                 ensure_ready()
             except Exception as exc:  # pragma: no cover - vector backend specific
                 logger.exception("Vector store warmup failed")
+                duration_ms = _elapsed_ms(action_started)
                 store_actions["ensure_ready"] = {
                     "status": "error",
                     "detail": str(exc),
+                    "duration_ms": duration_ms,
                 }
                 store_status = "error"
                 problems.append(f"vector_store.ensure_ready: {exc}")
             else:
-                store_actions["ensure_ready"] = {"status": "ok"}
+                duration_ms = _elapsed_ms(action_started)
+                store_actions["ensure_ready"] = {"status": "ok", "duration_ms": duration_ms}
+
+            elapsed_ms += duration_ms
 
         details["vector_store"] = {
             "status": store_status,
             "backend": type(vector_store).__name__,
             "actions": store_actions,
+            "elapsed_ms": round(elapsed_ms, 3),
         }
 
     overall_status = "error" if any(
@@ -170,6 +201,7 @@ def warmup(request: Request) -> JSONResponse:
         "status": overall_status,
         "ts": int(time.time()),
         "details": details,
+        "elapsed_ms": _elapsed_ms(warmup_started),
     }
     if problems:
         payload["message"] = "; ".join(problems)
@@ -177,6 +209,14 @@ def warmup(request: Request) -> JSONResponse:
         payload["message"] = "Warmup completed"
 
     return JSONResponse(payload, status_code=status_code)
+
+
+def _elapsed_ms(start: float, end: float | None = None) -> float:
+    """Return the elapsed time in milliseconds rounded to microsecond precision."""
+
+    if end is None:
+        end = time.perf_counter()
+    return round((end - start) * 1000.0, 3)
 
 
 def _resolve_app_state(request: Request | None):
