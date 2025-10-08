@@ -30,6 +30,7 @@ def _compat_request(self, method: str, url: str, *args: Any, **kwargs: Any):  # 
                 store = _init_memory_store(settings)
                 if store is not None:
                     state.memory_store = store
+            _resolve_upload_limits(state)
     response = _original_request(self, method, url, *args, **kwargs)
     if method.upper() == "HEAD" and not response.content:
         clone = _original_request(self, "GET", url, *args, **kwargs)
@@ -66,6 +67,11 @@ from app.chat.store import ChatStoreProtocol, ConversationAccessError
 from app.chat.summarizer import ConversationSummarizer
 from app.core.app import create_app
 from app.core.config import Settings, get_settings
+from app.core.deps import (
+    DEFAULT_ALLOWED_EXTENSIONS,
+    UploadLimits,
+    get_upload_limits,
+)
 from app.core.services import init_chat_store
 from app.ingest import parse_and_chunk
 from app.llm import get_cached_provider
@@ -116,6 +122,25 @@ def _normalise_extension(filename: str) -> str:
     if "." not in name:
         return ""
     return name.rsplit(".", 1)[-1].lower()
+
+
+def _resolve_upload_limits(state: Any | None = None) -> UploadLimits:
+    """Return cached upload configuration, defaulting when unavailable."""
+
+    if state is not None:
+        cached = getattr(state, "upload_limits", None)
+        if isinstance(cached, UploadLimits):
+            return cached
+
+    try:
+        limits = get_upload_limits()
+    except Exception:  # pragma: no cover - defensive fallback
+        limits = UploadLimits()
+
+    if state is not None:
+        setattr(state, "upload_limits", limits)
+
+    return limits
 
 
 def _load_index_html() -> str:
@@ -320,18 +345,31 @@ async def upload_document(
     settings = get_settings()
     ensure_collection()
 
+    state = getattr(app, "state", None)
+    limits = _resolve_upload_limits(state)
+    allowed_extensions = set(getattr(limits, "allowed_extensions", ())) or set(
+        DEFAULT_ALLOWED_EXTENSIONS
+    )
+    max_bytes = int(getattr(limits, "max_size", getattr(limits, "max_bytes", 0)) or 0)
+
     stored: list[str] = []
     total_chunks = 0
 
     for file in files:
         filename = (getattr(file, "filename", "uploaded") or "uploaded").strip() or "uploaded"
         ext = _normalise_extension(filename)
-        if ext not in {"pdf", "docx", "txt"}:
+        if ext not in allowed_extensions:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "UPLOAD_INVALID_EXT")
 
         data = await file.read()
         if not data:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "NO_TEXT_FOUND")
+
+        if max_bytes and len(data) > max_bytes:
+            raise HTTPException(
+                status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                "UPLOAD_TOO_LARGE",
+            )
 
         chunks = parse_and_chunk(filename, data)
         if not chunks:
