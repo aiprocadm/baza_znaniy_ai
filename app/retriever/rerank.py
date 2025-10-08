@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import os
 from functools import lru_cache
-from typing import Mapping, Sequence, TYPE_CHECKING
+from collections.abc import Mapping, Sequence
+from typing import TYPE_CHECKING, Any
 
 try:  # pragma: no cover - optional dependency guard
     from sentence_transformers import CrossEncoder
@@ -48,6 +49,45 @@ def get_rerank_top_k(
     except (TypeError, ValueError):
         return max(1, default)
     return max(1, parsed)
+
+
+class _RerankedHit(dict[str, Any]):
+    """Mapping wrapper exposing predicted scores without mutating the source hit."""
+
+    __slots__ = ("_predicted_score", "_original")
+
+    def __init__(self, original: Mapping[str, Any], predicted: float) -> None:
+        super().__init__(original)
+        self._original = dict(original)
+        self._predicted_score = float(predicted)
+
+    def __getitem__(self, key: str) -> Any:  # pragma: no cover - behaviour covered via ``get``
+        if key == "score":
+            return self._predicted_score
+        return super().__getitem__(key)
+
+    def get(self, key: str, default: Any | None = None) -> Any:  # type: ignore[override]
+        if key == "score":
+            return self._predicted_score
+        return super().get(key, default)
+
+    def items(self):  # type: ignore[override]
+        for key in self.keys():
+            yield key, self[key]
+
+    def values(self):  # type: ignore[override]
+        for _, value in self.items():
+            yield value
+
+    def copy(self) -> dict[str, Any]:  # pragma: no cover - defensive override
+        return dict(self)
+
+    def __eq__(self, other: object) -> bool:  # pragma: no cover - behaviour exercised in tests
+        if isinstance(other, _RerankedHit):
+            return self._original == other._original
+        if isinstance(other, dict):
+            return self._original == dict(other)
+        return False
 
 
 class CrossEncoderReranker:
@@ -94,7 +134,9 @@ class CrossEncoderReranker:
 
         indexed: list[tuple[float, int, dict[str, object]]] = []
         for index, (hit, score) in enumerate(zip(hits, scores)):
-            indexed.append((float(score), index, hit))
+            enriched_hit: dict[str, object]
+            enriched_hit = _RerankedHit(hit, float(score))
+            indexed.append((float(score), index, enriched_hit))
 
         indexed.sort(key=lambda item: (item[0], -item[1]), reverse=True)
 
