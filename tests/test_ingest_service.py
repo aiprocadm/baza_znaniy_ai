@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 from sqlmodel import Session, select
 
-from app.ingest.service import IngestService, IngestWorker
+from app.ingest.service import IngestJob, IngestService, IngestWorker
 from app.models import file as file_models
 from app.core.datetime_utils import utc_now
 from app.models.entities import JobStatus, TenantRecord
