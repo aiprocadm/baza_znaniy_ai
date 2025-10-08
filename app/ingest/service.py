@@ -144,11 +144,33 @@ class IngestService:
         auto_process: bool = False,
     ) -> None:
         settings = get_settings()
-        retries = settings.ingest_max_retries if max_retries is None else max_retries
-        backoff = (
-            settings.ingest_backoff_seconds if backoff_seconds is None else backoff_seconds
-        )
+
+        if max_retries is None:
+            env_retries = os.getenv("INGEST_MAX_RETRIES")
+            try:
+                retries = int(env_retries) if env_retries is not None else settings.ingest_max_retries
+            except (TypeError, ValueError):
+                retries = settings.ingest_max_retries
+        else:
+            retries = max_retries
+
+        if backoff_seconds is None:
+            env_backoff = os.getenv("INGEST_BACKOFF_SECONDS") or os.getenv("INGEST_BACKOFF_BASE")
+            try:
+                backoff = float(env_backoff) if env_backoff is not None else settings.ingest_backoff_seconds
+            except (TypeError, ValueError):
+                backoff = settings.ingest_backoff_seconds
+        else:
+            backoff = backoff_seconds
+
         default_queue_size = int(settings.ingest_queue_size)
+        env_queue = os.getenv("INGEST_QUEUE_SIZE") or os.getenv("INGEST_MAX_QUEUE")
+        if env_queue is not None:
+            default_queue_size = self._coerce_queue_size(
+                env_queue,
+                default=default_queue_size,
+                source="environment",
+            )
         queue_size_source = "settings"
         queue_size_raw: object
         if queue_maxsize is not None:
