@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import inspect
+import io
 import logging
 import sqlite3
 import sys
