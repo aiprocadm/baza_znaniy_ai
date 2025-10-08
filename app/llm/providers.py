@@ -37,14 +37,34 @@ def _get_settings() -> SettingsType:
     return cast(SettingsType, settings)
 
 
+def _normalise_provider_name(value: object) -> str:
+    """Return a normalised provider identifier for the given *value*."""
+
+    if value is None:
+        return "llama-cpp"
+    if isinstance(value, str):
+        candidate = value.strip().lower()
+        return candidate or "llama-cpp"
+    # Fallback for objects without string interface – mirrors ``str`` casting but
+    # guards against surprising ``AttributeError`` when ``__str__`` is missing.
+    try:
+        candidate = str(value).strip().lower()
+    except Exception:
+        return "llama-cpp"
+    return candidate or "llama-cpp"
+
+
 def get_llm_provider(settings: Optional[SettingsType] = None) -> LLMProvider:
     """Factory returning an LLM provider according to *settings*."""
 
     resolved_settings = settings or _get_settings()
-    provider_name = (resolved_settings.llm_provider or "llama-cpp").lower()
+    raw_provider = getattr(resolved_settings, "llm_provider", None)
+    provider_name = _normalise_provider_name(raw_provider)
+
     if provider_name in {"llama", "llama-cpp", "llama_cpp", "llamacpp"}:
         return LlamaCppProvider(resolved_settings)
-    raise ValueError(f"Unsupported LLM provider: {resolved_settings.llm_provider!r}")
+
+    raise ValueError(f"Unsupported LLM provider: {raw_provider!r}")
 
 
 __all__ = [
