@@ -102,37 +102,68 @@ class IngestService:
         backoff = (
             settings.ingest_backoff_seconds if backoff_seconds is None else backoff_seconds
         )
-        queue_size_raw: int | float | None
-        if queue_maxsize is not None:
-            queue_size_raw = queue_maxsize
-        elif queue is not None:
-            queue_size_raw = getattr(queue, "maxsize", None)
-        else:
-            queue_size_raw = settings.ingest_queue_size
 
-        try:
-            queue_size = int(queue_size_raw) if queue_size_raw is not None else 0
-        except (TypeError, ValueError):
+        def _resolve_queue_size(
+            raw_value: object, default_value: int
+        ) -> tuple[int, str | None]:
+            if raw_value is None:
+                return max(0, int(default_value)), None
+            if isinstance(raw_value, str):
+                lowered = raw_value.strip().lower()
+                if lowered in {"", "none", "null"}:
+                    return max(0, int(default_value)), "default"
+                if lowered in {"unbounded", "infinite", "inf"}:
+                    return 0, "unbounded"
+            try:
+                candidate = int(raw_value)
+            except (TypeError, ValueError):
+                return max(0, int(default_value)), "invalid"
+            if candidate < 0:
+                return 0, "negative"
+            return candidate, None
+
+        queue_size_source: object
+        if queue_maxsize is not None:
+            queue_size_source = queue_maxsize
+        elif queue is not None:
+            queue_size_source = getattr(queue, "maxsize", None)
+        else:
+            queue_size_source = settings.ingest_queue_size
+
+        queue_size, reason = _resolve_queue_size(queue_size_source, settings.ingest_queue_size)
+        if reason == "invalid":
             logger.warning(
                 "Invalid ingest queue size %r; falling back to settings value %s",
-                queue_size_raw,
+                queue_size_source,
                 settings.ingest_queue_size,
             )
-            queue_size = int(settings.ingest_queue_size)
-
-        if queue_size < 0:
+        elif reason == "negative":
             logger.info(
-                "Configured ingest queue size %s is negative; treating as unlimited",
-                queue_size,
+                "Configured ingest queue size %r is negative; treating as unlimited",
+                queue_size_source,
             )
-            queue_size = 0
 
         self.queue_maxsize = queue_size
         self.queue: asyncio.Queue[Optional[IngestJob]]
         if queue is not None:
+            queue_capacity = getattr(queue, "maxsize", None)
+            try:
+                queue_capacity_int = int(queue_capacity) if queue_capacity is not None else queue_size
+            except (TypeError, ValueError):
+                queue_capacity_int = queue_size
+            if queue_capacity_int < 0:
+                queue_capacity_int = 0
+            if queue_capacity_int != queue_size:
+                logger.warning(
+                    "Provided ingest queue has maxsize %s; overriding configured size %s",
+                    queue_capacity_int,
+                    queue_size,
+                )
+                self.queue_maxsize = queue_capacity_int
             self.queue = queue
         else:
             self.queue = asyncio.Queue(maxsize=queue_size)
+
         self.max_retries = max(0, int(retries))
         self.backoff_seconds = max(0.0, float(backoff))
         self._engine = engine

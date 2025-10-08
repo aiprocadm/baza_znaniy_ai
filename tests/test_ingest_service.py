@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 from sqlmodel import Session, select
 
-from app.ingest.service import IngestService, IngestWorker
+from app.ingest.service import IngestJob, IngestService, IngestWorker
 from app.models import file as file_models
 from app.core.datetime_utils import utc_now
 from app.models.entities import JobStatus, TenantRecord
@@ -230,6 +230,37 @@ def test_service_uses_settings_for_retry(monkeypatch: pytest.MonkeyPatch) -> Non
     assert service.backoff_seconds == 2.5
     assert service.queue_maxsize == 0
     assert service.queue.maxsize == 0
+
+    config_module.get_settings.cache_clear()
+
+
+def test_service_allows_unbounded_queue_override(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("INGEST_QUEUE_SIZE", "3")
+    from app.core import config as config_module
+
+    config_module.get_settings.cache_clear()
+
+    service = IngestService(queue_maxsize="unbounded")
+
+    assert service.queue_maxsize == 0
+    assert service.queue.maxsize == 0
+
+    config_module.get_settings.cache_clear()
+
+
+def test_service_prefers_existing_queue_capacity_on_conflict(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("INGEST_QUEUE_SIZE", "7")
+    from app.core import config as config_module
+
+    config_module.get_settings.cache_clear()
+
+    external_queue: asyncio.Queue[IngestJob | None] = asyncio.Queue(maxsize=2)
+    service = IngestService(queue=external_queue, queue_maxsize="invalid")
+
+    assert service.queue is external_queue
+    assert service.queue_maxsize == 2
 
     config_module.get_settings.cache_clear()
 
