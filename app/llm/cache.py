@@ -35,6 +35,7 @@ __all__ = [
     "get_llm_client",
     "get_llm_provider",
     "reset_provider_cache",
+    "set_provider_factory_override",
 ]
 
 _cached_provider: Optional[LLMProvider] = None
@@ -127,6 +128,8 @@ def _resolve_factory() -> Callable[[SettingsType], LLMProvider]:
         return _external_factory
 
     package = sys.modules.get("app.llm")
+    if package is None:
+        package = import_module("app.llm")
     candidate = getattr(package, "get_llm_provider", None) if package else None
     if _is_external_factory(candidate):
         _sync_external_factory(candidate)
@@ -159,7 +162,7 @@ def _call_factory(settings: SettingsType) -> LLMProvider:
 def get_llm_provider(settings: SettingsType) -> LLMProvider:
     """Expose the default provider factory used by the cache module."""
 
-    return _providers_get_llm_provider(settings)
+    return _resolve_factory()(settings)
 
 
 setattr(get_llm_provider, _DEFAULT_MARKER, True)
@@ -169,12 +172,14 @@ def get_cached_provider(settings: SettingsType | None = None) -> LLMProvider:
     """Return a cached provider instance, creating one on demand."""
 
     global _cached_provider
+
     if settings is not None:
         _cached_provider = _ensure_provider_interface(
             _call_factory(settings),
             settings,
         )
         return _cached_provider
+
     if _cached_provider is None:
         cached_settings = _get_settings()
         _cached_provider = _ensure_provider_interface(

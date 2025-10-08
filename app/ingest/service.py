@@ -15,6 +15,10 @@ from typing import Any, Optional, Tuple, TYPE_CHECKING
 
 from sqlmodel import Session, delete, select
 
+from app._module_reset import ensure_core_modules
+
+ensure_core_modules()
+
 from app.core.config import get_settings
 from app.core.datetime_utils import utc_now
 from app.ingest.chunking import _chunk, _get_tokenizer, iter_document_pages

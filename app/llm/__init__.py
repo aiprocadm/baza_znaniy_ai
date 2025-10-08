@@ -18,6 +18,7 @@ from .cache import (
     get_llm_client,
     get_llm_provider,
     reset_provider_cache,
+    set_provider_factory_override,
 )
 
 __all__ = [
@@ -26,6 +27,7 @@ __all__ = [
     "get_llm_provider",
     "get_cached_provider",
     "reset_provider_cache",
+    "set_provider_factory_override",
     "LLMProviderError",
     "ModelNotFoundError",
     "ModelNotReadyError",
