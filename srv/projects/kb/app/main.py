@@ -48,7 +48,16 @@ _FastAPITestClient._request = _compat_request  # type: ignore[attr-defined]
 _llama_module = sys.modules.get("llama_cpp")
 if _llama_module is None:
     _llama_spec = util.find_spec("llama_cpp")
-    llama_module = import_module("llama_cpp") if _llama_spec is not None else None
+    if _llama_spec is not None:
+        try:
+            llama_module = import_module("llama_cpp")
+        except ImportError as exc:  # pragma: no cover - optional dependency
+            logging.getLogger(__name__).warning(
+                "llama_cpp import failed; skipping fallback completion setup: %s", exc
+            )
+            llama_module = None
+    else:
+        llama_module = None
 else:
     llama_module = _llama_module
 
