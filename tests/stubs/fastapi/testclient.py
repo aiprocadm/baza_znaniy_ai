@@ -4,12 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import inspect
-import json
-from tempfile import SpooledTemporaryFile
 from typing import TYPE_CHECKING, Any, Iterable
 
-from . import BackgroundTasks, HTTPException, UploadFile, _build_call_arguments, _serialise
-from .responses import HTMLResponse, JSONResponse, Response, StreamingResponse
+from . import HTTPException, UploadFile, _build_call_arguments, _serialise
+from .uploads import coerce_uploads, ensure_list
+from .responses import HTMLResponse, JSONResponse, Response
 
 if TYPE_CHECKING:  # pragma: no cover - typing aid only
     from . import FastAPI
@@ -83,22 +82,60 @@ class TestClient:
         files: Any | None = None,
         **options: Any,
     ) -> _SimpleResponse:
+        return self._request_with_body("POST", path, json=json, data=data, files=files, **options)
+
+    def put(
+        self,
+        path: str,
+        json: Any | None = None,
+        data: dict[str, Any] | None = None,
+        files: Any | None = None,
+        **options: Any,
+    ) -> _SimpleResponse:
+        return self._request_with_body("PUT", path, json=json, data=data, files=files, **options)
+
+    def patch(
+        self,
+        path: str,
+        json: Any | None = None,
+        data: dict[str, Any] | None = None,
+        files: Any | None = None,
+        **options: Any,
+    ) -> _SimpleResponse:
+        return self._request_with_body("PATCH", path, json=json, data=data, files=files, **options)
+
+    def delete(self, path: str, **options: Any) -> _SimpleResponse:
+        return self._request("DELETE", path, **options)
+
+    def options(self, path: str, **options: Any) -> _SimpleResponse:
+        return self._request("OPTIONS", path, **options)
+
+    def head(self, path: str, **options: Any) -> _SimpleResponse:
+        return self._request("HEAD", path, **options)
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+    def _request_with_body(
+        self,
+        method: str,
+        path: str,
+        *,
+        json: Any | None = None,
+        data: dict[str, Any] | None = None,
+        files: Any | None = None,
+        **options: Any,
+    ) -> _SimpleResponse:
         if data is not None or files is not None:
             payload: dict[str, Any] = dict(data or {})
             if files:
                 for key, value in self._iter_files(files):
                     uploads = self._coerce_files(value)
                     self._merge_uploads(payload, key, uploads)
-            return self._request("POST", path, body=payload, **options)
+            return self._request(method, path, body=payload, **options)
 
-        return self._request("POST", path, body=json, **options)
+        return self._request(method, path, body=json, **options)
 
-    def delete(self, path: str, **options: Any) -> _SimpleResponse:
-        return self._request("DELETE", path, **options)
-
-    # ------------------------------------------------------------------
-    # Internal helpers
-    # ------------------------------------------------------------------
     def _request(
         self,
         method: str,
@@ -174,15 +211,14 @@ class TestClient:
         return list(items)
 
     def _coerce_files(self, value: Any) -> list[UploadFile]:
-        entries = _normalise_file_entries(value)
-        return [_build_upload_file(entry) for entry in entries]
+        return coerce_uploads(value)
 
     def _merge_uploads(self, target: dict[str, Any], key: str, uploads: list[UploadFile]) -> None:
         existing = target.get(key)
         if existing is None:
             target[key] = list(uploads)
         else:
-            combined = _ensure_list(existing)
+            combined = ensure_list(existing)
             combined.extend(uploads)
             target[key] = combined
 
@@ -225,56 +261,6 @@ class TestClient:
                 loop.run_until_complete(loop.shutdown_asyncgens())
                 asyncio.set_event_loop(None)
                 loop.close()
-
-
-def _normalise_file_entries(value: Any) -> list[Any]:
-    if isinstance(value, list):
-        return value
-    if isinstance(value, tuple) and value and isinstance(value[0], (list, tuple, UploadFile)):
-        return list(value)
-    return [value]
-
-
-def _ensure_list(value: Any) -> list[Any]:
-    return value if isinstance(value, list) else [value]
-
-
-def _build_upload_file(entry: Any) -> UploadFile:
-    if isinstance(entry, UploadFile):
-        return entry
-
-    if isinstance(entry, (list, tuple)):
-        filename = entry[0] if entry else "uploaded"
-        content = entry[1] if len(entry) > 1 else b""
-        content_type = entry[2] if len(entry) > 2 else None
-    else:
-        filename = str(entry)
-        content = b""
-        content_type = None
-
-    if hasattr(content, "read"):
-        file_obj = content
-        if hasattr(file_obj, "seek"):
-            try:
-                file_obj.seek(0)
-            except Exception:  # pragma: no cover - defensive
-                pass
-    else:
-        if isinstance(content, (bytes, bytearray, memoryview)):
-            data = bytes(content)
-        elif content is None:
-            data = b""
-        else:
-            data = str(content).encode()
-        file_obj = SpooledTemporaryFile(mode="w+b")
-        if data:
-            file_obj.write(data)
-        file_obj.seek(0)
-
-    kwargs: dict[str, Any] = {"filename": filename, "file": file_obj}
-    if content_type is not None:
-        kwargs["content_type"] = content_type
-    return UploadFile(**kwargs)
 
 
 __all__ = ["TestClient"]

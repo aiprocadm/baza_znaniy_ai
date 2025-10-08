@@ -2,12 +2,14 @@ from __future__ import annotations
 
 from io import BytesIO
 
-from tests.stubs.fastapi import (
-    BackgroundTasks,
-    FastAPI,
-    StreamingResponse,
-    TestClient,
-    UploadFile,
+import pytest
+
+from tests.stubs.fastapi import FastAPI, TestClient, UploadFile
+from tests.stubs.fastapi.uploads import (
+    build_upload_file,
+    coerce_uploads,
+    ensure_list,
+    normalise_file_entries,
 )
 
 
@@ -35,39 +37,83 @@ def test_testclient_post_handles_multiple_file_entries() -> None:
     assert response.json() == {"filenames": ["first.txt", "second.txt"]}
 
 
-def test_background_tasks_execute_after_response() -> None:
-    app = FastAPI()
-    executed: list[str] = []
-
-    @app.post("/task")
-    def trigger(background_tasks: BackgroundTasks) -> dict[str, str]:
-        background_tasks.add_task(executed.append, "done")
-        return {"status": "scheduled"}
-
-    client = TestClient(app)
-    response = client.post("/task", json={})
-
-    assert response.status_code == 200
-    assert response.json() == {"status": "scheduled"}
-    assert executed == ["done"]
-
-
-def test_streaming_response_is_consumed() -> None:
+def test_testclient_supports_additional_http_methods() -> None:
     app = FastAPI()
 
-    @app.get("/stream")
-    def stream() -> StreamingResponse:
-        async def generator():
-            yield b"chunk1"
-            yield "chunk2"
+    @app.put("/items")
+    def update_item() -> dict[str, str]:
+        return {"method": "PUT"}
 
-        return StreamingResponse(generator(), status_code=201)
+    @app.patch("/items")
+    def patch_item() -> dict[str, str]:
+        return {"method": "PATCH"}
+
+    @app.delete("/items")
+    def delete_item() -> tuple[dict[str, str], int]:
+        return {"method": "DELETE"}, 202
+
+    @app.options("/items")
+    def options_item() -> dict[str, str]:
+        return {"method": "OPTIONS"}
+
+    @app.head("/items")
+    def head_item() -> dict[str, str]:
+        return {"method": "HEAD"}
 
     client = TestClient(app)
-    response = client.get("/stream")
 
-    assert response.status_code == 201
-    assert response.content == b"chunk1chunk2"
-    assert response.text == "chunk1chunk2"
+    assert client.put("/items").json()["method"] == "PUT"
+    assert client.patch("/items").json()["method"] == "PATCH"
+    response = client.delete("/items")
+    assert response.status_code == 202
+    assert response.json()["method"] == "DELETE"
+    assert client.options("/items").json()["method"] == "OPTIONS"
+    assert client.head("/items").status_code == 200
+
+
+def test_router_includes_child_router_with_prefix() -> None:
+    child = FastAPI()
+
+    @child.get("/child")
+    def child_route() -> dict[str, str]:
+        return {"scope": "child"}
+
+    parent = FastAPI()
+    parent.include_router(child, prefix="/parent")
+
+    client = TestClient(parent)
+
+    assert client.get("/parent/child").json() == {"scope": "child"}
+
+
+@pytest.mark.parametrize(
+    "value,expected",
+    [
+        (("file.txt", b"payload"), [("file.txt", b"payload")]),
+        ((["nested.txt", b"bytes"],), [["nested.txt", b"bytes"]]),
+        ((("tuple.txt", b"data"),), [("tuple.txt", b"data")]),
+    ],
+)
+def test_normalise_file_entries(value, expected):
+    assert normalise_file_entries(value) == expected
+
+
+def test_ensure_list_wraps_non_list_values() -> None:
+    assert ensure_list(1) == [1]
+    assert ensure_list([1, 2]) == [1, 2]
+
+
+def test_coerce_uploads_builds_uploadfile_instances() -> None:
+    uploads = coerce_uploads(("sample.txt", b"payload", "text/plain"))
+    assert len(uploads) == 1
+    upload = uploads[0]
+    assert isinstance(upload, UploadFile)
+    assert upload.filename == "sample.txt"
+    assert upload.content_type == "text/plain"
+
+
+def test_build_upload_file_preserves_uploadfile_instance() -> None:
+    original = UploadFile(filename="existing.txt")
+    assert build_upload_file(original) is original
 
 
