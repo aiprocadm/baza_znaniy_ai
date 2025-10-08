@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from contextlib import asynccontextmanager
 from datetime import timezone
+from importlib import import_module
 from typing import Sequence
 
 from fastapi import FastAPI
@@ -16,13 +17,18 @@ try:  # pragma: no cover - optional dependency resolution
 except ModuleNotFoundError:  # pragma: no cover - optional dependency fallback
     AsyncIOScheduler = None  # type: ignore[assignment]
     STATE_RUNNING = None  # type: ignore[assignment]
-from app.api.router import api_router
 from app.chat.summarizer import ConversationSummarizer
 from app.core.auth import TokenRegistry
 from app.core.config import get_settings
 from app.core.services import init_chat_store, init_memory_store
 from app.ingest import IngestService, IngestWorker, parse_and_chunk  # noqa: F401
-from app.llm import LLMProvider, get_cached_provider
+try:  # pragma: no cover - allow stubbed LLM modules in tests
+    from app.llm import LLMProvider, get_cached_provider, reset_provider_cache
+except ImportError:  # pragma: no cover - fallback when cache reset is unavailable
+    from app.llm import LLMProvider, get_cached_provider  # type: ignore[assignment]
+
+    def reset_provider_cache() -> None:  # type: ignore[redefining-outer-name]
+        return None
 from app.llm.manager import LlamaLoraManager
 from app.observability.metadata_guard import (
     check_sqlmodel_metadata,
@@ -119,10 +125,12 @@ def create_app(provider: LLMProvider | None = None) -> FastAPI:
             service = getattr(app.state, "ingest_service", None)
             scheduler = getattr(app.state, "scheduler", None)
             if service is not None:
-                try:  # pragma: no cover - shutdown coordination
-                    await service.stop_background_worker()
-                except Exception:  # pragma: no cover - defensive shutdown logging
-                    logger.exception("Failed to stop ingestion worker")
+                stop_worker = getattr(service, "stop_background_worker", None)
+                if callable(stop_worker):
+                    try:  # pragma: no cover - shutdown coordination
+                        await stop_worker()
+                    except Exception:  # pragma: no cover - defensive shutdown logging
+                        logger.exception("Failed to stop ingestion worker")
             if scheduler is not None and _scheduler_is_running(scheduler):
                 try:  # pragma: no cover - scheduler shutdown
                     await scheduler.shutdown(wait=True)
@@ -160,6 +168,7 @@ def create_app(provider: LLMProvider | None = None) -> FastAPI:
 
     chat_store = init_chat_store(settings)
     memory_store = init_memory_store(settings)
+    reset_provider_cache()
     llm_provider = provider or get_cached_provider(settings)
     vector_store = get_vector_store(settings)
     lora_manager = _create_lora_manager(settings)
@@ -199,6 +208,7 @@ def create_app(provider: LLMProvider | None = None) -> FastAPI:
     application.state.lora_manager = lora_manager
     application.state.vector_store = vector_store
     application.state.memory_store = memory_store
+    application.state.memory_store_factory = init_memory_store
     application.state.file_store = file_store
     application.state.ingest_queue = ingest_queue
     application.state.ingest_service = ingest_service
@@ -220,7 +230,9 @@ def create_app(provider: LLMProvider | None = None) -> FastAPI:
     application.state.token_registry = TokenRegistry()
 
     application.include_router(ui_router)
-    application.include_router(api_router)
+
+    api_router_module = import_module("app.api.router")
+    application.include_router(getattr(api_router_module, "api_router"))
 
     # Prime the metadata guard once during application construction so metrics are
     # populated even before the first scheduler tick.
