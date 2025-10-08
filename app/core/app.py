@@ -166,7 +166,9 @@ def create_app(provider: LLMProvider | None = None) -> FastAPI:
         auto_process=True,
     )
     ingest_worker = IngestWorker(ingest_service)
-    ingest_service.set_worker(ingest_worker)
+    set_worker = getattr(ingest_service, "set_worker", None)
+    if callable(set_worker):
+        set_worker(ingest_worker)
     configure_scheduler = getattr(ingest_service, "configure_scheduler", None)
     if callable(configure_scheduler) and scheduler is not None:
         configure_scheduler(scheduler)
