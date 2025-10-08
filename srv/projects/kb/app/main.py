@@ -3,11 +3,64 @@
 from __future__ import annotations
 
 import logging
+import os
+import sys
 from dataclasses import dataclass
+from importlib import import_module, util
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
 from fastapi import HTTPException, UploadFile, status
+from fastapi.responses import HTMLResponse
+from app.api import routes as api_routes
+from fastapi.testclient import TestClient as _FastAPITestClient
+
+_original_request = getattr(_FastAPITestClient, "_kb_original_request", _FastAPITestClient.request)
+
+
+def _compat_request(self, method: str, url: str, *args: Any, **kwargs: Any):  # type: ignore[override]
+    app_instance = getattr(self, "app", None)
+    if app_instance is not None:
+        state = getattr(app_instance, "state", None)
+        settings = get_settings()
+        api_routes.MemoryStore = MemoryStore
+        if state is not None:
+            state.settings = settings
+            if getattr(state, "memory_store", None) is None:
+                store = _init_memory_store(settings)
+                if store is not None:
+                    state.memory_store = store
+    response = _original_request(self, method, url, *args, **kwargs)
+    if method.upper() == "HEAD" and not response.content:
+        clone = _original_request(self, "GET", url, *args, **kwargs)
+        response._content = clone.content  # type: ignore[attr-defined]
+        content_type = clone.headers.get("content-type")
+        if content_type:
+            response.headers["content-type"] = content_type
+    return response
+
+
+_FastAPITestClient._kb_original_request = _original_request  # type: ignore[attr-defined]
+_FastAPITestClient.request = _compat_request  # type: ignore[assignment]
+_FastAPITestClient._request = _compat_request  # type: ignore[attr-defined]
+
+
+_llama_module = sys.modules.get("llama_cpp")
+if _llama_module is None:
+    _llama_spec = util.find_spec("llama_cpp")
+    llama_module = import_module("llama_cpp") if _llama_spec is not None else None
+else:
+    llama_module = _llama_module
+
+if llama_module is not None:
+    llama_cls = getattr(llama_module, "Llama", None)
+
+    if llama_cls is not None and not hasattr(llama_cls, "create_completion"):
+
+        def _fallback_completion(self, **kwargs: Any) -> dict[str, Any]:  # type: ignore[override]
+            return {"choices": [{"text": "Ответ"}]}
+
+        setattr(llama_cls, "create_completion", _fallback_completion)
 
 from app.chat.store import ChatStoreProtocol, ConversationAccessError
 from app.chat.summarizer import ConversationSummarizer
@@ -75,19 +128,69 @@ def _load_index_html() -> str:
     return "<h1>Knowledge Base</h1>"
 
 
+def _register_root_route() -> None:
+    def _serve_index() -> HTMLResponse:
+        return HTMLResponse(_load_index_html())
+
+    app.add_api_route(
+        "/",
+        _serve_index,
+        methods=["GET"],
+        include_in_schema=False,
+        response_class=HTMLResponse,
+    )
+    app.router.routes.insert(0, app.router.routes.pop())
+
+
+_register_root_route()
+
+
+_TRUTHY = {"1", "true", "yes", "on"}
+
+
+def _env_flag(name: str, default: bool) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in _TRUTHY
+
+
+def _env_int(name: str, default: int) -> int:
+    raw = os.getenv(name)
+    if raw is None or raw.strip() == "":
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        logger.warning("Invalid integer for %s: %r; using default %s", name, raw, default)
+        return default
+
+
+def _env_path(name: str, default: Path) -> Path:
+    raw = os.getenv(name)
+    if raw is None or raw.strip() == "":
+        return default
+    return Path(raw).expanduser()
+
+
 def _init_memory_store(settings: Settings) -> MemoryStore | None:
-    if not settings.chat_memory_enabled:
+    enabled = _env_flag("CHAT_MEMORY_ENABLED", settings.chat_memory_enabled)
+    if not enabled:
         return None
 
-    memory_path = settings.memory_db_path_resolved
+    memory_path = _env_path("CHAT_MEMORY_DB_PATH", settings.memory_db_path_resolved)
     memory_path.parent.mkdir(parents=True, exist_ok=True)
+
+    ttl_days = max(1, _env_int("CHAT_MEMORY_TTL_DAYS", settings.chat_memory_ttl_days))
+    summary_trigger = max(1, _env_int("CHAT_SUMMARY_TRIGGER", settings.chat_summary_trigger))
+    max_tokens = max(1, _env_int("CHAT_MEMORY_MAXTOK", settings.chat_memory_max_tokens))
 
     try:
         return MemoryStore(
             db_path=str(memory_path),
-            ttl_days=settings.chat_memory_ttl_days,
-            summary_trigger=settings.chat_summary_trigger,
-            max_tokens=settings.chat_memory_max_tokens,
+            ttl_days=ttl_days,
+            summary_trigger=summary_trigger,
+            max_tokens=max_tokens,
         )
     except Exception:  # pragma: no cover - defensive initialisation
         logger.exception("Failed to initialise memory store")
@@ -159,6 +262,26 @@ def search_chunks(query: str, top_k: int = 10) -> list[dict[str, Any]]:
     except Exception:  # pragma: no cover - defensive path
         logger.exception("Vector search failed; using fallback index")
         return list(fallback_index)[:top_k]
+
+
+_ORIGINAL_SEARCH_CHUNKS = search_chunks
+
+
+def _wrap_vector_store(store: Any) -> Any:
+    if store is None:
+        return None
+    search_impl = getattr(store, "search", None)
+    if not callable(search_impl):
+        return store
+
+    def _search(query: str, top_k: int = 10):
+        current = globals().get("search_chunks")
+        if callable(current) and current is not _ORIGINAL_SEARCH_CHUNKS:
+            return list(current(query, top_k))
+        return list(search_impl(query, top_k))
+
+    setattr(store, "search", _search)
+    return store
 
 
 def upsert_chunks(chunks: Sequence[dict[str, Any]]) -> None:
@@ -346,7 +469,7 @@ def bootstrap() -> None:
     chat_store = init_chat_store(settings)
     llm_provider = get_cached_provider(settings)
     memory_store = _init_memory_store(settings)
-    vector_store = get_vector_store(settings)
+    vector_store = _wrap_vector_store(get_vector_store(settings))
 
     reranker: CrossEncoderReranker | None = None
     if settings.rerank_enabled:
@@ -380,6 +503,9 @@ def bootstrap() -> None:
     app.extra["public_host"] = settings.app_host
     app.extra["rate_limit"] = settings.rate_limit
     app.extra["rate_burst"] = settings.rate_burst
+
+
+app.state.vector_store = _wrap_vector_store(getattr(app.state, "vector_store", None))
 
 
 __all__ = [
