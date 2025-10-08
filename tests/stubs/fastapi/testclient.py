@@ -20,11 +20,32 @@ class _SimpleResponse:
         self._content = content
 
     def json(self) -> Any:
+        if isinstance(self._content, (bytes, bytearray, memoryview)):
+            data = bytes(self._content)
+            try:
+                return json.loads(data.decode())
+            except Exception:
+                return data.decode(errors="ignore")
+        if isinstance(self._content, str):
+            try:
+                return json.loads(self._content)
+            except Exception:
+                return self._content
+        return self._content
+
+    @property
+    def content(self) -> Any:
         return self._content
 
     @property
     def text(self) -> str:
-        return str(self._content)
+        content = self._content
+        if isinstance(content, (bytes, bytearray, memoryview)):
+            try:
+                return bytes(content).decode()
+            except Exception:
+                return repr(bytes(content))
+        return str(content)
 
 
 class TestClient:
@@ -129,7 +150,7 @@ class TestClient:
         if route is None or params is None:
             raise AssertionError(f"No route registered for {method} {path}")
 
-        kwargs = _build_call_arguments(route.handler, body, params, self.app)
+        kwargs, background = _build_call_arguments(route.handler, body, params, self.app)
         if data:
             for key, value in data.items():
                 kwargs.setdefault(key, value)
@@ -141,23 +162,48 @@ class TestClient:
         try:
             result = route.handler(**kwargs)
             if inspect.isawaitable(result):
-                result = asyncio.run(result)
+                result = self._run_async(result)
         except HTTPException as exc:
             return _SimpleResponse(exc.status_code, {"detail": exc.detail})
 
+        def _collect_backgrounds(*extra: BackgroundTasks | None) -> list[BackgroundTasks]:
+            collected: list[BackgroundTasks] = []
+            if isinstance(background, BackgroundTasks):
+                collected.append(background)
+            for candidate in extra:
+                if isinstance(candidate, BackgroundTasks) and candidate not in collected:
+                    collected.append(candidate)
+            return collected
+
+        if isinstance(result, StreamingResponse):
+            content = self._consume_streaming_response(result)
+            return self._finalise_response(
+                content,
+                result.status_code,
+                _collect_backgrounds(getattr(result, "background", None)),
+            )
+
         if isinstance(result, (JSONResponse, HTMLResponse, Response)):
-            return _SimpleResponse(result.status_code, result.json())
+            return self._finalise_response(
+                result.json(),
+                result.status_code,
+                _collect_backgrounds(getattr(result, "background", None)),
+            )
         if isinstance(result, tuple):
             content, status_code = result if len(result) == 2 else (result[0], route.status_code)
-            return _SimpleResponse(status_code, _serialise(content))
+            return self._finalise_response(
+                _serialise(content),
+                status_code,
+                _collect_backgrounds(),
+            )
 
         content = _serialise(result)
-        return _SimpleResponse(route.status_code, content)
+        return self._finalise_response(content, route.status_code, _collect_backgrounds())
 
     def _run_handler(self, handler: Any) -> None:
         result = handler()
         if inspect.isawaitable(result):
-            asyncio.run(result)
+            self._run_async(result)
 
     def _iter_files(self, items: Any) -> Iterable[tuple[str, Any]]:
         if isinstance(items, dict):
@@ -175,6 +221,46 @@ class TestClient:
             combined = ensure_list(existing)
             combined.extend(uploads)
             target[key] = combined
+
+    def _finalise_response(
+        self,
+        content: Any,
+        status_code: int,
+        backgrounds: Iterable[BackgroundTasks],
+    ) -> _SimpleResponse:
+        self._run_background_tasks(backgrounds)
+        return _SimpleResponse(status_code, content)
+
+    def _run_background_tasks(self, backgrounds: Iterable[BackgroundTasks]) -> None:
+        seen: set[int] = set()
+        for background in backgrounds:
+            identifier = id(background)
+            if identifier in seen or not background.has_tasks():
+                continue
+            seen.add(identifier)
+            for func, args, kwargs in background.drain():
+                self._execute_callable(func, *args, **kwargs)
+
+    def _consume_streaming_response(self, response: StreamingResponse) -> bytes:
+        return self._run_async(response.read())
+
+    def _execute_callable(self, func: Any, *args: Any, **kwargs: Any) -> None:
+        outcome = func(*args, **kwargs)
+        if inspect.isawaitable(outcome):
+            self._run_async(outcome)
+
+    def _run_async(self, coroutine: Any) -> Any:
+        try:
+            return asyncio.run(coroutine)
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            try:
+                asyncio.set_event_loop(loop)
+                return loop.run_until_complete(coroutine)
+            finally:
+                loop.run_until_complete(loop.shutdown_asyncgens())
+                asyncio.set_event_loop(None)
+                loop.close()
 
 
 __all__ = ["TestClient"]
