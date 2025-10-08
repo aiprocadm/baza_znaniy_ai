@@ -16,7 +16,18 @@ from urllib.parse import unquote, urlparse
 from sqlalchemy import Column, JSON, MetaData, Text, UniqueConstraint, text
 from sqlalchemy.engine import Engine, make_url
 from sqlalchemy.ext.asyncio import create_async_engine
-from sqlalchemy.util import FacadeDict
+
+try:  # pragma: no cover - optional dependency during lightweight test runs
+    from sqlalchemy.util import FacadeDict as _SQLAlchemyFacadeDict
+except Exception:  # pragma: no cover - exercised when SQLAlchemy is stubbed out
+    class _SQLAlchemyFacadeDict(dict):
+        """Fallback mapping used when ``sqlalchemy.util.FacadeDict`` is unavailable."""
+
+        pass
+
+    FacadeDict = _SQLAlchemyFacadeDict  # type: ignore[assignment]
+else:
+    FacadeDict = _SQLAlchemyFacadeDict
 try:  # pragma: no cover - optional dependency during lightweight test runs
     from sqlalchemy.orm import sessionmaker
 except Exception:  # pragma: no cover - fallback when SQLAlchemy ORM is absent

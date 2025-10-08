@@ -638,11 +638,28 @@ async def upload(
     parser = _resolve_callable(state, "parse_and_chunk", parse_and_chunk)
     upsert_override = _resolve_callable(state, "upsert_chunks", None)
 
-    upload_items = []
+    upload_items: list[UploadFile] = []
+
+    def _add_upload(candidate: Any) -> None:
+        if isinstance(candidate, UploadFile):
+            upload_items.append(candidate)
+            return
+        if isinstance(candidate, (list, tuple, set)):
+            for item in candidate:
+                _add_upload(item)
+            return
+        if isinstance(candidate, dict):
+            maybe_file = candidate.get("file") or candidate.get("upload")
+            if isinstance(maybe_file, (list, tuple)):
+                for item in maybe_file:
+                    _add_upload(item)
+            elif isinstance(maybe_file, UploadFile):
+                upload_items.append(maybe_file)
+
     if file is not None:
-        upload_items.append(file)
+        _add_upload(file)
     if files:
-        upload_items.extend(files)
+        _add_upload(files)
     if not upload_items:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "UPLOAD_INVALID_FILE")
 
