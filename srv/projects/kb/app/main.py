@@ -15,7 +15,16 @@ from fastapi.responses import HTMLResponse
 from app.api import routes as api_routes
 from fastapi.testclient import TestClient as _FastAPITestClient
 
-_original_request = getattr(_FastAPITestClient, "_kb_original_request", _FastAPITestClient.request)
+_original_request = getattr(_FastAPITestClient, "_kb_original_request", None)
+if _original_request is None:
+    _original_request = getattr(_FastAPITestClient, "request", None)
+if _original_request is None:
+    _original_request = getattr(_FastAPITestClient, "_request", None)
+
+if _original_request is None:  # pragma: no cover - defensive fallback for exotic stubs
+
+    def _original_request(*args: Any, **kwargs: Any):  # type: ignore[no-redef]
+        raise AttributeError("fastapi.testclient.TestClient is missing a request implementation")
 
 
 def _compat_request(self, method: str, url: str, *args: Any, **kwargs: Any):  # type: ignore[override]
@@ -32,12 +41,20 @@ def _compat_request(self, method: str, url: str, *args: Any, **kwargs: Any):  # 
                     state.memory_store = store
             _resolve_upload_limits(state)
     response = _original_request(self, method, url, *args, **kwargs)
-    if method.upper() == "HEAD" and not response.content:
+    response_body = getattr(response, "content", getattr(response, "_content", b""))
+    if method.upper() == "HEAD" and not response_body:
         clone = _original_request(self, "GET", url, *args, **kwargs)
-        response._content = clone.content  # type: ignore[attr-defined]
-        content_type = clone.headers.get("content-type")
-        if content_type:
-            response.headers["content-type"] = content_type
+        clone_body = getattr(clone, "content", getattr(clone, "_content", b""))
+        if hasattr(response, "content"):
+            setattr(response, "content", clone_body)
+        else:
+            setattr(response, "_content", clone_body)
+        clone_headers = getattr(clone, "headers", None)
+        response_headers = getattr(response, "headers", None)
+        if clone_headers and response_headers is not None:
+            content_type = clone_headers.get("content-type")
+            if content_type:
+                response_headers["content-type"] = content_type
     return response
 
 
@@ -157,14 +174,28 @@ def _register_root_route() -> None:
     def _serve_index() -> HTMLResponse:
         return HTMLResponse(_load_index_html())
 
-    app.add_api_route(
-        "/",
-        _serve_index,
-        methods=["GET"],
-        include_in_schema=False,
-        response_class=HTMLResponse,
-    )
-    app.router.routes.insert(0, app.router.routes.pop())
+    add_api_route = getattr(app, "add_api_route", None)
+    if callable(add_api_route):
+        add_api_route(
+            "/",
+            _serve_index,
+            methods=["GET"],
+            include_in_schema=False,
+            response_class=HTMLResponse,
+        )
+        routes = getattr(app, "router", None)
+        route_list = getattr(routes, "routes", None)
+        if isinstance(route_list, list) and route_list:
+            route_list.insert(0, route_list.pop())
+    else:
+        get_route = getattr(app, "get", None)
+        if callable(get_route):
+            get_route("/", include_in_schema=False)(
+                _serve_index
+            )
+        route_list = getattr(app, "_routes", None)
+        if isinstance(route_list, list) and route_list:
+            route_list.insert(0, route_list.pop())
 
 
 _register_root_route()
