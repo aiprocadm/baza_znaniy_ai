@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import json
 from typing import TYPE_CHECKING, Any, Iterable
 
-from . import HTTPException, UploadFile, _build_call_arguments, _serialise
+from . import BackgroundTasks, HTTPException, UploadFile, _build_call_arguments, _serialise
 from .uploads import coerce_uploads, ensure_list
-from .responses import HTMLResponse, JSONResponse, Response
+from .responses import HTMLResponse, JSONResponse, Response, StreamingResponse
 
 if TYPE_CHECKING:  # pragma: no cover - typing aid only
     from . import FastAPI
