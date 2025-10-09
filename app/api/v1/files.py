@@ -5,9 +5,10 @@ from sqlmodel import Session, select
 
 from app.core.auth import ensure_tenant_access, get_current_active_user
 from app.core.deps import get_ingest_session
+from app.models import FileInfo, FilesResponse, FileSummaryResponse
 from app.models.user import UserRecord
-from app.models import FileInfo, FilesResponse
 from app.models.file import DocumentRecord, FileRecord
+from app.services.file_stats import compute_file_stats
 
 router = APIRouter(tags=["files"])
 
@@ -44,3 +45,23 @@ def list_files(
         for file_obj, document in records
     ]
     return FilesResponse(files=items)
+
+
+@router.get("/files/summary", response_model=FileSummaryResponse)
+def file_summary(
+    _: UserRecord = Depends(get_current_active_user),
+    session: Session = Depends(get_ingest_session),
+    tenant: str = Depends(ensure_tenant_access),
+) -> FileSummaryResponse:
+    """Return aggregated statistics about files uploaded by the tenant."""
+
+    stats = compute_file_stats(session, tenant)
+    return FileSummaryResponse(
+        total_files=stats.total_files,
+        total_size_bytes=stats.total_size_bytes,
+        total_chunks=stats.total_chunks,
+        status_counts=stats.status_counts,
+        oldest_upload=stats.oldest_upload,
+        newest_upload=stats.newest_upload,
+        average_size_bytes=stats.average_size_bytes,
+    )

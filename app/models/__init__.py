@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, List, Optional
+from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
@@ -137,6 +137,18 @@ class FilesResponse(BaseModel):
     files: List[FileInfo]
 
 
+class FileSummaryResponse(BaseModel):
+    """Aggregated statistics returned by the files summary endpoint."""
+
+    total_files: int = Field(..., ge=0)
+    total_size_bytes: int = Field(..., ge=0)
+    total_chunks: int = Field(..., ge=0)
+    status_counts: Dict[str, int] = Field(default_factory=dict)
+    oldest_upload: Optional[datetime] = None
+    newest_upload: Optional[datetime] = None
+    average_size_bytes: Optional[float] = Field(default=None, ge=0)
+
+
 class JobInfo(BaseModel):
     """Representation of an asynchronous job entry."""
 
@@ -189,6 +201,7 @@ __all__ = [
     "DocumentCreate",
     "FileInfo",
     "FilesResponse",
+    "FileSummaryResponse",
     "JobInfo",
     "JobsResponse",
     "IngestRequest",

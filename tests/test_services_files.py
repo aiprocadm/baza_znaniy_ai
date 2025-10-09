@@ -1,8 +1,15 @@
 import uuid
+from datetime import timedelta
 from pathlib import Path
 
 import pytest
+from sqlmodel import Session
 
+from app.core.datetime_utils import utc_now
+from app.models import file as file_models
+from app.models.entities import TenantRecord
+from app.models.file import FileRecord as DbFileRecord, FileStatus
+from app.services.file_stats import compute_file_stats
 from app.services.files import FileRecord, FileStore, IngestQueue, IngestStatus
 
 
@@ -101,3 +108,73 @@ def test_ingest_queue_behaviour() -> None:
     assert queue.dequeue() is None
     assert len(queue) == 0
     assert queue.items() == ()
+
+
+def test_compute_file_stats_handles_mixed_statuses(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    db_path = tmp_path / "ingest.db"
+    monkeypatch.setenv("DB_URL", f"sqlite:///{db_path}")
+    file_models.get_engine.cache_clear()
+
+    try:
+        engine = file_models.get_engine()
+        with Session(engine) as session:
+            session.add(TenantRecord(tenant_id="tenant", slug="tenant"))
+            session.commit()
+
+            base_time = utc_now() - timedelta(hours=3)
+            expected_oldest = base_time
+            expected_newest = base_time + timedelta(hours=2)
+            records = [
+                DbFileRecord(
+                    tenant_id="tenant",
+                    sha256="hash-1",
+                    path="/tmp/one.txt",
+                    filename="one.txt",
+                    size=120,
+                    status=FileStatus.COMPLETED,
+                    chunks=4,
+                    created_at=base_time,
+                    updated_at=base_time,
+                ),
+                DbFileRecord(
+                    tenant_id="tenant",
+                    sha256="hash-2",
+                    path="/tmp/two.txt",
+                    filename="two.txt",
+                    size=80,
+                    status=FileStatus.PROCESSING,
+                    chunks=None,
+                    created_at=base_time + timedelta(hours=1),
+                    updated_at=base_time + timedelta(hours=1),
+                ),
+                DbFileRecord(
+                    tenant_id="tenant",
+                    sha256="hash-3",
+                    path="/tmp/three.txt",
+                    filename="three.txt",
+                    size=200,
+                    status=FileStatus.COMPLETED,
+                    chunks=1,
+                    created_at=base_time + timedelta(hours=2),
+                    updated_at=base_time + timedelta(hours=2),
+                ),
+            ]
+            session.add_all(records)
+            session.commit()
+
+            stats = compute_file_stats(session, "tenant")
+
+        assert stats.total_files == 3
+        assert stats.total_size_bytes == 400
+        assert stats.total_chunks == 5
+        assert stats.status_counts[FileStatus.COMPLETED] == 2
+        assert stats.status_counts[FileStatus.PROCESSING] == 1
+        assert stats.status_counts[FileStatus.QUEUED] == 0
+        assert stats.status_counts[FileStatus.FAILED] == 0
+        assert stats.average_size_bytes == pytest.approx(400 / 3)
+        assert stats.oldest_upload == expected_oldest
+        assert stats.newest_upload == expected_newest
+    finally:
+        file_models.get_engine.cache_clear()
