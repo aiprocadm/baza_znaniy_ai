@@ -5,7 +5,11 @@ from pathlib import Path
 import pytest
 
 from app.core.config import Settings
-from app.llm.exceptions import LoRAAdapterNotFoundError, ModelNotFoundError
+from app.llm.exceptions import (
+    LoRAAdapterNotFoundError,
+    ModelNotFoundError,
+    ModelNotReadyError,
+)
 from app.llm.llama_cpp_provider import LlamaCppProvider
 
 
@@ -49,7 +53,7 @@ def test_ensure_model_requires_existing_file(tmp_path: Path) -> None:
 
 def test_generate_uses_context_overrides(tmp_path: Path) -> None:
     model_path = tmp_path / "model.gguf"
-    model_path.write_bytes(b"gguf")
+    model_path.write_bytes(b"GGUF")
     settings = Settings(
         llm_provider="llama-cpp",
         llm_model_path=str(model_path),
@@ -73,7 +77,7 @@ def test_generate_uses_context_overrides(tmp_path: Path) -> None:
 
 def test_lora_adapter_management(tmp_path: Path) -> None:
     model_path = tmp_path / "model.gguf"
-    model_path.write_bytes(b"gguf")
+    model_path.write_bytes(b"GGUF")
     adapter_path = tmp_path / "adapter.safetensors"
     adapter_path.write_bytes(b"lora")
     settings = Settings(
@@ -100,7 +104,7 @@ def test_lora_adapter_management(tmp_path: Path) -> None:
 
 def test_ensure_model_auto_loads_configured_lora(tmp_path: Path) -> None:
     model_path = tmp_path / "model.gguf"
-    model_path.write_bytes(b"gguf")
+    model_path.write_bytes(b"GGUF")
     adapter_path = tmp_path / "auto.safetensors"
     adapter_path.write_bytes(b"lora")
     settings = Settings(
@@ -117,4 +121,20 @@ def test_ensure_model_auto_loads_configured_lora(tmp_path: Path) -> None:
     assert provider.active_adapter == adapter_path
     assert llama.current_adapter == adapter_path.stem
     assert llama.loaded_adapters[adapter_path.stem]["scale"] == pytest.approx(0.75)
+
+
+def test_ensure_model_rejects_invalid_gguf_header(tmp_path: Path) -> None:
+    model_path = tmp_path / "model.gguf"
+    model_path.write_text("placeholder")
+    settings = Settings(
+        llm_provider="llama-cpp",
+        llm_model_path=str(model_path),
+    )
+
+    provider = LlamaCppProvider(settings=settings, llama_cls=FakeLlama)
+
+    with pytest.raises(ModelNotReadyError) as exc:
+        provider.ensure_model()
+
+    assert "GGUF" in str(exc.value)
 

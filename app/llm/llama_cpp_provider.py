@@ -90,6 +90,8 @@ class LlamaCppProvider:
                 else:
                     raise ModelNotFoundError(model_path)
 
+        self._validate_model_file(model_path)
+
         init_kwargs = dict(
             model_path=str(model_path),
             n_ctx=int(self.settings.llm_ctx),
@@ -112,6 +114,24 @@ class LlamaCppProvider:
                 raise
             except Exception as exc:  # pragma: no cover - llama.cpp specific
                 raise ModelNotReadyError("Failed to load LoRA adapter") from exc
+
+    # ------------------------------------------------------------------
+    def _validate_model_file(self, model_path: Path) -> None:
+        """Ensure *model_path* is a GGUF file before llama.cpp loads it."""
+
+        try:
+            with model_path.open("rb") as handle:
+                magic = handle.read(4)
+        except OSError as exc:  # pragma: no cover - unlikely on readable file
+            raise ModelNotReadyError(
+                f"Failed to read LLM model file at {model_path!s}"
+            ) from exc
+
+        if len(magic) < 4 or magic != b"GGUF":
+            raise ModelNotReadyError(
+                "Configured LLM model file is not a valid GGUF archive. "
+                "Please download a compatible model (see scripts/download_model.py)."
+            )
 
     # ------------------------------------------------------------------
     def _assert_ready(self) -> Llama:
