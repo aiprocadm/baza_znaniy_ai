@@ -217,6 +217,42 @@ def test_hash_is_based_on_contents(sqlite_db: str, tmp_path: Path) -> None:
     asyncio.run(scenario())
 
 
+def test_cross_process_worker_flow(sqlite_db: str, sample_file: Path) -> None:
+    async def scenario() -> None:
+        api_service = IngestService(
+            max_retries=1, backoff_seconds=0, auto_process=False, use_local_queue=False
+        )
+        record, queued = await api_service.register_file(
+            "tenant",
+            str(sample_file),
+            filename=sample_file.name,
+            size=sample_file.stat().st_size,
+            mime_type="text/plain",
+        )
+        assert queued is True
+
+        worker_service = IngestService(
+            max_retries=1, backoff_seconds=0, auto_process=False, use_local_queue=False
+        )
+        worker = IngestWorker(worker_service, embed_batch_size=2)
+
+        job = worker_service.dequeue_next_job()
+        assert job is not None
+        assert job.job_record_id is not None
+
+        await worker._process(job)
+
+        with Session(worker_service.engine) as session:
+            file_obj = session.exec(
+                select(FileRecord).where(FileRecord.id == record.id)
+            ).one()
+            assert file_obj.status == file_models.FileStatus.COMPLETED
+            jobs = session.exec(select(JobRecord).order_by(JobRecord.created_at)).all()
+            assert jobs[-1].status == JobStatus.COMPLETED
+
+    asyncio.run(scenario())
+
+
 def test_service_uses_settings_for_retry(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("INGEST_MAX_RETRIES", "5")
     monkeypatch.setenv("INGEST_BACKOFF_SECONDS", "2.5")
