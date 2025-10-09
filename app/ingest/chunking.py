@@ -403,7 +403,8 @@ def _chunk(
     except Exception:
         window = 1
 
-    if window <= 1:
+    window = max(window, 1)
+    if window == 1:
         return list(text)
 
     try:
@@ -411,12 +412,8 @@ def _chunk(
     except Exception:
         overlap_value = 0
 
-    if overlap_value < 0:
-        overlap_value = 0
-    if overlap_value >= window:
-        overlap_value = window - 1
-
-    step = window - overlap_value or 1
+    overlap_value = max(0, min(overlap_value, window - 1))
+    step = max(window - overlap_value, 1)
 
     if encoder is None:
         encoder = _get_tokenizer()

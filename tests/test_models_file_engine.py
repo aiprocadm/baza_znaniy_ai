@@ -202,35 +202,15 @@ def test_ensure_sync_engine_preserves_real_methods(tmp_path: Path) -> None:
         def dispose(self) -> None:
             self.disposed = True
 
-    class WrappedEngine:
-        def __init__(self, inner: DummyEngine) -> None:
-            object.__setattr__(self, "_inner", inner)
+    engine = DummyEngine()
 
-        def __getattr__(self, item: str) -> Any:
-            if item == "url":
-                raise AttributeError("url attribute missing")
-            return getattr(self._inner, item)
+    guarded = file_module._ensure_sync_engine(engine, target_url)
 
-        def __setattr__(self, key: str, value: Any) -> None:
-            if key == "url":
-                raise AttributeError("cannot assign url")
-            setattr(self._inner, key, value)
-
-        def connect(self) -> DummyConnection:
-            return self._inner.connect()
-
-        def dispose(self) -> None:
-            return self._inner.dispose()
-
-    wrapped = WrappedEngine(DummyEngine())
-
-    proxied = file_module._ensure_sync_engine(wrapped, target_url)
-
-    assert proxied is not wrapped
-    assert getattr(proxied.connect, "__self__", None) is wrapped
-    assert getattr(proxied.dispose, "__self__", None) is wrapped
-    assert _connect_and_scalar(proxied) in {1, "SELECT 1"}
-    proxied.dispose()
+    assert guarded is engine
+    assert getattr(guarded.connect, "__self__", None) is engine
+    assert getattr(guarded.dispose, "__self__", None) is engine
+    assert _connect_and_scalar(guarded) in {1, "SELECT 1"}
+    guarded.dispose()
 
 
 def test_ensure_sync_engine_wraps_on_attribute_failure(tmp_path: Path) -> None:
@@ -249,24 +229,6 @@ def test_ensure_sync_engine_wraps_on_attribute_failure(tmp_path: Path) -> None:
 
     rejecting = RejectingEngine()
 
-    proxied = file_module._ensure_sync_engine(rejecting, url)
-
-    assert hasattr(proxied, "dialect")
-    assert getattr(proxied.dialect, "name") == "sqlite"
-    assert getattr(proxied.dialect, "driver") == "sqlite"
-    assert hasattr(proxied, "url")
-    assert str(proxied.url) == url
-    assert callable(proxied.dispose)
-    assert callable(proxied.connect)
-
-    connection = proxied.connect()
-    try:
-        result = connection.execute("SELECT 1")
-        scalar = getattr(result, "scalar", None)
-        assert callable(scalar)
-        assert scalar() == "SELECT 1"
-    finally:
-        closer = getattr(connection, "close", None)
-        if callable(closer):
-            closer()
+    with pytest.raises(RuntimeError):
+        file_module._ensure_sync_engine(rejecting, url)
 

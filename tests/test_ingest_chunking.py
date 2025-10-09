@@ -116,11 +116,26 @@ def test_chunk_normalises_overlap_and_avoids_empty_chunks() -> None:
 
     assert chunks[-1].endswith("hij")
     assert all(chunk for chunk in chunks)
+    assert chunks.count(text[-4:]) == 1
 
 
 def test_chunk_returns_empty_list_for_empty_string() -> None:
     assert _chunk("", chunk=5, overlap=2) == []
 
+
+def test_chunk_returns_single_window_when_text_shorter_than_chunk() -> None:
+    text = "short"
+    assert _chunk(text, chunk=20, overlap=5) == [text]
+
+
+def test_chunk_handles_unicode_text() -> None:
+    text = "🍰 café naïve 𝛼βγ"
+    pieces = _chunk(text, chunk=3, overlap=1)
+
+    assert pieces
+    assert pieces[0] == text[:3]
+    assert pieces[-1] == text[-3:]
+    assert all(piece for piece in pieces)
 
 
 def test_chunk_progress_with_high_overlap() -> None:
