@@ -14,6 +14,7 @@ from sqlmodel import Session
 from app.core.config import get_settings
 from app.llm.manager import LlamaLoraManager
 from app.ingest.service import IngestService
+from app.services.files import FileStore, IngestQueue
 
 
 DEFAULT_ALLOWED_EXTENSIONS = frozenset({"pdf", "docx", "pptx", "xlsx", "txt", "md"})
@@ -123,6 +124,34 @@ def get_ingest_session(request: Request = None) -> Iterator[Session]:
         yield session
 
 
+def get_file_store(request: Request = None) -> FileStore:
+    """Access the in-memory :class:`~app.services.files.FileStore`."""
+
+    if request is None:
+        raise RuntimeError("Request context is required for file store access")
+    app = getattr(request, "app", None)
+    if app is None:
+        raise RuntimeError("File store is not available outside application context")
+    store = getattr(getattr(app, "state", None), "file_store", None)
+    if store is None:
+        raise RuntimeError("File store has not been initialised")
+    return store
+
+
+def get_ingest_queue(request: Request = None) -> IngestQueue:
+    """Access the shared :class:`~app.services.files.IngestQueue` instance."""
+
+    if request is None:
+        raise RuntimeError("Request context is required for ingest queue access")
+    app = getattr(request, "app", None)
+    if app is None:
+        raise RuntimeError("Ingest queue is not available outside application context")
+    queue = getattr(getattr(app, "state", None), "ingest_queue", None)
+    if queue is None:
+        raise RuntimeError("Ingest queue has not been initialised")
+    return queue
+
+
 def get_lora_manager(request: Request = None) -> LlamaLoraManager:
     """Access the shared LoRA manager instance."""
 
@@ -160,6 +189,8 @@ __all__ = [
     "get_data_dir",
     "get_ingest_service",
     "get_ingest_session",
+    "get_file_store",
+    "get_ingest_queue",
     "get_lora_manager",
     "get_tenant",
     "get_upload_limits",

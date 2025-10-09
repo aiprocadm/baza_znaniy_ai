@@ -10,6 +10,7 @@ import os
 import shutil
 import sys
 import types
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -17,6 +18,8 @@ import pytest
 from fastapi import APIRouter
 from fastapi.testclient import TestClient
 
+from app.core.datetime_utils import utc_now
+from app.services.files import FileRecord as UploadFileRecord, IngestStatus
 from tests.demo_assets import ensure_demo_assets
 
 from tests.service_stubs import install_service_stubs
@@ -202,6 +205,67 @@ def test_chat_returns_citations(service_app: Any):
         assert data["citations"]
         assert len(data["citations"]) == 2
         assert data["citations_insufficient"] is True
+
+
+def test_ingest_metrics_endpoint_reports_queue_state(
+    service_app: Any, tmp_path: Path
+) -> None:
+    app = service_app.app
+    file_store = app.state.file_store
+    ingest_queue = app.state.ingest_queue
+
+    payload_path = tmp_path / "payload.txt"
+    payload_path.write_text("payload")
+
+    now = utc_now()
+    tenant = "default"
+
+    pending = UploadFileRecord(
+        id="p-1",
+        filename="pending.txt",
+        tenant=tenant,
+        path=payload_path,
+        size=payload_path.stat().st_size,
+        uploaded_at=now - timedelta(minutes=5),
+        status=IngestStatus.PENDING,
+    )
+    failed = UploadFileRecord(
+        id="f-1",
+        filename="failed.txt",
+        tenant=tenant,
+        path=payload_path,
+        size=payload_path.stat().st_size,
+        uploaded_at=now - timedelta(minutes=1),
+        status=IngestStatus.FAILED,
+    )
+    failed.error = "conversion failed"
+
+    for record in (pending, failed):
+        file_store.add(record)
+        ingest_queue.enqueue(record.id)
+
+    with TestClient(app) as client:
+        response = client.get(
+            "/api/v1/ingest/metrics",
+            headers={"x-tenant": tenant},
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+
+    assert payload["total_files"] == 2
+    assert payload["queue_depth"] == 2
+    assert payload["status_counts"]["pending"] == 1
+    assert payload["status_counts"]["failed"] == 1
+    assert payload["status_counts"]["processing"] == 0
+    assert payload["recent_failures"]
+    assert payload["recent_failures"][0]["file_id"] == failed.id
+    assert payload["recent_failures"][0]["error"] == "conversion failed"
+    failure_uploaded = payload["recent_failures"][0]["uploaded_at"].replace("Z", "+00:00")
+    last_activity = payload["last_activity_at"].replace("Z", "+00:00")
+    assert datetime.fromisoformat(failure_uploaded).tzinfo is not None
+    assert datetime.fromisoformat(last_activity).tzinfo is not None
+    assert payload["oldest_pending_age_seconds"] > 0
 
 
 def test_upload_returns_expected_response(
