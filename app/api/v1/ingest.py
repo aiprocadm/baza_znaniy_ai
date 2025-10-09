@@ -7,11 +7,23 @@ from sqlmodel import Session
 
 from app.core.datetime_utils import utc_now
 from app.core.auth import ensure_tenant_access, get_current_active_user
-from app.core.deps import get_ingest_service, get_ingest_session
+from app.core.deps import (
+    get_file_store,
+    get_ingest_queue,
+    get_ingest_service,
+    get_ingest_session,
+)
 from app.models.user import UserRecord
 from app.ingest.service import IngestQueueFullError, IngestService
-from app.models import IngestRequest, IngestResponse
+from app.models import (
+    IngestFailureInfo,
+    IngestQueueMetricsResponse,
+    IngestRequest,
+    IngestResponse,
+)
 from app.models.file import DocumentRecord, DocumentStatus, FileRecord, FileStatus
+from app.services.files import FileStore, IngestQueue
+from app.services.ingest_monitoring import compute_ingest_queue_metrics
 
 router = APIRouter(tags=["ingest"])
 
@@ -78,4 +90,39 @@ async def ingest_file(
         status=record.status,
         chunks=record.chunks,
         error=record.error,
+    )
+
+
+@router.get("/ingest/metrics", response_model=IngestQueueMetricsResponse)
+def ingest_metrics(
+    _: UserRecord = Depends(get_current_active_user),
+    tenant: str = Depends(ensure_tenant_access),
+    file_store: FileStore = Depends(get_file_store),
+    ingest_queue: IngestQueue = Depends(get_ingest_queue),
+) -> IngestQueueMetricsResponse:
+    """Return real-time ingest metrics for the active tenant."""
+
+    metrics = compute_ingest_queue_metrics(
+        file_store,
+        ingest_queue,
+        tenant=tenant,
+    )
+
+    return IngestQueueMetricsResponse(
+        total_files=metrics.total_files,
+        queue_depth=metrics.queue_depth,
+        status_counts=metrics.status_counts,
+        oldest_pending_age_seconds=metrics.oldest_pending_age_seconds,
+        average_pending_age_seconds=metrics.average_pending_age_seconds,
+        recent_failures=[
+            IngestFailureInfo(
+                file_id=item.file_id,
+                filename=item.filename,
+                status=item.status,
+                error=item.error,
+                uploaded_at=item.uploaded_at,
+            )
+            for item in metrics.recent_failures
+        ],
+        last_activity_at=metrics.last_activity_at,
     )

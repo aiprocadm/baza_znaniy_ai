@@ -149,6 +149,28 @@ class FileSummaryResponse(BaseModel):
     average_size_bytes: Optional[float] = Field(default=None, ge=0)
 
 
+class IngestFailureInfo(BaseModel):
+    """Representation of a failed ingestion attempt surfaced via the API."""
+
+    file_id: str
+    filename: str
+    status: str
+    error: Optional[str] = None
+    uploaded_at: datetime
+
+
+class IngestQueueMetricsResponse(BaseModel):
+    """Real-time ingest queue metrics exposed for the Operations Console."""
+
+    total_files: int = Field(..., ge=0)
+    queue_depth: int = Field(..., ge=0)
+    status_counts: Dict[str, int] = Field(default_factory=dict)
+    oldest_pending_age_seconds: Optional[float] = Field(default=None, ge=0)
+    average_pending_age_seconds: Optional[float] = Field(default=None, ge=0)
+    recent_failures: List[IngestFailureInfo] = Field(default_factory=list)
+    last_activity_at: Optional[datetime] = None
+
+
 class JobInfo(BaseModel):
     """Representation of an asynchronous job entry."""
 
@@ -202,6 +224,8 @@ __all__ = [
     "FileInfo",
     "FilesResponse",
     "FileSummaryResponse",
+    "IngestFailureInfo",
+    "IngestQueueMetricsResponse",
     "JobInfo",
     "JobsResponse",
     "IngestRequest",
