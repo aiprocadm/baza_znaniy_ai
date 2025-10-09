@@ -497,6 +497,14 @@ class Settings(BaseSettings):
         default=64,
         validation_alias=AliasChoices("INGEST_QUEUE_SIZE", "INGEST_MAX_QUEUE"),
     )
+    ingest_use_local_queue: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("INGEST_USE_LOCAL_QUEUE"),
+    )
+    ingest_autostart_worker: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("INGEST_AUTOSTART_WORKER", "INGEST_AUTO_START_WORKER"),
+    )
     ingest_worker_interval_seconds: float = Field(
         default=1.0,
         validation_alias=AliasChoices(

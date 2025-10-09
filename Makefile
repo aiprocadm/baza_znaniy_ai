@@ -6,7 +6,7 @@ HOST ?= 0.0.0.0
 PORT ?= 8000
 IMAGE ?= kb-ai:local
 
-.PHONY: install lint format test run build clean
+.PHONY: install lint format test run worker build clean
 
 install:
 	$(PIP) install --upgrade pip
@@ -26,6 +26,9 @@ test:
 
 run:
 	uvicorn $(APP_MODULE) --factory --host $(HOST) --port $(PORT)
+
+worker:
+	python -m app.worker.main
 
 build:
 	docker build -t $(IMAGE) .

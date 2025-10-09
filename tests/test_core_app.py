@@ -343,10 +343,17 @@ def _stub_app_dependencies(core_app, monkeypatch):
     monkeypatch.setattr(core_app, "IngestQueue", lambda: ingest_queue)
 
     class DummyIngestService:
-        def __init__(self, max_retries, backoff_seconds, auto_process=False):
+        def __init__(
+            self,
+            max_retries,
+            backoff_seconds,
+            auto_process=False,
+            use_local_queue=True,
+        ):
             self.max_retries = max_retries
             self.backoff_seconds = backoff_seconds
             self.auto_process = auto_process
+            self.use_local_queue = use_local_queue
 
         def set_worker(self, worker):  # pragma: no cover - simple stub
             self.worker = worker

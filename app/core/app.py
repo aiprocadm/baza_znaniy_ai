@@ -110,15 +110,19 @@ def create_app(provider: LLMProvider | None = None) -> FastAPI:
         worker = getattr(app.state, "ingest_worker", None)
         service = getattr(app.state, "ingest_service", None)
         scheduler = getattr(app.state, "scheduler", None)
-        if worker is not None and service is not None and scheduler is not None:
+        worker_ready = worker is not None and service is not None and scheduler is not None
+        if worker_ready:
             try:  # pragma: no cover - startup coordination
                 service.ensure_background_worker()
                 worker.ensure_started()
-                if not _scheduler_is_running(scheduler):
-                    scheduler.start()
                 app.state.ingest_worker_task = None
             except Exception:  # pragma: no cover - defensive startup logging
                 logger.exception("Failed to start ingestion worker")
+        if scheduler is not None and not _scheduler_is_running(scheduler):
+            try:  # pragma: no cover - scheduler startup
+                scheduler.start()
+            except Exception:  # pragma: no cover - defensive scheduler logging
+                logger.exception("Failed to start ingest scheduler")
         try:
             yield
         finally:
@@ -186,18 +190,23 @@ def create_app(provider: LLMProvider | None = None) -> FastAPI:
         scheduler = AsyncIOScheduler(timezone=timezone.utc)
         schedule_sqlmodel_metadata_guard(scheduler)
 
+    ingest_autostart = bool(setting("ingest_autostart_worker", True))
+    ingest_use_local_queue = bool(setting("ingest_use_local_queue", True))
     ingest_service = IngestService(
         max_retries=setting("ingest_max_retries", 3),
         backoff_seconds=setting("ingest_backoff_seconds", 1.0),
-        auto_process=True,
+        auto_process=ingest_autostart,
+        use_local_queue=ingest_use_local_queue,
     )
-    ingest_worker = IngestWorker(ingest_service)
-    set_worker = getattr(ingest_service, "set_worker", None)
-    if callable(set_worker):
-        set_worker(ingest_worker)
-    configure_scheduler = getattr(ingest_service, "configure_scheduler", None)
-    if callable(configure_scheduler) and scheduler is not None:
-        configure_scheduler(scheduler)
+    ingest_worker = None
+    if ingest_autostart:
+        ingest_worker = IngestWorker(ingest_service)
+        set_worker = getattr(ingest_service, "set_worker", None)
+        if callable(set_worker):
+            set_worker(ingest_worker)
+        configure_scheduler = getattr(ingest_service, "configure_scheduler", None)
+        if callable(configure_scheduler) and scheduler is not None:
+            configure_scheduler(scheduler)
 
     min_citations, max_citations = setting("citations_bounds", (3, 5))
 

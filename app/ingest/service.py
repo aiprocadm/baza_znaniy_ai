@@ -14,6 +14,7 @@ from decimal import Decimal
 from typing import Any, Optional, Tuple, TYPE_CHECKING
 
 from sqlmodel import Session, delete, select
+from sqlalchemy import text
 
 from app._module_reset import ensure_core_modules
 
@@ -180,6 +181,7 @@ class IngestService:
         backoff_seconds: Optional[float] = None,
         engine=None,
         auto_process: bool = False,
+        use_local_queue: Optional[bool] = None,
     ) -> None:
         settings = get_settings()
 
@@ -268,6 +270,9 @@ class IngestService:
         self.backoff_seconds = max(0.0, float(backoff))
         self._engine = engine
         self.auto_process = auto_process
+        if use_local_queue is None:
+            use_local_queue = bool(getattr(settings, "ingest_use_local_queue", True))
+        self.use_local_queue = bool(use_local_queue)
         self.worker: "IngestWorker" | None = None
         self._scheduler: AsyncIOScheduler | None = None
         self._worker_job_id: str | None = None
@@ -472,10 +477,121 @@ class IngestService:
             if manage_session:
                 session_obj.close()
 
+
+    def dequeue_next_job(self, session: Session | None = None) -> IngestJob | None:
+        """Atomically reserve the next queued job from the database."""
+
+        manage_session = session is None
+        session_obj = session or Session(self.engine)
+        should_commit = False
+        try:
+            now = utc_now()
+            statement = text(
+                """
+                WITH next_job AS (
+                    SELECT id
+                    FROM jobs
+                    WHERE job_type = :job_type AND status = :queued
+                    ORDER BY priority DESC, created_at
+                    LIMIT 1
+                )
+                UPDATE jobs
+                SET status = :processing,
+                    started_at = COALESCE(started_at, :ts),
+                    updated_at = :ts
+                WHERE id IN (SELECT id FROM next_job)
+                RETURNING id
+                """
+            )
+            row = session_obj.exec(
+                statement,
+                params={
+                    "job_type": "ingest",
+                    "queued": JobStatus.QUEUED,
+                    "processing": JobStatus.PROCESSING,
+                    "ts": now,
+                },
+            ).first()
+            if row is None:
+                return None
+
+            job_id: Optional[int] = None
+            mapping = getattr(row, "_mapping", None)
+            if mapping is not None and "id" in mapping:
+                job_id = mapping["id"]
+            elif hasattr(row, "__getitem__"):
+                try:
+                    job_id = int(row[0])  # type: ignore[index]
+                except Exception:
+                    job_id = None
+            else:
+                job_id = getattr(row, "id", None)
+
+            if job_id is None:
+                return None
+
+            job_record = session_obj.get(JobRecord, job_id)
+            if job_record is None:
+                return None
+
+            payload = dict(job_record.payload or {})
+            file_id = payload.get("file_id")
+            if file_id is None:
+                return None
+
+            try:
+                file_id_int = int(file_id)
+            except (TypeError, ValueError):
+                return None
+
+            filename = str(payload.get("filename") or payload.get("file") or "")
+            path = str(payload.get("path") or "")
+            sha256 = str(payload.get("sha256") or "")
+            document_id = payload.get("document_id")
+            try:
+                document_id_int = int(document_id) if document_id is not None else None
+            except (TypeError, ValueError):
+                document_id_int = None
+
+            attempt_value = payload.get("attempt")
+            if attempt_value is None:
+                attempt_value = job_record.attempt
+            try:
+                attempt = int(attempt_value or 0)
+            except (TypeError, ValueError):
+                attempt = 0
+
+            should_commit = True
+            return IngestJob(
+                tenant_id=job_record.tenant_id,
+                path=path,
+                sha256=sha256,
+                file_id=file_id_int,
+                filename=filename,
+                document_id=document_id_int,
+                job_record_id=job_record.id,
+                attempt=attempt,
+            )
+        except Exception:
+            if manage_session:
+                session_obj.rollback()
+            raise
+        finally:
+            if manage_session:
+                try:
+                    if should_commit:
+                        session_obj.commit()
+                    else:
+                        session_obj.rollback()
+                finally:
+                    session_obj.close()
+
+
+
     async def enqueue_job(
         self, file_obj: FileRecord, *, attempt: int = 0, session: Session | None = None
     ) -> IngestJob:
-        if self.queue.full():
+        if self.use_local_queue and self.queue.full():
             raise IngestQueueFullError("INGEST_QUEUE_FULL")
 
         job = self._make_job(file_obj, attempt=attempt)
@@ -494,10 +610,11 @@ class IngestService:
                     session_obj.flush()
                 await worker.process_job(job)
                 return job
-            try:
-                self.queue.put_nowait(job)
-            except QueueFull as exc:
-                raise IngestQueueFullError("INGEST_QUEUE_FULL") from exc
+            if self.use_local_queue:
+                try:
+                    self.queue.put_nowait(job)
+                except QueueFull as exc:
+                    raise IngestQueueFullError("INGEST_QUEUE_FULL") from exc
             if manage_session:
                 session_obj.commit()
         except IngestQueueFullError:
@@ -659,20 +776,29 @@ class IngestWorker:
         while True:
             if limit is not None and processed >= limit:
                 break
-            try:
-                job = self.service.queue.get_nowait()
-            except QueueEmpty:
-                break
-            if job is None:
+            job: IngestJob | None = None
+            from_queue = False
+            if self.service.use_local_queue:
+                try:
+                    job = self.service.queue.get_nowait()
+                    from_queue = True
+                except QueueEmpty:
+                    job = None
+            if job is None and from_queue:
                 self.service.queue.task_done()
                 continue
+            if job is None:
+                job = await asyncio.to_thread(self.service.dequeue_next_job)
+                if job is None:
+                    break
             logger.debug("ingest worker processing job %s", job)
             try:
                 await self._process(job)
             except Exception:  # pragma: no cover - defensive
                 await self._handle_failure(job)
             finally:
-                self.service.queue.task_done()
+                if from_queue:
+                    self.service.queue.task_done()
             processed += 1
         return processed
 
