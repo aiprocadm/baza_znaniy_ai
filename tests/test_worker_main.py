@@ -5,7 +5,6 @@ import sys
 from collections.abc import Callable
 from types import ModuleType
 
-
 def _reload_worker_module():
     """Return a freshly reloaded ``app.worker.main`` module."""
 
