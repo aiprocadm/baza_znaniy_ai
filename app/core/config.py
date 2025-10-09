@@ -796,7 +796,10 @@ class Settings(BaseSettings):
     )
     @classmethod
     def _expand_paths(cls, value: object) -> object:
-        if isinstance(value, str) and value:
+        if isinstance(value, str):
+            value = value.strip()
+            if not value:
+                return None
             return Path(value).expanduser()
         return value
 
