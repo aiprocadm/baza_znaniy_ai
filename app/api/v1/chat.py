@@ -7,7 +7,11 @@ import time
 from typing import Iterable, List, Mapping
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from fastapi.params import Depends as DependsMarker
+
+try:  # FastAPI<0.115 exposes Depends via param_functions only
+    from fastapi.params import Depends as DependsMarker
+except ModuleNotFoundError:  # pragma: no cover - compatibility shim
+    from fastapi.param_functions import Depends as DependsMarker
 
 from app.chat.store import ChatStoreProtocol, ConversationAccessError
 from app.core.auth import ensure_tenant_access, get_current_active_user
