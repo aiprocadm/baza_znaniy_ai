@@ -23,9 +23,9 @@ def test_guard_synthesizes_dialect_when_missing(tmp_path: Path) -> None:
 
     guarded = SyncEngineGuard(engine, url).ensure_sync()
 
-    _assert_sqlite_dialect(guarded.dialect)
-    assert getattr(guarded.dialect, FALLBACK_MARKER)
-    assert guarded is not engine
+    assert guarded is engine
+    _assert_sqlite_dialect(engine.dialect)
+    assert getattr(engine.dialect, FALLBACK_MARKER)
 
 
 def test_guard_provides_url_fallback(tmp_path: Path) -> None:
@@ -43,9 +43,9 @@ def test_guard_provides_url_fallback(tmp_path: Path) -> None:
 
     guarded = SyncEngineGuard(engine, url).ensure_sync()
 
-    assert str(guarded.url).startswith("sqlite")
-    assert guarded.url is not None
-    assert guarded is not engine
+    assert guarded is engine
+    assert str(engine.url).startswith("sqlite")
+    assert engine.url is not None
 
 
 def test_guard_replaces_dispose_when_missing(tmp_path: Path) -> None:
@@ -61,7 +61,8 @@ def test_guard_replaces_dispose_when_missing(tmp_path: Path) -> None:
 
     guarded = SyncEngineGuard(engine, url).ensure_sync()
 
-    dispose = guarded.dispose
+    assert guarded is engine
+    dispose = engine.dispose
     assert callable(dispose)
     assert getattr(dispose, FALLBACK_MARKER, False)
     dispose()
@@ -81,7 +82,8 @@ def test_guard_replaces_connect_when_missing(tmp_path: Path) -> None:
 
     guarded = SyncEngineGuard(engine, url).ensure_sync()
 
-    connect = guarded.connect
+    assert guarded is engine
+    connect = engine.connect
     assert callable(connect)
     assert getattr(connect, FALLBACK_MARKER, False)
     with connect() as connection:
@@ -117,6 +119,6 @@ def test_guard_returns_original_engine_when_complete(tmp_path: Path) -> None:
     engine = CompleteEngine(f"sqlite:///{tmp_path/'complete.sqlite'}")
     guarded = SyncEngineGuard(engine, engine.url).ensure_sync()
     assert guarded is engine
-    assert not is_fallback_value(guarded.dispose)
-    guarded.dispose()
+    assert not is_fallback_value(engine.dispose)
+    engine.dispose()
     assert engine._disposed

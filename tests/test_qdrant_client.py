@@ -77,7 +77,9 @@ def qc_module(monkeypatch):
 
     qc = importlib.import_module("app.qdrant_client")
     qc = importlib.reload(qc)
-    return qc
+    qc._clear_cache()
+    yield qc
+    qc._clear_cache()
 
 
 def test_basic_operations_use_vector_store(qc_module, monkeypatch):
@@ -85,7 +87,7 @@ def test_basic_operations_use_vector_store(qc_module, monkeypatch):
 
     expected_search = [{"id": "chunk-1"}]
     stub = VectorStoreStub(search_result=expected_search)
-    monkeypatch.setattr(qc_module, "_vector_store", stub)
+    monkeypatch.setattr(qc_module, "_resolve_vector_store", lambda: stub)
 
     qc_module.ensure_collection()
     assert stub.ensure_ready_called is True
@@ -101,7 +103,7 @@ def test_basic_operations_use_vector_store(qc_module, monkeypatch):
 
 def test_reset_collection_supported(qc_module, monkeypatch):
     stub = ResettableVectorStoreStub()
-    monkeypatch.setattr(qc_module, "_vector_store", stub)
+    monkeypatch.setattr(qc_module, "_resolve_vector_store", lambda: stub)
 
     qc_module.reset_collection()
     assert stub.reset_called is True
@@ -109,7 +111,7 @@ def test_reset_collection_supported(qc_module, monkeypatch):
 
 def test_reset_collection_not_supported(qc_module, monkeypatch):
     stub = VectorStoreStub()
-    monkeypatch.setattr(qc_module, "_vector_store", stub)
+    monkeypatch.setattr(qc_module, "_resolve_vector_store", lambda: stub)
 
     with pytest.raises(NotImplementedError):
         qc_module.reset_collection()
@@ -118,7 +120,7 @@ def test_reset_collection_not_supported(qc_module, monkeypatch):
 def test_export_payloads_supported(qc_module, monkeypatch):
     batches = [[{"id": 1}], [{"id": 2}]]
     stub = ExportImportVectorStoreStub(exported_batches=batches)
-    monkeypatch.setattr(qc_module, "_vector_store", stub)
+    monkeypatch.setattr(qc_module, "_resolve_vector_store", lambda: stub)
 
     iterator = qc_module.export_payloads(batch_size=5)
     exported = list(iterator)
@@ -128,7 +130,7 @@ def test_export_payloads_supported(qc_module, monkeypatch):
 
 def test_export_payloads_not_supported(qc_module, monkeypatch):
     stub = VectorStoreStub()
-    monkeypatch.setattr(qc_module, "_vector_store", stub)
+    monkeypatch.setattr(qc_module, "_resolve_vector_store", lambda: stub)
 
     with pytest.raises(NotImplementedError):
         qc_module.export_payloads()
@@ -136,7 +138,7 @@ def test_export_payloads_not_supported(qc_module, monkeypatch):
 
 def test_import_payloads_supported(qc_module, monkeypatch):
     stub = ExportImportVectorStoreStub(exported_batches=[])
-    monkeypatch.setattr(qc_module, "_vector_store", stub)
+    monkeypatch.setattr(qc_module, "_resolve_vector_store", lambda: stub)
 
     payloads = [{"id": "one"}, {"id": "two"}]
     qc_module.import_payloads(payloads)
@@ -145,7 +147,7 @@ def test_import_payloads_supported(qc_module, monkeypatch):
 
 def test_import_payloads_not_supported(qc_module, monkeypatch):
     stub = VectorStoreStub()
-    monkeypatch.setattr(qc_module, "_vector_store", stub)
+    monkeypatch.setattr(qc_module, "_resolve_vector_store", lambda: stub)
 
     with pytest.raises(NotImplementedError):
         qc_module.import_payloads([])
@@ -154,11 +156,10 @@ def test_import_payloads_not_supported(qc_module, monkeypatch):
 def test_export_import_roundtrip(qc_module, monkeypatch):
     """End-to-end check that export/import iterate and restore module state."""
 
-    original_vector_store = qc_module._vector_store
     batches = [[{"id": "a"}, {"id": "b"}], [{"id": "c"}]]
     stub = ExportImportVectorStoreStub(exported_batches=batches)
 
-    monkeypatch.setattr(qc_module, "_vector_store", stub)
+    monkeypatch.setattr(qc_module, "_resolve_vector_store", lambda: stub)
 
     exported = list(qc_module.export_payloads(batch_size=2))
     assert exported == [{"id": "a"}, {"id": "b"}, {"id": "c"}]
@@ -166,5 +167,3 @@ def test_export_import_roundtrip(qc_module, monkeypatch):
     qc_module.import_payloads(exported)
     assert stub.imported_payloads == exported
 
-    # ensure monkeypatch will restore the original vector store when the test ends
-    monkeypatch.setattr(qc_module, "_vector_store", original_vector_store)
