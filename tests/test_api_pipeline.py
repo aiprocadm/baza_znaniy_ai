@@ -194,6 +194,46 @@ def test_full_pipeline(api_client: TestClient) -> None:
     assert any(job.get("status") == "completed" for job in jobs_payload["jobs"])
 
 
+def test_file_summary_endpoint(api_client: TestClient) -> None:
+    """Ensure the file summary endpoint aggregates tenant statistics."""
+
+    first_payload = b"Alpha document"
+    second_payload = b"Bravo report"
+
+    response_one = api_client.post(
+        "/api/v1/upload",
+        files={"file": ("alpha.txt", first_payload, "text/plain")},
+    )
+    assert response_one.status_code == 201, response_one.json()
+    first_id = response_one.json()["file_id"]
+
+    response_two = api_client.post(
+        "/api/v1/upload",
+        files={"file": ("bravo.txt", second_payload, "text/plain")},
+    )
+    assert response_two.status_code == 201, response_two.json()
+    second_id = response_two.json()["file_id"]
+
+    _wait_for_completion(api_client, first_id)
+    _wait_for_completion(api_client, second_id)
+
+    summary_response = api_client.get("/api/v1/files/summary")
+    assert summary_response.status_code == 200, summary_response.json()
+    summary = summary_response.json()
+
+    total_size = len(first_payload) + len(second_payload)
+
+    assert summary["total_files"] == 2
+    assert summary["status_counts"]["completed"] == 2
+    assert summary["status_counts"]["failed"] == 0
+    assert summary["status_counts"]["queued"] == 0
+    assert summary["total_size_bytes"] == total_size
+    assert summary["total_chunks"] >= 2
+    assert summary["average_size_bytes"] == pytest.approx(total_size / 2)
+    assert summary["oldest_upload"] is not None
+    assert summary["newest_upload"] is not None
+
+
 def test_ingest_endpoint_waits_for_completion(api_client: TestClient) -> None:
     """Ensure ingest API blocks until processing completes when auto-processing is enabled."""
 
