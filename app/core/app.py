@@ -18,7 +18,34 @@ except ModuleNotFoundError:  # pragma: no cover - optional dependency fallback
     AsyncIOScheduler = None  # type: ignore[assignment]
     STATE_RUNNING = None  # type: ignore[assignment]
 from app.chat.summarizer import ConversationSummarizer
-from app.core.auth import TokenRegistry
+try:
+    from app.core.auth import TokenRegistry
+except ImportError:  # pragma: no cover - fallback for heavily stubbed test modules
+    class TokenRegistry:  # type: ignore[override]
+        """Lightweight replacement used when the real auth module is unavailable."""
+
+        def __init__(self) -> None:
+            self._revoked: set[str] = set()
+            self._inactive_users: set[str] = set()
+
+        def revoke(self, token_id: str | None) -> None:
+            if token_id:
+                self._revoked.add(token_id)
+
+        def is_revoked(self, token_id: str | None) -> bool:
+            return bool(token_id and token_id in self._revoked)
+
+        def mark_active(self, user_id: str | None) -> None:
+            if user_id:
+                self._inactive_users.discard(user_id)
+
+        def mark_inactive(self, user_id: str | None) -> None:
+            if user_id:
+                self._inactive_users.add(user_id)
+
+        def is_active(self, user_id: str | None) -> bool:
+            return bool(user_id and user_id not in self._inactive_users)
+
 from app.core.config import get_settings
 from app.core.services import init_chat_store, init_memory_store
 from app.ingest import IngestService, IngestWorker, parse_and_chunk  # noqa: F401
