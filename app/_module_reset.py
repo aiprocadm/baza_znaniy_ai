@@ -74,6 +74,15 @@ def ensure_core_modules() -> None:
     )
 
     if core_app is not None:
+        spec = getattr(core_app, "__spec__", None)
+        if getattr(spec, "_initializing", False):
+            # ``ensure_core_modules`` may run while ``app.core.app`` is still being
+            # imported (for example, when triggered from ``app.ingest.service``).
+            # Attempting to reload the module at that point raises an import error
+            # because the module is only partially initialised, so we bail out and
+            # allow the original import to complete before any reload happens.
+            return
+
         importlib.reload(core_app)
 
 
