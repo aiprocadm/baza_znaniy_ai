@@ -78,17 +78,23 @@ def _expected_windows(
 
     window = max(int(chunk), 1)
     step_overlap = max(min(int(overlap), window - 1), 0)
+    step = max(window - step_overlap, 1)
 
     windows: List[List[int]] = []
-    start = 0
-    total = len(tokens)
-    while start < total:
-        end = min(start + window, total)
+    last_start: int | None = None
+    limit = max(len(tokens) - window + 1, 0)
+    for start in range(0, limit, step):
+        end = min(start + window, len(tokens))
         windows.append(tokens[start:end])
-        if end >= total:
-            break
-        next_start = max(end - step_overlap, start + 1)
-        start = next_start
+        last_start = start
+
+    tail_start = max(len(tokens) - window, 0)
+    if tail_start < len(tokens) and (last_start is None or tail_start > last_start):
+        windows.append(tokens[tail_start:])
+
+    if not windows:
+        windows.append(tokens[tail_start:])
+
     return windows
 
 
@@ -97,6 +103,23 @@ def test_chunk_handles_zero_and_single_window_sizes() -> None:
 
     assert _chunk(text, chunk=0, overlap=2) == list(text)
     assert _chunk(text, chunk=1, overlap=2) == list(text)
+
+
+def test_chunk_rejects_non_string_input() -> None:
+    with pytest.raises(TypeError):
+        _chunk(123, chunk=2, overlap=0)  # type: ignore[arg-type]
+
+
+def test_chunk_normalises_overlap_and_avoids_empty_chunks() -> None:
+    text = "abcdefghij"
+    chunks = _chunk(text, chunk=4, overlap=10)
+
+    assert chunks[-1].endswith("hij")
+    assert all(chunk for chunk in chunks)
+
+
+def test_chunk_returns_empty_list_for_empty_string() -> None:
+    assert _chunk("", chunk=5, overlap=2) == []
 
 
 
@@ -116,7 +139,7 @@ def test_chunk_respects_token_window_size() -> None:
     assert len(chunks) == 3
     assert encoded_chunks[0] == original_tokens[:900]
     assert encoded_chunks[1] == original_tokens[760:1660]
-    assert encoded_chunks[2] == original_tokens[1520:]
+    assert encoded_chunks[2] == original_tokens[-900:]
     assert all(len(tokens) <= 900 for tokens in encoded_chunks)
 
 
@@ -143,7 +166,7 @@ def test_chunk_fallback_respects_token_window_slices() -> None:
     assert len(chunks) == 3
     assert chunks[0] == expanded_text[:chunk]
     assert chunks[1] == expanded_text[chunk - overlap : chunk - overlap + chunk]
-    assert chunks[2] == expanded_text[(2 * chunk) - (2 * overlap) :]
+    assert chunks[2] == expanded_text[-chunk:]
 
     encoded_chunks = [tokenizer.encode(chunk) for chunk in chunks]
     expected = _expected_windows(expanded_text, chunk, overlap, tokenizer=tokenizer)
@@ -276,8 +299,7 @@ def test_chunk_small_window_returns_original_tokens_when_fallback_empty() -> Non
 
     pieces = _chunk(text, chunk=5, overlap=0, encoder=tokenizer)
 
-    assert pieces == [""]
-    assert tokenizer.encode(pieces[0]) == [7]
+    assert pieces == []
 
 
 def test_chunk_with_tiny_window_uses_characters_and_handles_empty_tokens() -> None:

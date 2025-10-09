@@ -9,7 +9,16 @@ import os
 import re
 import time
 from functools import lru_cache
-from typing import BinaryIO, Iterator, List, NamedTuple, Optional, Protocol, Union
+from typing import (
+    BinaryIO,
+    Callable,
+    Iterator,
+    List,
+    NamedTuple,
+    Optional,
+    Protocol,
+    Union,
+)
 
 from docx import Document
 
@@ -383,20 +392,31 @@ def _chunk(
 ) -> List[str]:
     """Split ``text`` into overlapping windows based on token counts."""
 
+    if not isinstance(text, str):
+        raise TypeError("text must be str")
+
     if not text:
         return []
 
-    chunk = max(int(chunk), 1)
+    try:
+        window = int(chunk)
+    except Exception:
+        window = 1
+
+    if window <= 1:
+        return list(text)
+
     try:
         overlap_value = int(overlap)
     except Exception:
         overlap_value = 0
+
     if overlap_value < 0:
         overlap_value = 0
-    if overlap_value >= chunk:
-        overlap_value = chunk - 1
-    overlap = overlap_value
-    step = chunk - overlap or 1
+    if overlap_value >= window:
+        overlap_value = window - 1
+
+    step = window - overlap_value or 1
 
     if encoder is None:
         encoder = _get_tokenizer()
@@ -411,6 +431,33 @@ def _chunk(
             except Exception:  # pragma: no cover - defensive fallback
                 tokens = []
 
+    def _collect_chunks(length: int, fetch: Callable[[int, int], str]) -> List[str]:
+        if length <= 0:
+            return []
+
+        pieces: List[str] = []
+        last_start: Optional[int] = None
+        limit = max(length - window + 1, 0)
+        for start in range(0, limit, step):
+            end = min(start + window, length)
+            piece = fetch(start, end)
+            if piece:
+                pieces.append(piece)
+                last_start = start
+
+        tail_start = max(length - window, 0)
+        if tail_start < length and (last_start is None or tail_start > last_start):
+            tail_piece = fetch(tail_start, length)
+            if tail_piece:
+                pieces.append(tail_piece)
+
+        if not pieces:
+            tail_piece = fetch(tail_start, length)
+            if tail_piece:
+                pieces.append(tail_piece)
+
+        return pieces
+
     decoded_full = ""
     if tokens:
         try:
@@ -418,32 +465,20 @@ def _chunk(
         except Exception:  # pragma: no cover - fallback to character chunking
             decoded_full = ""
 
-        if not decoded_full or (len(tokens) > chunk or len(decoded_full) <= chunk):
+        if not decoded_full or (len(tokens) > window or len(decoded_full) <= window):
             try:
-                pieces: List[str] = []
-                index = 0
-                total = len(tokens)
-                while index < total:
-                    window_tokens = tokens[index : index + chunk]
-                    if not window_tokens:
-                        break
-                    pieces.append(encoder.decode(window_tokens))
-                    index += step
-                return pieces
+                return _collect_chunks(
+                    len(tokens),
+                    lambda start, end: encoder.decode(tokens[start:end]),
+                )
             except Exception:  # pragma: no cover - fallback to character chunking
                 pass
 
     source_text = decoded_full or text
-    pieces: List[str] = []
-    index = 0
-    total = len(source_text)
-    while index < total:
-        window_text = source_text[index : index + chunk]
-        if not window_text:
-            break
-        pieces.append(window_text)
-        index += step
-    return pieces
+    return _collect_chunks(
+        len(source_text),
+        lambda start, end: source_text[start:end],
+    )
 
 
 def _iter_pdf_text_pymupdf(data: bytes) -> Iterator[tuple[int, str]]:
