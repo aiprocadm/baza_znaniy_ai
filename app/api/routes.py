@@ -53,6 +53,7 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 _SERVICE_UNAVAILABLE = getattr(status, "HTTP_503_SERVICE_UNAVAILABLE", 503)
+_UNSUPPORTED_MEDIA_TYPE = getattr(status, "HTTP_415_UNSUPPORTED_MEDIA_TYPE", 415)
 _REQUEST_TOO_LARGE = HTTP_CONTENT_TOO_LARGE
 
 
@@ -947,7 +948,7 @@ async def upload(
         filename = (upload_file.filename or "uploaded").strip() or "uploaded"
         ext = _normalise_extension(filename)
         if ext not in allowed_extensions:
-            raise HTTPException(status.HTTP_400_BAD_REQUEST, "UPLOAD_INVALID_EXT")
+            raise HTTPException(_UNSUPPORTED_MEDIA_TYPE, "UPLOAD_INVALID_EXT")
 
         data = await upload_file.read()
         if not data:

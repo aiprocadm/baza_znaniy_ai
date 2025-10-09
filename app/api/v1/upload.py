@@ -35,6 +35,8 @@ from app.ingest.service import IngestQueueFullError, IngestService
 
 router = APIRouter(tags=["upload"])
 
+_UNSUPPORTED_MEDIA_TYPE = getattr(status, "HTTP_415_UNSUPPORTED_MEDIA_TYPE", 415)
+
 _deps_module = sys.modules.get("app.core.deps")
 if _deps_module is not None and not hasattr(_deps_module, "get_ingest_session"):
 
@@ -275,7 +277,7 @@ async def upload_file(
     )
     extension = _normalise_extension(upload.filename or "")
     if extension not in limits.allowed_extensions:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="UPLOAD_INVALID_EXT")
+        raise HTTPException(_UNSUPPORTED_MEDIA_TYPE, detail="UPLOAD_INVALID_EXT")
 
 
     def _as_bytes(value: object) -> bytes:
@@ -415,7 +417,7 @@ async def upload_file(
         selected_content_type = getattr(upload, "content_type", None)
         selected_extension = _normalise_extension(selected_filename or "")
         if selected_extension not in limits.allowed_extensions:
-            raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="UPLOAD_INVALID_EXT")
+            raise HTTPException(_UNSUPPORTED_MEDIA_TYPE, detail="UPLOAD_INVALID_EXT")
 
         payload = await _read_file(upload, limits)
     finally:

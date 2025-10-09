@@ -20,6 +20,8 @@ from fastapi.testclient import TestClient as _FastAPITestClient
 
 from app.api import routes as api_routes
 
+_UNSUPPORTED_MEDIA_TYPE = getattr(status, "HTTP_415_UNSUPPORTED_MEDIA_TYPE", 415)
+
 _original_request = getattr(_FastAPITestClient, "_kb_original_request", None)
 if _original_request is None:
     _original_request = getattr(_FastAPITestClient, "request", None)
@@ -593,7 +595,7 @@ async def upload_document(
         filename = (getattr(file, "filename", "uploaded") or "uploaded").strip() or "uploaded"
         ext = _normalise_extension(filename)
         if ext not in allowed_extensions:
-            raise HTTPException(status.HTTP_400_BAD_REQUEST, "UPLOAD_INVALID_EXT")
+            raise HTTPException(_UNSUPPORTED_MEDIA_TYPE, "UPLOAD_INVALID_EXT")
 
         data = await file.read()
         if not data:
