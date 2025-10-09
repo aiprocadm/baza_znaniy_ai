@@ -803,13 +803,23 @@ class Settings(BaseSettings):
     @field_validator("data_dir", mode="after")
     @classmethod
     def _ensure_data_dir(cls, value: Path) -> Path:
+        if isinstance(value, str):
+            value = value.strip()
+            if not value:
+                return Path("./var/data").expanduser()
+            value = Path(value)
         return value.expanduser()
 
     @field_validator("chat_db_path", "memory_db_path", "qdrant_path", mode="after")
     @classmethod
     def _resolve_optional_path(cls, value: Path | None) -> Path | None:
-        if value is None:
+        if value in {None, "", Ellipsis}:
             return None
+        if isinstance(value, str):
+            stripped = value.strip()
+            if not stripped:
+                return None
+            value = Path(stripped)
         return value.expanduser()
 
     @field_validator("rerank_topk", mode="before")
