@@ -9,7 +9,7 @@ import secrets
 import sys
 from pathlib import Path
 from tempfile import SpooledTemporaryFile
-from typing import Any, List, Optional
+from typing import List, Optional
 
 try:  # pragma: no cover - starlette is optional when running with stubs
     from starlette.datastructures import UploadFile as StarletteUploadFile

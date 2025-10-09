@@ -9,7 +9,7 @@ from app.core.auth import require_admin_user
 from app.core.datetime_utils import utc_now
 from app.core.deps import get_ingest_session
 from app.models.tenant import TenantRecord
-from app.models.user import UserCreate, UserRecord, UserResponse, UserRole
+from app.models.user import UserCreate, UserRecord, UserResponse
 from app.security import hash_password
 
 router = APIRouter(prefix="/users", tags=["users"])

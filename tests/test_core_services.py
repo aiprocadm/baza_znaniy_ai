@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-import app.core  # ensure package exists before injecting cleaned config module
+import app.core  # noqa: F401 - ensure package exists before injecting cleaned config module
 
 CONFIG_MODULE_NAME = "app.core.config"
 if CONFIG_MODULE_NAME in sys.modules:

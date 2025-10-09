@@ -9,26 +9,26 @@ IMAGE ?= kb-ai:local
 .PHONY: install lint format test run build clean
 
 install:
-$(PIP) install --upgrade pip
-$(PIP) install -r requirements.txt
-if [ -f requirements-dev.txt ]; then $(PIP) install -r requirements-dev.txt; fi
+	$(PIP) install --upgrade pip
+	$(PIP) install -r requirements.txt
+	if [ -f requirements-dev.txt ]; then $(PIP) install -r requirements-dev.txt; fi
 
 lint:
-ruff check .
-black --check .
+	ruff check .
+	black --check .
 
 format:
-black .
-ruff check . --fix
+	black .
+	ruff check . --fix
 
 test:
-pytest -q
+	pytest -q
 
 run:
-uvicorn $(APP_MODULE) --factory --host $(HOST) --port $(PORT)
+	uvicorn $(APP_MODULE) --factory --host $(HOST) --port $(PORT)
 
 build:
-docker build -t $(IMAGE) .
+	docker build -t $(IMAGE) .
 
 clean:
-rm -rf __pycache__ */__pycache__ .pytest_cache cov_html .coverage coverage.xml
+	rm -rf __pycache__ */__pycache__ .pytest_cache cov_html .coverage coverage.xml

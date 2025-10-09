@@ -30,6 +30,7 @@ class UniqueConstraint:
 class MetaData:
     def __init__(self) -> None:
         self._bound_engines: list[Any] = []
+        self.bound_engines = self._bound_engines
 
     def create_all(self, engine: Any) -> None:  # pragma: no cover - stub behaviour
         self._bound_engines.append(engine)
@@ -37,14 +38,6 @@ class MetaData:
 
 def text(value: str) -> str:
     return value
-
-
-class MetaData:
-    def __init__(self) -> None:
-        self.bound_engines: list[Any] = []
-
-    def create_all(self, engine: Any) -> None:
-        self.bound_engines.append(engine)
 
 
 engine_module = ModuleType("sqlalchemy.engine")

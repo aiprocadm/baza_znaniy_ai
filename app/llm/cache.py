@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import importlib
 import sys
-from typing import TYPE_CHECKING, Any, Callable, Optional, cast
+from typing import TYPE_CHECKING, Any, Callable, Mapping, Optional, cast
 
 if TYPE_CHECKING:  # pragma: no cover - import for static analysis only
     from app.core.config import Settings as SettingsType
@@ -129,7 +129,7 @@ def _resolve_factory() -> Callable[[SettingsType], LLMProvider]:
 
     package = sys.modules.get("app.llm")
     if package is None:
-        package = import_module("app.llm")
+        package = importlib.import_module("app.llm")
     candidate = getattr(package, "get_llm_provider", None) if package else None
     if _is_external_factory(candidate):
         _sync_external_factory(candidate)

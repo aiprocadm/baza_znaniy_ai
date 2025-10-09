@@ -395,8 +395,7 @@ __all__ = [
     "StreamingResponse",
     "UploadFile",
     "status",
+    "TestClient",
 ]
 
 from .testclient import TestClient  # noqa: E402  # isort:skip
-
-__all__.append("TestClient")
