@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math  # Standard library is required for runtime validators.
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Annotated, Any
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -12,16 +12,24 @@ if TYPE_CHECKING:  # pragma: no cover - circular import guard for type checking
     from app.llm.manager import LoraStatus
 
 
+ScalingFactor = Annotated[
+    float,
+    Field(
+        gt=0.0,
+        le=10.0,
+        description="Scaling factor applied to the adapter weights",
+    ),
+]
+
+
 class LoraBaseRequest(BaseModel):
     """Common payload data for LoRA adapter operations."""
 
     path: Path = Field(..., description="Filesystem path to the adapter file")
-    scaling: float = Field(
-        1.0,
-        gt=0.0,
-        le=10.0,
-        description="Scaling factor applied to the adapter weights",
-    )
+    scaling: ScalingFactor = Field(default=1.0)
+
+    def model_post_init(self, __context: Any) -> None:  # pragma: no cover - simple assignment
+        object.__setattr__(self, "scaling", float(self.scaling))
 
     @field_validator("path", mode="before")
     @classmethod
@@ -33,13 +41,18 @@ class LoraBaseRequest(BaseModel):
     @field_validator("scaling")
     @classmethod
     def _validate_scaling(cls, value: float) -> float:
-        if not isinstance(value, (int, float)) or not math.isfinite(float(value)):
+        try:
+            numeric = float(value)
+        except (TypeError, ValueError):
+            raise ValueError("Scaling factor must be a finite number") from None
+
+        if not math.isfinite(numeric):
             raise ValueError("Scaling factor must be a finite number")
-        if float(value) <= 0.0:
+        if numeric <= 0.0:
             raise ValueError("Scaling factor must be greater than zero")
-        if float(value) > 10.0:
+        if numeric > 10.0:
             raise ValueError("Scaling factor must not exceed 10.0")
-        return float(value)
+        return numeric
 
 
 class LoraLoadRequest(LoraBaseRequest):

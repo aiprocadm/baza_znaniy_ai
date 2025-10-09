@@ -19,6 +19,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.testclient import TestClient as _FastAPITestClient
 
 from app.api import routes as api_routes
+from app.api.status_codes import HTTP_CONTENT_TOO_LARGE, HTTP_UNPROCESSABLE_CONTENT
 
 _UNSUPPORTED_MEDIA_TYPE = getattr(status, "HTTP_415_UNSUPPORTED_MEDIA_TYPE", 415)
 
@@ -131,7 +132,7 @@ def _compat_request(self, method: str, url: str, *args: Any, **kwargs: Any):  # 
                 chat_request = ChatRequest(**payload_data)
             except Exception as exc:
                 return httpx.Response(
-                    status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    HTTP_UNPROCESSABLE_CONTENT,
                     json={"detail": str(exc)},
                 )
             try:
@@ -603,7 +604,7 @@ async def upload_document(
 
         if max_bytes and len(data) > max_bytes:
             raise HTTPException(
-                status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                HTTP_CONTENT_TOO_LARGE,
                 "UPLOAD_TOO_LARGE",
             )
 

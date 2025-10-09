@@ -25,6 +25,7 @@ from tests.service_stubs import install_service_stubs
 
 install_service_stubs()
 
+from app.api.status_codes import HTTP_UNPROCESSABLE_CONTENT
 from app.api.v1 import lora as lora_module
 from app.api.v1.lora import load_lora_adapter
 from app.models.lora import LoraLoadRequest
@@ -208,8 +209,7 @@ def test_runtime_scaling_guard_rejects_invalid_values(bad_scaling: float) -> Non
     with pytest.raises(HTTPException) as excinfo:
         asyncio.run(lora_module.load_lora_adapter(payload, manager=_BypassManager()))
 
-    expected_status = getattr(status, "HTTP_422_UNPROCESSABLE_ENTITY", 422)
-    assert excinfo.value.status_code == expected_status
+    assert excinfo.value.status_code == HTTP_UNPROCESSABLE_CONTENT
     assert excinfo.value.detail == "INVALID_SCALING"
 
 
@@ -262,8 +262,7 @@ def test_load_endpoint_rejects_invalid_scaling_when_bypassed(
         json={"path": str(adapter_path), "scaling": raw_value},
     )
 
-    expected_status = getattr(status, "HTTP_422_UNPROCESSABLE_ENTITY", 422)
-    assert response.status_code == expected_status
+    assert response.status_code == HTTP_UNPROCESSABLE_CONTENT
     assert response.json()["detail"] == "INVALID_SCALING"
 
 
@@ -300,8 +299,7 @@ def test_load_endpoint_negative_scaling_returns_422_without_manager_call(
     finally:
         app.dependency_overrides.pop(dependency, None)
 
-    expected_status = getattr(status, "HTTP_422_UNPROCESSABLE_ENTITY", 422)
-    assert response.status_code == expected_status
+    assert response.status_code == HTTP_UNPROCESSABLE_CONTENT
     assert response.json()["detail"] == "INVALID_SCALING"
     async_manager.load_adapter.assert_not_called()
 
@@ -364,8 +362,7 @@ def test_scaling_validation_rejects_non_positive(scaling: object) -> None:
             load_lora_adapter(payload=payload, manager=manager)  # type: ignore[arg-type]
         )
 
-    expected_status = getattr(status, "HTTP_422_UNPROCESSABLE_ENTITY", 422)
-    assert exc_info.value.status_code == expected_status
+    assert exc_info.value.status_code == HTTP_UNPROCESSABLE_CONTENT
     assert exc_info.value.detail == "INVALID_SCALING"
     manager.load_adapter.assert_not_called()
 
@@ -385,8 +382,7 @@ def test_scaling_validation_rejects_non_numeric(tmp_path: Path) -> None:
     with pytest.raises(HTTPException) as excinfo:
         asyncio.run(invoke())
 
-    expected_status = getattr(status, "HTTP_422_UNPROCESSABLE_ENTITY", 422)
-    assert excinfo.value.status_code == expected_status
+    assert excinfo.value.status_code == HTTP_UNPROCESSABLE_CONTENT
     assert excinfo.value.detail == "INVALID_SCALING"
 
 
@@ -408,5 +404,5 @@ def test_load_endpoint_preserves_original_request_model(tmp_path: Path) -> None:
 
     assert isinstance(response, lora_module.LoraStatusResponse)
     manager.load_adapter.assert_awaited_once_with(adapter_path, 0.75)
-    assert payload.scaling == Decimal("0.75")
-    assert isinstance(payload.scaling, Decimal)
+    assert payload.scaling == pytest.approx(0.75)
+    assert isinstance(payload.scaling, float)

@@ -24,9 +24,10 @@ def configure_warning_filters() -> None:
 
     for message in _SWIG_DEPRECATION_MESSAGES:
         warnings.filterwarnings(
-            "once",
+            "ignore",
             category=DeprecationWarning,
             message=message,
+            module=".*",
         )
 
 
