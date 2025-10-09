@@ -207,6 +207,24 @@ def reset_provider_cache() -> None:
 get_llm_client = get_cached_provider
 
 
+def set_provider_factory_override(
+    factory: Callable[[SettingsType], LLMProvider] | None,
+    *,
+    reset_cache: bool = True,
+) -> None:
+    """Configure an override for the provider factory used by the cache layer."""
+
+    global _external_factory, _cached_provider
+
+    if factory is not None and not callable(factory):
+        raise TypeError("factory override must be callable or None")
+
+    _external_factory = factory
+
+    if reset_cache:
+        _cached_provider = None
+
+
 def _is_external_factory(candidate: object) -> bool:
     return callable(candidate) and not getattr(candidate, _DEFAULT_MARKER, False) and getattr(candidate, "__module__", None) != __name__
 

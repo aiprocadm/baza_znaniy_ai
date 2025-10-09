@@ -321,5 +321,6 @@ __all__ = [
     "issue_tokens",
     "require_roles",
     "require_admin_user",
+    "_extract_bearer_token",
 ]
 
