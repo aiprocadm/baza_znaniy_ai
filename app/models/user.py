@@ -6,9 +6,10 @@ from datetime import datetime
 from enum import Enum
 from typing import Optional
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.models.entities import UserRecord as UserRecord
+from app.core.email import EmailValidationError, normalise_email
 
 
 class UserRole(str, Enum):
@@ -22,12 +23,20 @@ class UserRole(str, Enum):
 class UserCreate(BaseModel):
     """Payload used to create a new user."""
 
-    email: EmailStr
+    email: str
     full_name: str = Field(..., min_length=1, max_length=200)
     password: str = Field(..., min_length=8, max_length=200)
     role: UserRole = Field(default=UserRole.MEMBER)
     is_active: bool = Field(default=True)
     tenant_slug: str = Field(..., min_length=1, max_length=100)
+
+    @field_validator("email")
+    @classmethod
+    def _normalise_email(cls, value: str) -> str:
+        try:
+            return normalise_email(value)
+        except EmailValidationError as exc:
+            raise ValueError("INVALID_EMAIL_FORMAT") from exc
 
 
 class UserUpdate(BaseModel):
@@ -45,7 +54,7 @@ class UserResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
-    email: EmailStr
+    email: str
     full_name: Optional[str]
     role: UserRole
     is_active: bool

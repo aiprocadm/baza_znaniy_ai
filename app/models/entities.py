@@ -10,6 +10,7 @@ from sqlalchemy import Column, JSON, UniqueConstraint
 from sqlmodel import Field, SQLModel
 
 from app.core.datetime_utils import utc_now
+from app.core.email import EmailValidationError, normalise_email
 from app.models.sqlmodel_compat import install_stub_model_initializers
 
 
@@ -128,6 +129,16 @@ class UserRecord(SQLModel, table=True):
     created_at: datetime = Field(default_factory=utc_now, nullable=False)
     updated_at: datetime = Field(default_factory=utc_now, nullable=False)
     last_login_at: Optional[datetime] = Field(default=None)
+
+    @field_validator("email")
+    @classmethod
+    def _normalise_email(cls, value: Optional[str]) -> Optional[str]:
+        if value in (None, ""):
+            return None
+        try:
+            return normalise_email(value)
+        except EmailValidationError as exc:
+            raise ValueError("INVALID_EMAIL_FORMAT") from exc
 
 
 class JobStatus(str):
