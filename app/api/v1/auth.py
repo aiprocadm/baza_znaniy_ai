@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlmodel import Session, select
 
 from app.core.datetime_utils import utc_now
+from app.core.email import EmailValidationError, normalise_email
 from app.core.auth import (
     TokenPair,
     _extract_bearer_token,
@@ -23,8 +24,16 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 
 class LoginRequest(BaseModel):
-    email: EmailStr
+    email: str
     password: str = Field(..., min_length=1)
+
+    @field_validator("email")
+    @classmethod
+    def _validate_email(cls, value: str) -> str:
+        try:
+            return normalise_email(value)
+        except EmailValidationError as exc:
+            raise ValueError("INVALID_EMAIL_FORMAT") from exc
 
 
 class TokenResponse(BaseModel):
