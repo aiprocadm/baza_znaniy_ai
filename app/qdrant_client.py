@@ -3,9 +3,21 @@
 from __future__ import annotations
 
 from functools import lru_cache
-from typing import Iterable, Iterator
+from typing import Iterable, Iterator, Protocol, runtime_checkable, cast
 
-from app.core.config import Settings, get_settings
+from app.core.config import get_settings
+
+
+@runtime_checkable
+class QdrantSettings(Protocol):
+    """Protocol describing the configuration required by this module."""
+
+    qdrant_url: str
+    qdrant_api_key: str | None
+    qdrant_collection: str
+    qdrant_path_resolved: str
+    vector_embed_model: str
+    vector_embed_dimension: int
 
 try:  # pragma: no cover - optional dependency surface during import
     from app.retriever import VectorStore, get_vector_store as _get_vector_store_factory
@@ -26,8 +38,13 @@ _SETTING_EXPORTS = {
 
 
 @lru_cache(maxsize=1)
-def _cached_settings() -> Settings:
-    return get_settings()
+def _cached_settings() -> QdrantSettings:
+    settings = get_settings()
+    if not isinstance(settings, QdrantSettings):
+        # ``SimpleNamespace`` instances used in tests satisfy the protocol but do
+        # not register automatically; cast to appease type-checkers.
+        return cast(QdrantSettings, settings)
+    return settings
 
 
 @lru_cache(maxsize=1)
