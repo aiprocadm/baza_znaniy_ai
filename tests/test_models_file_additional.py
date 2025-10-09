@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import pytest
 from sqlalchemy import Column, Integer, MetaData, Table
-import pytest
-from sqlalchemy import Column, Integer, MetaData, Table
 
 from app.models import file as file_module
 
