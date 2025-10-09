@@ -17,7 +17,9 @@ from app.ingest.service import IngestService
 from app.services.files import FileStore, IngestQueue
 
 
-DEFAULT_ALLOWED_EXTENSIONS = frozenset({"pdf", "docx", "pptx", "xlsx", "txt", "md"})
+DEFAULT_ALLOWED_EXTENSIONS = frozenset(
+    {"pdf", "docx", "pptx", "xlsx", "txt", "md", "html"}
+)
 
 
 @dataclass

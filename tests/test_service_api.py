@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from fastapi import APIRouter
+from fastapi import APIRouter, status
 from fastapi.testclient import TestClient
 
 from app.core.datetime_utils import utc_now
@@ -188,7 +188,8 @@ def test_upload_rejects_invalid_extension(service_app: Any):
             files={"files": ("image.png", b"binary", "image/png")},
         )
 
-        assert response.status_code == 400
+        expected = getattr(status, "HTTP_415_UNSUPPORTED_MEDIA_TYPE", 415)
+        assert response.status_code == expected
         assert response.json()["detail"] == "UPLOAD_INVALID_EXT"
 
 
