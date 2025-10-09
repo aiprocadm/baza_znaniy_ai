@@ -5,11 +5,12 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
 import tarfile
 import tempfile
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable
 
 from app.core.config import get_settings
 from app.retriever import get_vector_store
@@ -41,6 +42,21 @@ def _load_manifest(root: Path) -> dict[str, Any]:
     return {}
 
 
+def _safe_members(members: Iterable[tarfile.TarInfo]) -> Iterable[tarfile.TarInfo]:
+    """Yield members that are safe to extract under the current directory."""
+
+    for member in members:
+        name = member.name or ""
+        if not name:
+            continue
+        if os.path.isabs(name):
+            continue
+        path = Path(name)
+        if any(part == ".." for part in path.parts):
+            continue
+        yield member
+
+
 def _restore_sqlite(source: Path, destination: Path) -> None:
     destination.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(source, destination)
@@ -51,7 +67,8 @@ def import_all(path: Path, *, reset: bool = False) -> int:
     with tempfile.TemporaryDirectory() as tmp_dir:
         root = Path(tmp_dir)
         with tarfile.open(path, "r:gz") as tar:
-            tar.extractall(root)
+            safe_members = list(_safe_members(tar.getmembers()))
+            tar.extractall(root, members=safe_members, filter="data")
 
         manifest = _load_manifest(root)
 

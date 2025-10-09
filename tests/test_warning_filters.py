@@ -4,7 +4,7 @@ import importlib
 import warnings
 
 
-def test_swig_deprecation_warnings_reported_once() -> None:
+def test_swig_deprecation_warnings_are_suppressed() -> None:
     module = importlib.import_module("app")
 
     with warnings.catch_warnings(record=True) as caught:
@@ -20,6 +20,5 @@ def test_swig_deprecation_warnings_reported_once() -> None:
         warnings.warn("a different warning", DeprecationWarning)
 
     assert [warning.message.args[0] for warning in caught] == [
-        "builtin type SwigPyObject has no __module__ attribute",
         "a different warning",
     ]

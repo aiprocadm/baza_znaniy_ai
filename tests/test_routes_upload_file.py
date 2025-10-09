@@ -18,6 +18,7 @@ except ModuleNotFoundError:  # pragma: no cover - fallback when Starlette missin
 
 from app.api import routes as routes_module
 from app.api import upload_utils
+from app.api.status_codes import HTTP_CONTENT_TOO_LARGE
 
 
 @pytest.fixture()
@@ -67,12 +68,11 @@ def test_coerce_upload_file_handles_tuple_with_bytes(monkeypatch: pytest.MonkeyP
 def test_upload_rejects_oversized_body(docs_client: TestClient) -> None:
     oversized = b"x" * (1024 * 1024 + 1)
 
-    expected_status = getattr(status, "HTTP_413_REQUEST_ENTITY_TOO_LARGE", 413)
     response = docs_client.post(
         "/api/docs/upload",
         data={"user_id": "tester"},
         files={"file": ("big.txt", oversized, "text/plain")},
     )
 
-    assert response.status_code == expected_status
+    assert response.status_code == HTTP_CONTENT_TOO_LARGE
     assert response.json()["detail"] == "UPLOAD_TOO_LARGE"
