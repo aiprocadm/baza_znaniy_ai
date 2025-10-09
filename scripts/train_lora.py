@@ -137,7 +137,6 @@ def train_lora_adapter(examples: List[Example], *, base_model: str, output_dir: 
     if not examples:
         raise ValueError("Dataset is empty after loading.")
     try:
-        import torch
         from transformers import AutoModelForCausalLM, AutoTokenizer, TrainingArguments, Trainer
         from transformers.trainer_utils import set_seed
         from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
@@ -195,7 +194,8 @@ def train_lora_adapter(examples: List[Example], *, base_model: str, output_dir: 
         save_total_limit=2,
     )
 
-    data_collator = lambda data: _collate(tokenizer, data)
+    def data_collator(data):
+        return _collate(tokenizer, data)
 
     trainer = Trainer(
         model=model,

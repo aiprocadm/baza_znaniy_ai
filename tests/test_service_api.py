@@ -9,7 +9,6 @@ import logging
 import os
 import shutil
 import sys
-import time
 import types
 from pathlib import Path
 from typing import Any

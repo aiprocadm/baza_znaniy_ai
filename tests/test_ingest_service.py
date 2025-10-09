@@ -8,7 +8,7 @@ import pytest
 from sqlmodel import Session, select
 
 from app.core.datetime_utils import utc_now
-from app.ingest.service import IngestJob, IngestService, IngestWorker
+from app.ingest.service import IngestService, IngestWorker
 from app.models import file as file_models
 from app.models.entities import JobStatus, TenantRecord
 from app.models.file import (

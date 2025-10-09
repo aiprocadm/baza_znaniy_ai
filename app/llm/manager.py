@@ -7,10 +7,7 @@ import math
 from types import SimpleNamespace
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable, Protocol, runtime_checkable
-
-if TYPE_CHECKING:  # pragma: no cover - import for static analysis only
-    from app.core.config import Settings
+from typing import Any, Callable, Protocol, runtime_checkable
 
 
 @runtime_checkable
@@ -31,7 +28,7 @@ def _ensure_llm_package_exports() -> None:
         return
     try:
         from . import cache as _cache
-        from .providers import LLMProvider, get_llm_provider
+        from .providers import LLMProvider
     except Exception:  # pragma: no cover - optional dependencies may be missing
         return
 

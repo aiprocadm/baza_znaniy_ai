@@ -19,7 +19,18 @@ class Paragraph:
 
 class Document:
     def __init__(self, stream: Iterable[bytes]) -> None:
-        data = stream.read() if hasattr(stream, "read") else bytes(stream)
+        if hasattr(stream, "read"):
+            data = stream.read()
+        elif isinstance(stream, (bytes, bytearray, memoryview)):
+            data = bytes(stream)
+        else:
+            chunks = []
+            for part in stream:
+                if isinstance(part, (bytes, bytearray, memoryview)):
+                    chunks.append(bytes(part))
+                else:
+                    chunks.append(bytes([int(part)]))
+            data = b"".join(chunks)
         if not data:
             raise ValueError("Empty DOCX payload")
 

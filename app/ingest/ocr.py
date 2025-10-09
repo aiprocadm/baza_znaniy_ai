@@ -145,7 +145,7 @@ def iter_pdf_pages_with_ocr(
             except OCRError as exc:
                 LOGGER.error("OCR failed for page %s: %s", index + 1, exc)
                 yield index + 1, ""
-            except Exception as exc:
+            except Exception:
                 LOGGER.exception("Unexpected OCR failure on page %s", index + 1)
                 yield index + 1, ""
             else:
