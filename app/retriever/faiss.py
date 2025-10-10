@@ -194,8 +194,7 @@ class FaissVectorStore:
                 self._ordered_ids.append(identifier)
 
         self._persist_payloads()
-        self._index = None
-        self._ensure_index_loaded()
+        self._rebuild_index()
 
     def search(self, query: str, top_k: int) -> list[dict[str, object]]:
         if top_k <= 0:
