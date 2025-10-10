@@ -31,17 +31,19 @@ jobs:
             pyproject.toml
             poetry.lock
 
-      - name: Pre-install binary wheels for heavy deps
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install --only-binary=:all: numpy faiss-cpu sentence-transformers llama-cpp-python
+      - name: Upgrade pip
+        run: python -m pip install --upgrade pip
 
-      - name: Install dependencies
+      - name: Purge pip cache
+        run: python -m pip cache purge
+
+      - name: Install CPU PyTorch
+        run: python -m pip install --index-url https://download.pytorch.org/whl/cpu torch==2.4.1
+
+      - name: Install project dependencies
         run: |
-          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-          if [ -f requirements-dev.txt ]; then pip install -r requirements-dev.txt; fi
-          if [ -f pyproject.toml ]; then pip install -e .; fi
-          pip install ruff black mypy
+          python -m pip install -r requirements-runtime.txt -r requirements-llm.txt -r requirements-dev.txt
+          python -m pip install -e .
 
       - name: Restore GGUF cache
         uses: actions/cache@v4

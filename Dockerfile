@@ -13,9 +13,10 @@ ARG LLM_MODEL_OUTPUT=models/model.gguf
 
 ENV HUGGINGFACE_HUB_TOKEN=${HUGGINGFACE_HUB_TOKEN}
 
-COPY requirements.txt ./
+COPY requirements-runtime.txt requirements-llm.txt requirements-train.txt requirements-dev.txt requirements.txt ./
 RUN pip install --no-cache-dir --upgrade pip \
-    && pip install --no-cache-dir -r requirements.txt
+    && pip install --no-cache-dir --index-url https://download.pytorch.org/whl/cpu torch==2.4.1 \
+    && pip install --no-cache-dir -r requirements-runtime.txt -r requirements-llm.txt
 
 COPY app ./app
 COPY data ./data
