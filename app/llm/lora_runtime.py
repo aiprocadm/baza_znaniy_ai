@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable
 
@@ -26,6 +27,7 @@ class AdapterInfo:
     directory: Path
     payload: Path
     manifest_path: Path
+    scaling: float = 1.0
 
     @property
     def format(self) -> str:
@@ -36,7 +38,7 @@ class AdapterInfo:
             return "peft"
         return adapter_type
 
-    def to_dict(self) -> dict[str, str | int]:
+    def to_dict(self) -> dict[str, str | int | float]:
         return {
             "name": self.name,
             "base": self.base,
@@ -44,7 +46,40 @@ class AdapterInfo:
             "seq_len": self.seq_len,
             "created_at": self.created_at,
             "path": str(self.payload),
+            "scaling": float(self.scaling),
         }
+
+    @classmethod
+    def from_path(
+        cls,
+        path: Path,
+        *,
+        base: str,
+        adapter_type: str | None = None,
+        scaling: float = 1.0,
+    ) -> "AdapterInfo":
+        adapter_type = (adapter_type or path.suffix.lstrip(".")).lower()
+        if adapter_type in {"", "gguf", "llama", "llama.cpp"}:
+            adapter_type = "gguf"
+        elif adapter_type in {"safetensors", "peft", "adapter_model", "bin"}:
+            adapter_type = "peft"
+        created_at = (
+            datetime.now(timezone.utc)
+            .replace(microsecond=0)
+            .isoformat()
+            .replace("+00:00", "Z")
+        )
+        return cls(
+            name=path.stem,
+            base=base,
+            adapter_type=adapter_type,
+            seq_len=0,
+            created_at=created_at,
+            directory=path.parent,
+            payload=path,
+            manifest_path=path,
+            scaling=float(scaling),
+        )
 
 
 _ACTIVE_ADAPTER: AdapterInfo | None = None
@@ -97,6 +132,7 @@ def _iter_manifests(registry_dir: Path) -> Iterable[AdapterInfo]:
                 directory=entry,
                 payload=_discover_payload(entry, str(manifest.get("type", "peft"))),
                 manifest_path=manifest_path,
+                scaling=float(manifest.get("scaling", 1.0)),
             )
         except KeyError as exc:
             raise RegistryError(f"Manifest {manifest_path} missing required field: {exc}") from exc
@@ -138,7 +174,8 @@ def load_adapter(name: str) -> AdapterInfo:
 
     _ensure_compatible(candidate)
 
-    provider = get_cached_provider(get_settings())
+    settings = get_settings()
+    provider = get_cached_provider(settings)
     ensure_model = getattr(provider, "ensure_model", None)
     if callable(ensure_model):
         ensure_model()
@@ -160,8 +197,8 @@ def load_adapter(name: str) -> AdapterInfo:
     else:
         raise AdapterCompatibilityError(f"Unsupported adapter format: {candidate.format}")
 
-    global _ACTIVE_ADAPTER
-    _ACTIVE_ADAPTER = candidate
+    candidate.scaling = float(settings.lora_scaling)
+    set_active_adapter(candidate)
     return candidate
 
 
@@ -179,11 +216,25 @@ def unload_adapter(name: str | None = None) -> None:
     if callable(unload_fn):
         LOGGER.info("Unloading LoRA adapter: %s", _ACTIVE_ADAPTER.payload)
         unload_fn()
-    _ACTIVE_ADAPTER = None
+    set_active_adapter(None)
 
 
 def active_adapter() -> AdapterInfo | None:
     return _ACTIVE_ADAPTER
 
 
-__all__ = ["AdapterInfo", "AdapterCompatibilityError", "RegistryError", "list_adapters", "load_adapter", "unload_adapter", "active_adapter"]
+def set_active_adapter(info: AdapterInfo | None) -> None:
+    global _ACTIVE_ADAPTER
+    _ACTIVE_ADAPTER = info
+
+
+__all__ = [
+    "AdapterInfo",
+    "AdapterCompatibilityError",
+    "RegistryError",
+    "list_adapters",
+    "load_adapter",
+    "unload_adapter",
+    "active_adapter",
+    "set_active_adapter",
+]
