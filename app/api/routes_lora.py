@@ -14,7 +14,7 @@ from app.llm.lora_runtime import (
     load_adapter,
     unload_adapter,
 )
-from app.models.lora import LoraAdapterInfo, LoraAdapterName, LoraStatusResponse
+from app.models.lora import LoraAdapterInfo, LoraAdapterNamePayload, LoraStatusResponse
 
 router = APIRouter(prefix="/admin/lora", tags=["lora"], dependencies=[Depends(require_admin_user)])
 
@@ -34,7 +34,7 @@ async def get_adapter_status() -> LoraStatusResponse:
 
 
 @router.post("/load", response_model=LoraStatusResponse)
-async def load_registered_adapter(payload: LoraAdapterName) -> LoraStatusResponse:
+async def load_registered_adapter(payload: LoraAdapterNamePayload) -> LoraStatusResponse:
     try:
         info = load_adapter(payload.name)
     except RegistryError as exc:
@@ -47,7 +47,7 @@ async def load_registered_adapter(payload: LoraAdapterName) -> LoraStatusRespons
 
 
 @router.post("/unload", response_model=LoraStatusResponse)
-async def unload_current_adapter(payload: LoraAdapterName | None = None) -> LoraStatusResponse:
+async def unload_current_adapter(payload: LoraAdapterNamePayload | None = None) -> LoraStatusResponse:
     try:
         unload_adapter(payload.name if payload else None)
     except RegistryError as exc:
