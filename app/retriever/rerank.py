@@ -24,7 +24,7 @@ def is_rerank_enabled(
 ) -> bool:
     """Return whether reranking should be enabled based on environment variables."""
 
-    source = env or os.environ
+    source = os.environ if env is None else env
     value = source.get("RERANK_ENABLED")
     if value is None:
         return default
