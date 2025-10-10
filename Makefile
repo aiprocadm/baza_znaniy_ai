@@ -7,7 +7,7 @@ PORT ?= 8000
 IMAGE ?= kb-ai:local
 TORCH_INDEX ?= https://download.pytorch.org/whl/cpu
 
-.PHONY: venv install dev lint format test run worker build clean
+.PHONY: venv install dev lint format test run worker build clean web-install web-lint web-format web-test web-build web-run
 
 venv:
 	$(PYTHON) -m venv .venv
@@ -41,4 +41,22 @@ build:
 	docker build -t $(IMAGE) .
 
 clean:
-	rm -rf __pycache__ */__pycache__ .pytest_cache cov_html .coverage coverage.xml
+        rm -rf __pycache__ */__pycache__ .pytest_cache cov_html .coverage coverage.xml
+
+web-install:
+        cd frontend && npm install
+
+web-lint:
+        cd frontend && npm run lint
+
+web-format:
+        cd frontend && npm run format
+
+web-test:
+        cd frontend && npm run test
+
+web-build:
+        cd frontend && npm run build
+
+web-run:
+        cd frontend && npm run dev -- --host 0.0.0.0
