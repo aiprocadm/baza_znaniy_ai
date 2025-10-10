@@ -5,7 +5,6 @@ import sys
 from collections.abc import Callable
 from types import ModuleType
 
-import pytest
 
 
 def _reload_worker_module():

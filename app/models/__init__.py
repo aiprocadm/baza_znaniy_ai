@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
 
 from app.core.datetime_utils import utc_now
-from .lora import LoraLoadRequest, LoraStatusResponse, LoraUnloadRequest
+from .lora import LoraAdapterInfo, LoraAdapterName, LoraStatusResponse
 
 import importlib
 
@@ -233,9 +233,9 @@ __all__ = [
     "SearchHit",
     "SearchResponse",
     "UploadResponse",
-    "LoraLoadRequest",
+    "LoraAdapterInfo",
+    "LoraAdapterName",
     "LoraStatusResponse",
-    "LoraUnloadRequest",
     "TenantCreate",
     "TenantRecord",
     "TenantResponse",

@@ -56,6 +56,7 @@ except ImportError:  # pragma: no cover - fallback when cache reset is unavailab
 
     def reset_provider_cache() -> None:  # type: ignore[redefining-outer-name]
         return None
+from app.llm import lora_runtime
 from app.llm.manager import LlamaLoraManager
 from app.observability.metadata_guard import (
     check_sqlmodel_metadata,
@@ -264,6 +265,14 @@ def create_app(provider: LLMProvider | None = None) -> FastAPI:
     application.state.min_citations = min_citations
     application.state.max_citations = max_citations
     application.state.token_registry = TokenRegistry()
+
+    if getattr(settings, "use_lora", False):
+        default_adapter = getattr(settings, "lora_default_adapter", "none") or "none"
+        if default_adapter.lower() not in {"none", "0", "false", "no"}:
+            try:
+                lora_runtime.load_adapter(default_adapter)
+            except Exception:  # pragma: no cover - best effort startup log
+                logger.exception("Failed to load default LoRA adapter: %s", default_adapter)
 
     application.include_router(ui_router)
 

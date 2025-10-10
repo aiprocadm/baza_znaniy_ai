@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import math
-from pathlib import Path
 
 import pytest
 
@@ -68,17 +67,14 @@ def test_after_validators_cannot_bypass_numeric_constraints() -> None:
         ValidatedModel(amount=1.0)
 
 
-def test_lora_load_request_model_validate_enforces_scaling_constraints(tmp_path: Path) -> None:
-    """The application schema should use the stub's validation semantics."""
+def test_lora_adapter_name_validation() -> None:
+    """Adapter names must be non-empty after stripping whitespace."""
 
-    from app.models.lora import LoraLoadRequest
+    from app.models.lora import LoraAdapterName
     from pydantic import ValidationError
 
-    payload = {"path": str(tmp_path / "adapter.gguf")}
+    assert LoraAdapterName(name="demo").name == "demo"
 
     with pytest.raises(ValidationError):
-        LoraLoadRequest.model_validate({**payload, "scaling": -0.1})
-
-    with pytest.raises(ValidationError):
-        LoraLoadRequest.model_validate({**payload, "scaling": float("nan")})
+        LoraAdapterName(name="  ")
 

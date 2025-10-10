@@ -157,6 +157,108 @@ pip install .[dev]
 Dev-зависимости включают парсеры `openpyxl` и `python-pptx`, которые нужны для
 юнит-тестов обработки XLSX и PPTX-документов.
 
+## Как обучить свой LoRA-адаптер
+
+Ниже — минимальный путь от данных до подключенного адаптера. Все команды
+рассчитаны на Linux/macOS; в PowerShell используйте эквиваленты.
+
+1. **Подготовьте датасет.** Каждый пример — строка JSON с полями
+   `instruction`, `input` (можно оставить пустым) и `output`:
+
+   ```json
+   {"instruction": "Объясни правило сложения", "input": "2+2", "output": "2+2=4"}
+   ```
+
+   Пример см. в [`data/dev.jsonl`](data/dev.jsonl). Чем чище ответы, тем выше
+   метрики EM/ROUGE.
+
+2. **Проверьте качество данных.** Скрипт ищет дубликаты, пустые поля и статистику
+   токенов:
+
+   ```bash
+   python scripts/validate_dataset.py \
+     --path data/dev.jsonl \
+     --base-model "${LORA_TRAIN_BASE_MODEL:-sshleifer/tiny-gpt2}" \
+     --max-seq-len "${LORA_TRAIN_MAX_SEQ_LEN:-4096}"
+   ```
+
+   Отчёты сохраняются в JSON и Markdown; при критичных проблемах код возврата >0.
+
+3. **Запустите обучение.** Минимальный пример c tiny-моделью (для быстрой
+   проверки) и отключённым QLoRA:
+
+   ```bash
+   export LORA_USE_QLORA=0
+   python scripts/train_lora.py \
+     --base-model sshleifer/tiny-gpt2 \
+     --train data/lora/smoke_train.jsonl \
+     --eval data/lora/smoke_eval.jsonl \
+     --output "$LORA_TRAIN_OUTPUT_DIR" \
+     --max-seq-len 512 \
+     --epochs 1 \
+     --lr 2e-4 \
+     --batch-size 1 \
+     --gradient-accumulation 4 \
+     --lora-r 16 \
+     --lora-alpha 32 \
+     --lora-dropout 0.05 \
+     --target-modules c_attn,c_proj \
+     --no-qlora
+   ```
+
+   Скрипт сохранит артефакты в каталоге `runs/<timestamp>_*`: `adapter/`,
+   `metrics.json`, `trainer_state.json`, `tokenizer/` и журнал `logs/training.jsonl`.
+
+4. **Оцените адаптер.** Получите EM/ROUGE-L на валидации и проверьте пороги:
+
+   ```bash
+  python scripts/eval_lora.py \
+    --base-model sshleifer/tiny-gpt2 \
+    --adapter runs/<...>/adapter/adapter.safetensors \
+     --dataset data/lora/smoke_eval.jsonl \
+     --max-new-tokens 128 \
+     --min-em 0.2 \
+     --min-rouge 0.2
+   ```
+
+5. **(Опционально) конвертируйте в GGUF для llama.cpp.**
+
+   ```bash
+  python scripts/convert_lora_to_gguf.py \
+    --base-model ./models/model.gguf \
+    --adapter runs/<...>/adapter/adapter.safetensors \
+     --out ./data/lora/registry/my-adapter/adapter.gguf
+   ```
+
+6. **Зарегистрируйте адаптер.** В каталоге `LORA_REGISTRY_DIR` создайте папку с
+   файлами и манифестом:
+
+   ```bash
+   mkdir -p data/lora/registry/demo
+  cp runs/<...>/adapter/adapter.safetensors data/lora/registry/demo/
+   cat > data/lora/registry/demo/manifest.json <<'JSON'
+   {"name":"demo","base":"meta-llama/Llama-3-8b-Instruct","type":"peft","seq_len":4096,"created_at":"2024-01-01T00:00:00Z"}
+   JSON
+   ```
+
+7. **Горячо подключите адаптер через API.**
+
+   ```bash
+   curl -X POST http://localhost:8000/admin/lora/load \
+     -H "X-API-Key: <ключ>" \
+     -H "Content-Type: application/json" \
+     -d '{"name":"demo"}'
+
+   curl http://localhost:8000/admin/lora/list -H "X-API-Key: <ключ>"
+   curl -X POST http://localhost:8000/admin/lora/unload -H "X-API-Key: <ключ>" -d '{"name":"demo"}'
+   ```
+
+Типовые ошибки:
+
+- «Adapter ... not found» — неправильное имя каталога или отсутствует `manifest.json`.
+- «does not support GGUF adapters» — провайдер LLM не умеет подключать данный формат (нужно конвертировать).
+- «token count exceeds max_seq_len» — пересмотрите `LORA_TRAIN_MAX_SEQ_LEN` или обрежьте источник.
+
 ### Минимальный набор для pytest
 
 Если требуется лишь прогнать тесты без полного окружения, заранее установите
