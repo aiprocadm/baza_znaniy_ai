@@ -459,18 +459,12 @@ async def upload_file(
             mime_type=mime_type,
         )
     except IngestQueueFullError as exc:
-        try:
-            target.unlink()
-        except FileNotFoundError:  # pragma: no cover - defensive cleanup
-            pass
+        _cleanup_ingest_target(target, tenant_root)
         status_code = getattr(status, "HTTP_429_TOO_MANY_REQUESTS", 429)
         raise HTTPException(status_code, detail=str(exc)) from exc
 
     if not queued and record.path != str(target):
-        try:
-            target.unlink()
-        except FileNotFoundError:  # pragma: no cover - defensive cleanup
-            pass
+        _cleanup_ingest_target(target, tenant_root)
 
     file_identifier = str(record.id or "")
     if not file_identifier:
@@ -483,6 +477,23 @@ async def upload_file(
         status=record.status,
         queued=queued,
     )
+
+
+def _cleanup_ingest_target(target: Path, tenant_root: Path) -> None:
+    """Remove transient files and empty directories created during ingestion."""
+
+    try:
+        target.unlink()
+    except FileNotFoundError:  # pragma: no cover - defensive cleanup
+        pass
+
+    bucket = target.parent
+    try:
+        while bucket != tenant_root and bucket != bucket.parent:
+            bucket.rmdir()
+            bucket = bucket.parent
+    except OSError:  # pragma: no cover - directory not empty
+        pass
 
 
 def _extract_disposition_filename(source: object) -> str | None:

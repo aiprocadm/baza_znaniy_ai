@@ -6,20 +6,98 @@ import math  # Standard library is required for runtime validators.
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any
 
-from pydantic import BaseModel, Field, ConfigDict, field_validator
+from pydantic import BaseModel, Field, ConfigDict, field_validator, ValidationError
+from pydantic import GetCoreSchemaHandler, GetJsonSchemaHandler
+from pydantic_core import PydanticCustomError, core_schema
 
 if TYPE_CHECKING:  # pragma: no cover - circular import guard for type checking
     from app.llm.lora_runtime import AdapterInfo
 
 
-LoraAdapterName = Annotated[
-    str,
-    Field(
-        min_length=1,
-        max_length=128,
-        description="Human readable adapter identifier",
-    ),
-]
+class LoraAdapterName(str):
+    """Validated adapter identifier that behaves like a string."""
+
+    _MIN_LENGTH = 1
+    _MAX_LENGTH = 128
+
+    def __new__(cls, value: object = None, *, name: object | None = None) -> "LoraAdapterName":
+        if value is None:
+            if name is None:
+                raise TypeError("LoraAdapterName requires a value")
+            value = name
+        elif name is not None:
+            raise TypeError("Specify either 'value' or 'name', not both")
+
+        try:
+            validated = cls._validate_string(value)
+        except PydanticCustomError as exc:
+            raise ValidationError.from_exception_data(
+                "LoraAdapterName",
+                [
+                    {
+                        "type": exc.type,
+                        "loc": ("name",),
+                        "msg": exc.message,
+                        "input": value,
+                        "ctx": exc.context,
+                    }
+                ],
+            ) from exc
+        except ValueError as exc:
+            raise ValidationError.from_exception_data(
+                "LoraAdapterName",
+                [
+                    {
+                        "type": "value_error",
+                        "loc": ("name",),
+                        "msg": str(exc),
+                        "input": value,
+                    }
+                ],
+            ) from exc
+        return str.__new__(cls, validated)
+
+    @property
+    def name(self) -> str:
+        return str(self)
+
+    @classmethod
+    def _validate_string(cls, candidate: object) -> str:
+        string = str(candidate) if candidate is not None else ""
+        string = string.strip()
+        if len(string) < cls._MIN_LENGTH:
+            raise PydanticCustomError(
+                "string_too_short",
+                "Adapter name must not be empty",
+                {"min_length": cls._MIN_LENGTH},
+            )
+        if len(string) > cls._MAX_LENGTH:
+            raise PydanticCustomError(
+                "string_too_long",
+                f"Adapter name must not exceed {cls._MAX_LENGTH} characters",
+                {"max_length": cls._MAX_LENGTH},
+            )
+        return string
+
+    @classmethod
+    def _validate(cls, candidate: object) -> "LoraAdapterName":
+        if isinstance(candidate, cls):
+            return candidate
+        return cls(cls._validate_string(candidate))
+
+    @classmethod
+    def __get_pydantic_core_schema__(
+        cls, source_type: type[object], handler: GetCoreSchemaHandler
+    ) -> core_schema.CoreSchema:
+        return core_schema.no_info_plain_validator_function(cls._validate)
+
+    @classmethod
+    def __get_pydantic_json_schema__(
+        cls, core_schema: core_schema.CoreSchema, handler: GetJsonSchemaHandler
+    ) -> dict[str, Any]:
+        schema = {"type": "string", "minLength": cls._MIN_LENGTH, "maxLength": cls._MAX_LENGTH}
+        schema["description"] = "Human readable adapter identifier"
+        return schema
 
 
 ScalingFactor = Annotated[
