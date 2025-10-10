@@ -4,11 +4,22 @@ from pathlib import Path
 from tempfile import SpooledTemporaryFile
 from types import ModuleType, SimpleNamespace
 
+import hashlib
+import warnings
+
 import pytest
 import asyncio
 import importlib.util
 import pydantic
 import sysconfig
+
+warnings.filterwarnings(
+    "ignore",
+    category=DeprecationWarning,
+    message=r"builtin type swigvarlink has no __module__ attribute",
+)
+
+import app  # ensure warning filters are installed
 
 
 if "fastapi" not in sys.modules:
@@ -137,6 +148,17 @@ def _invoke_post(app: FastAPI, path: str, *, files: list[tuple[str, object]]) ->
     return _StubResponse(route.status_code, content)
 
 
+def _expected_storage_path(base: Path, tenant: str, payload: bytes, filename: str) -> Path:
+    sha_value = hashlib.sha256(payload).hexdigest()
+    suffix = Path(filename).suffix
+    extension = suffix.lstrip(".")
+    resolved_root = base.resolve()
+    tenant_root = (resolved_root / tenant).resolve()
+    bucket = tenant_root / sha_value[:2]
+    suffix = f".{extension}" if extension else ""
+    return bucket / f"{sha_value}{suffix}"
+
+
 class _PrometheusMetric:
     def labels(self, **_: object) -> "_PrometheusMetric":
         return self
@@ -198,13 +220,6 @@ if _pydantic is not None and not hasattr(_pydantic, "model_validator"):
     setattr(_pydantic, "model_validator", _model_validator)
 
 
-if "app.core.auth" not in sys.modules:
-    auth_module = ModuleType("app.core.auth")
-    auth_module.ensure_tenant_access = lambda: "default"
-    auth_module.get_current_active_user = lambda: object()
-    sys.modules["app.core.auth"] = auth_module
-
-
 if "app.core.deps" not in sys.modules:
     deps_module = ModuleType("app.core.deps")
 
@@ -225,12 +240,15 @@ if "app.core.deps" not in sys.modules:
     deps_module.UploadLimits = UploadLimits
     deps_module.DEFAULT_ALLOWED_EXTENSIONS = frozenset({"txt", "md"})
     deps_module.get_data_dir = lambda: Path(".")
+    deps_module.get_tenant = lambda: "default"
+    deps_module.get_ingest_session = lambda: None
+    deps_module.get_file_store = lambda: None
+    deps_module.get_ingest_queue = lambda: None
     deps_module.get_ingest_service = lambda: None
     deps_module.get_upload_limits = UploadLimits
     sys.modules["app.core.deps"] = deps_module
 else:
     from app.core.deps import UploadLimits  # type: ignore
-
 
 
 upload_utils_path = Path(__file__).resolve().parents[1] / "app" / "api" / "upload_utils.py"
@@ -433,7 +451,9 @@ def test_upload_file_tuple_input_preserves_payload(tmp_path: Path) -> None:
 
     assert response.filename == "tuple.txt"
     recorded = service.calls[0]
+    expected_path = _expected_storage_path(tmp_path, "tuple-tenant", payload, recorded["filename"])
     stored_path = Path(recorded["path"])
+    assert stored_path == expected_path
     assert stored_path.exists()
     assert stored_path.read_bytes() == payload
     assert recorded["size"] == len(payload)
@@ -462,7 +482,9 @@ def test_upload_file_list_input_preserves_payload(tmp_path: Path) -> None:
 
     assert response.filename == "list.txt"
     recorded = service.calls[0]
+    expected_path = _expected_storage_path(tmp_path, "list-tenant", payload, recorded["filename"])
     stored_path = Path(recorded["path"])
+    assert stored_path == expected_path
     assert stored_path.exists()
     assert stored_path.read_bytes() == payload
     assert recorded["size"] == len(payload)
@@ -493,7 +515,9 @@ def test_upload_file_dict_input_preserves_payload(tmp_path: Path) -> None:
 
     assert response.filename == "dict.txt"
     recorded = service.calls[0]
+    expected_path = _expected_storage_path(tmp_path, "dict-tenant", payload, recorded["filename"])
     stored_path = Path(recorded["path"])
+    assert stored_path == expected_path
     assert stored_path.exists()
     assert stored_path.read_bytes() == payload
     assert recorded["size"] == len(payload)
@@ -531,7 +555,9 @@ def test_upload_endpoint_handles_multiple_formats(tmp_path: Path) -> None:
     assert service.calls, "register_file should be invoked"
     recorded = service.calls[0]
     assert recorded["mime_type"] == "application/pdf"
+    expected_path = _expected_storage_path(tmp_path, "tenant-x", pdf_payload, recorded["filename"])
     stored_path = Path(recorded["path"])
+    assert stored_path == expected_path
     assert stored_path.exists()
     assert stored_path.read_bytes() == pdf_payload
 
@@ -570,4 +596,9 @@ def test_upload_does_not_mutate_original_uploadfile(tmp_path: Path) -> None:
     assert response.filename == "immutable.txt"
     assert original.filename == ""
     recorded = service.calls[0]
-    assert Path(recorded["path"]).read_bytes() == payload
+    expected_path = _expected_storage_path(
+        tmp_path, "immutable", payload, recorded["filename"]
+    )
+    stored_path = Path(recorded["path"])
+    assert stored_path == expected_path
+    assert stored_path.read_bytes() == payload
