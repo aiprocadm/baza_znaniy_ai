@@ -1,3 +1,4 @@
+import io
 import json
 import os
 import sys
@@ -127,7 +128,8 @@ def test_export_all_creates_tarball(tmp_path, monkeypatch):
         assert f"{export_module.DB_DIR}/{memory_db.name}" in members
         assert export_module.MANIFEST_FILE in members
         extract_dir = tmp_path / "extracted"
-        tar.extractall(extract_dir)
+        safe_members = list(import_module._safe_members(tar.getmembers()))  # type: ignore[attr-defined]
+        tar.extractall(extract_dir, members=safe_members, filter="data")
 
     data = json.loads((extract_dir / export_module.PAYLOADS_FILE).read_text())
     assert data[0]["vector"] == [1.0, 2.0, 3.0]
@@ -171,3 +173,40 @@ def test_import_all_restores_tarball(tmp_path, monkeypatch):
 
     assert chat_db.read_text() == "chat data"
     assert memory_db.read_text() == "memory data"
+
+
+def test_import_all_skips_path_traversal_members(tmp_path, monkeypatch):
+    data_dir = tmp_path / "data"
+    payloads = [{"id": "1", "vector": [1.0], "text": "safe", "sha256": "abc"}]
+
+    export_store = DummyExportStore(payloads)
+    monkeypatch.setenv("DATA_DIR", str(data_dir))
+    get_settings.cache_clear()
+    monkeypatch.setattr(export_module, "get_vector_store", lambda settings: export_store)
+
+    archive = tmp_path / "export.tar.gz"
+    export_module.export_all(archive)
+
+    extracted = tmp_path / "extracted"
+    with tarfile.open(archive, "r:gz") as tar:
+        members = list(import_module._safe_members(tar.getmembers()))  # type: ignore[attr-defined]
+        tar.extractall(extracted, members=members, filter="data")
+
+    archive.unlink()
+    with tarfile.open(archive, "w:gz") as tar:
+        for path in sorted(extracted.rglob("*")):
+            tar.add(path, arcname=str(path.relative_to(extracted)))
+
+        info = tarfile.TarInfo("../evil.txt")
+        data = b"malicious"
+        info.size = len(data)
+        tar.addfile(info, io.BytesIO(data))
+
+    import_store = DummyImportStore()
+    monkeypatch.setattr(import_module, "get_vector_store", lambda settings: import_store)
+    get_settings.cache_clear()
+
+    restored = import_module.import_all(archive)
+
+    assert restored == len(payloads)
+    assert not (tmp_path / "evil.txt").exists()

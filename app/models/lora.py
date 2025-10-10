@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+import math  # Standard library is required for runtime validators.
+from pathlib import Path
+from typing import TYPE_CHECKING, Annotated, Any
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -10,18 +12,47 @@ if TYPE_CHECKING:  # pragma: no cover - circular import guard for type checking
     from app.llm.lora_runtime import AdapterInfo
 
 
-class LoraAdapterName(BaseModel):
-    """Payload describing an adapter identified by name."""
+ScalingFactor = Annotated[
+    float,
+    Field(
+        gt=0.0,
+        le=10.0,
+        description="Scaling factor applied to the adapter weights",
+    ),
+]
 
-    name: str = Field(..., min_length=1, description="Registry name of the adapter")
+
+class LoraBaseRequest(BaseModel):
+    """Common payload data for LoRA adapter operations."""
+
+    path: Path = Field(..., description="Filesystem path to the adapter file")
+    scaling: ScalingFactor = Field(default=1.0)
+
+    def model_post_init(self, __context: Any) -> None:  # pragma: no cover - simple assignment
+        object.__setattr__(self, "scaling", float(self.scaling))
 
     @field_validator("name")
     @classmethod
-    def _validate_name(cls, value: str) -> str:
-        cleaned = value.strip()
-        if not cleaned:
-            raise ValueError("Adapter name must not be empty")
-        return cleaned
+    def _validate_path(cls, value: object) -> Path:
+        if value in {None, "", Ellipsis}:
+            raise ValueError("Adapter path must be provided")
+        return Path(str(value)).expanduser()
+
+    @field_validator("scaling")
+    @classmethod
+    def _validate_scaling(cls, value: float) -> float:
+        try:
+            numeric = float(value)
+        except (TypeError, ValueError):
+            raise ValueError("Scaling factor must be a finite number") from None
+
+        if not math.isfinite(numeric):
+            raise ValueError("Scaling factor must be a finite number")
+        if numeric <= 0.0:
+            raise ValueError("Scaling factor must be greater than zero")
+        if numeric > 10.0:
+            raise ValueError("Scaling factor must not exceed 10.0")
+        return numeric
 
 
 class LoraAdapterInfo(BaseModel):

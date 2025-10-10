@@ -40,6 +40,23 @@ except Exception:  # pragma: no cover - fall back to a stub for type checking
     class Llama:  # type: ignore[too-many-ancestors]
         def __init__(self, *args: object, **kwargs: object) -> None:  # noqa: D401 - stub
             raise ModelNotReadyError("llama_cpp is not installed")
+else:
+    try:  # pragma: no cover - optional cleanup for third-party helper module
+        import llama_cpp._utils as _llama_utils
+    except Exception:
+        _llama_utils = None  # type: ignore[assignment]
+    if _llama_utils is not None:
+        for _name in ("outnull_file", "errnull_file"):
+            handle = getattr(_llama_utils, _name, None)
+            if handle is None:
+                continue
+            close = getattr(handle, "close", None)
+            if callable(close):
+                try:
+                    close()
+                except Exception:  # pragma: no cover - best-effort cleanup
+                    pass
+            setattr(_llama_utils, _name, None)
 
 
 _GENERATION_KEYS = {"temperature", "top_p", "top_k", "max_tokens"}

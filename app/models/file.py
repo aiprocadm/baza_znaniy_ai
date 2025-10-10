@@ -45,9 +45,13 @@ from app.models.sqlmodel_compat import (
     collect_sqlmodel_tables,
     install_stub_model_initializers,
 )
+from app.models.sqlite_datetime import register_sqlite_datetime_support
 
 
 logger = logging.getLogger(__name__)
+
+
+register_sqlite_datetime_support()
 
 
 if getattr(SQLModel, "metadata", None) is None:
@@ -324,7 +328,10 @@ install_stub_model_initializers([DocumentRecord, FileRecord, PageRecord, ChunkRe
 
 def _connect_args(url: str) -> dict[str, object]:
     if url.startswith("sqlite"):
-        return {"check_same_thread": False, "timeout": 5.0}
+        return {
+            "check_same_thread": False,
+            "timeout": 5.0,
+        }
     return {}
 
 
