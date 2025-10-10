@@ -153,23 +153,24 @@ def core_app(monkeypatch):
 
     class StubLoraStatusResponse:
         @staticmethod
-        def from_status(status):  # pragma: no cover - simple stub
-            return types.SimpleNamespace(model_dump=lambda: {})
+        def from_runtime(info):  # pragma: no cover - simple stub
+            return types.SimpleNamespace(model_dump=lambda: {"loaded": info is not None})
 
-    models_lora_module.LoraStatusResponse = StubLoraStatusResponse
+        @staticmethod
+        def empty():  # pragma: no cover - simple stub
+            return types.SimpleNamespace(model_dump=lambda: {"loaded": False})
 
-    class StubLoraLoadRequest:
+    class StubAdapterName:
+        def __init__(self, name: str):  # pragma: no cover - simple stub
+            self.name = name
+
+    class StubAdapterInfo:
         def __init__(self, **data):  # pragma: no cover - simple stub
             self.__dict__.update(data)
 
-        def model_dump(self, *args, **kwargs):  # pragma: no cover - simple stub
-            return dict(self.__dict__)
-
-    class StubLoraUnloadRequest(StubLoraLoadRequest):  # pragma: no cover - simple stub
-        pass
-
-    models_lora_module.LoraLoadRequest = StubLoraLoadRequest
-    models_lora_module.LoraUnloadRequest = StubLoraUnloadRequest
+    models_lora_module.LoraStatusResponse = StubLoraStatusResponse
+    models_lora_module.LoraAdapterName = StubAdapterName
+    models_lora_module.LoraAdapterInfo = StubAdapterInfo
     monkeypatch.setitem(sys.modules, "app.models.lora", models_lora_module)
 
     router_module = types.ModuleType("app.api.router")

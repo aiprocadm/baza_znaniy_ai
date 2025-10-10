@@ -132,6 +132,26 @@ class LlamaCppProvider:
             except Exception as exc:  # pragma: no cover - llama.cpp specific
                 raise ModelNotReadyError("Failed to load LoRA adapter") from exc
 
+    def ensure_ready(self) -> None:
+        """Ensure the underlying llama.cpp runtime is ready for requests."""
+
+        self.ensure_model()
+
+    def ensure_adapter(self) -> None:
+        """Reload the configured default adapter when it is not active."""
+
+        adapter_path = getattr(self.settings, "lora_adapter_path", None)
+        if not adapter_path:
+            return
+        if self._active_adapter and self._active_adapter == Path(adapter_path).expanduser():
+            return
+        try:
+            self.load_lora(adapter_path, scaling=self.settings.lora_scaling)
+        except LoRAAdapterNotFoundError:
+            raise
+        except Exception as exc:  # pragma: no cover - llama.cpp specific
+            raise ModelNotReadyError("Failed to activate default LoRA adapter") from exc
+
     # ------------------------------------------------------------------
     def _validate_model_file(self, model_path: Path) -> None:
         """Ensure *model_path* is a GGUF file before llama.cpp loads it."""
@@ -255,6 +275,15 @@ class LlamaCppProvider:
         """Return the path of the active LoRA adapter, if any."""
 
         return self._active_adapter
+
+    # ------------------------------------------------------------------
+    @property
+    def adapter_name(self) -> str | None:
+        """Return the adapter name currently enabled within llama.cpp."""
+
+        if self._active_adapter is None:
+            return None
+        return self._active_adapter.stem
 
 
 __all__ = ["LlamaCppProvider"]

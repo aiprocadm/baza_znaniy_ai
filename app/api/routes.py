@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import inspect
 import io
 import logging
 import os
@@ -30,6 +29,7 @@ from app.llm import (
     ModelNotReadyError,
     get_cached_provider,
 )
+from app.llm.lora_runtime import active_adapter
 from app.memory.store import MemoryStore
 from app.models.lora import LoraStatusResponse
 from app.models.chat import ChatIn
@@ -575,28 +575,13 @@ def _check_llm_ready(state) -> dict[str, Any]:
 
 
 async def _check_lora_ready(state) -> dict[str, Any]:
+    del state  # compatibility with existing signature
     status_info: dict[str, Any] = {"status": "ok"}
-    manager = getattr(state, "lora_manager", None)
-
-    if manager is None:
-        status_info.update(status="skipped", detail="LoRA manager not configured")
-        return status_info
-
-    get_status = getattr(manager, "get_status", None)
-    if not callable(get_status):  # pragma: no cover - unexpected implementation
-        status_info.update(status="error", detail="LoRA manager missing status accessor")
-        return status_info
-
     try:
-        status = get_status()
-        if inspect.isawaitable(status):
-            status = await status
-        payload = LoraStatusResponse.from_status(status).model_dump()
-        status_info["detail"] = payload
-        status_info["loaded"] = payload.get("loaded", False)
+        payload = LoraStatusResponse.from_runtime(active_adapter()).model_dump()
+        status_info.update(detail=payload, loaded=payload.get("loaded", False))
     except Exception as exc:
-        status_info.update(status="error", detail=f"LoRA недоступна: {exc}")
-
+        status_info.update(status="error", detail=f"LoRA runtime error: {exc}")
     return status_info
 
 

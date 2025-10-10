@@ -20,7 +20,7 @@ from decimal import Decimal
 from pydantic import AliasChoices, Field
 
 try:  # pragma: no cover - optional features may be unavailable in tests
-    from pydantic import BaseModel, computed_field, field_validator
+    from pydantic import BaseModel, computed_field, field_validator, model_validator
 except ImportError:  # pragma: no cover - provide light-weight fallbacks
     from pydantic import BaseModel  # type: ignore[assignment]
 
@@ -33,6 +33,12 @@ except ImportError:  # pragma: no cover - provide light-weight fallbacks
         return decorator
 
     def field_validator(*args, **kwargs):  # type: ignore[misc]
+        def decorator(func):
+            return func
+
+        return decorator
+
+    def model_validator(*args, **kwargs):  # type: ignore[misc]
         def decorator(func):
             return func
 
@@ -698,6 +704,10 @@ class Settings(BaseSettings):
     )
 
     # LLM ----------------------------------------------------------------
+    use_lora: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("USE_LORA", "ENABLE_LORA"),
+    )
     llm_provider: str = Field(default="llama-cpp", validation_alias=AliasChoices("LLM_PROVIDER"))
     llm_model_name: str = Field(
         default="kb-llama",
@@ -726,6 +736,10 @@ class Settings(BaseSettings):
         default=None,
         validation_alias=AliasChoices("LLM_LORA_ADAPTER", "LLM_ADAPTER", "OLLAMA_ADAPTER"),
     )
+    lora_default_adapter: str | None = Field(
+        default="none",
+        validation_alias=AliasChoices("LORA_DEFAULT_ADAPTER", "DEFAULT_LORA_ADAPTER"),
+    )
     ollama_base_url: str = Field(
         default="http://ollama:11434",
         validation_alias=AliasChoices("OLLAMA_BASE_URL", "OLLAMA_HOST"),
@@ -739,6 +753,25 @@ class Settings(BaseSettings):
         default=None,
         validation_alias=AliasChoices("LORA_ADAPTER_VERSION"),
     )
+    lora_registry_dir: Path = Field(
+        default=Path("./data/lora/registry"),
+        validation_alias=AliasChoices("LORA_REGISTRY_DIR"),
+    )
+    lora_train_output_dir: Path = Field(
+        default=Path("./data/lora/runs"),
+        validation_alias=AliasChoices("LORA_TRAIN_OUTPUT_DIR"),
+    )
+    lora_train_base_model: str = Field(
+        default="meta-llama/Llama-3-8b-Instruct",
+        validation_alias=AliasChoices("LORA_TRAIN_BASE_MODEL"),
+    )
+    lora_train_max_seq_len: int = Field(
+        default=4096,
+        validation_alias=AliasChoices("LORA_TRAIN_MAX_SEQ_LEN"),
+    )
+    lora_train_fp16: bool = Field(default=True, validation_alias=AliasChoices("LORA_FP16"))
+    lora_train_bf16: bool = Field(default=False, validation_alias=AliasChoices("LORA_BF16"))
+    lora_use_qlora: bool = Field(default=True, validation_alias=AliasChoices("LORA_USE_QLORA"))
 
     # Security -----------------------------------------------------------
     secret_key: str = Field(default="change-me", validation_alias=AliasChoices("SECRET_KEY"))
@@ -792,6 +825,8 @@ class Settings(BaseSettings):
         "qdrant_path",
         "llm_model_path",
         "lora_adapter_path",
+        "lora_registry_dir",
+        "lora_train_output_dir",
         mode="before",
     )
     @classmethod
@@ -824,6 +859,19 @@ class Settings(BaseSettings):
                 return None
             value = Path(stripped)
         return value.expanduser()
+
+    @field_validator("lora_registry_dir", "lora_train_output_dir", mode="after")
+    @classmethod
+    def _ensure_directory(cls, value: Path) -> Path:
+        resolved = Path(value).expanduser()
+        resolved.mkdir(parents=True, exist_ok=True)
+        return resolved
+
+    @model_validator(mode="after")
+    def _ensure_precision_flags(self) -> "Settings":
+        if self.lora_train_fp16 and self.lora_train_bf16:
+            raise ValueError("Only one of LORA_FP16 or LORA_BF16 can be enabled")
+        return self
 
     @field_validator("rerank_topk", mode="before")
     @classmethod
@@ -874,6 +922,16 @@ class Settings(BaseSettings):
     @property
     def gen_model(self) -> str:
         return self.llm_model_name
+
+    @computed_field
+    @property
+    def lora_registry_path(self) -> Path:
+        return Path(self.lora_registry_dir)
+
+    @computed_field
+    @property
+    def lora_runs_path(self) -> Path:
+        return Path(self.lora_train_output_dir)
 
     def iter_secret_fields(self) -> Iterable[str]:
         """Return names of settings that contain sensitive values."""

@@ -1,89 +1,79 @@
-"""Tests for the LoRA management API."""
-
 from __future__ import annotations
 
-import asyncio
-import math
-from decimal import Decimal
-from importlib import reload
+import json
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Iterator
 
-from unittest.mock import AsyncMock
-
 import pytest
-from fastapi import HTTPException, status
 from fastapi.testclient import TestClient
 
-try:  # pragma: no cover - optional dependency for wider validation coverage
-    import numpy as np
-except Exception:  # pragma: no cover - numpy is optional in test environments
-    np = None  # type: ignore[assignment]
+from app.core import config as config_module
 
-from tests.service_stubs import install_service_stubs
-
-install_service_stubs()
 
 from app.api.status_codes import HTTP_UNPROCESSABLE_CONTENT
 from app.api.v1 import lora as lora_module
 from app.api.v1.lora import load_lora_adapter
 from app.models.lora import LoraLoadRequest
 
+    def ensure_model(self) -> None:  # pragma: no cover - trivial stub
+        return None
+
+    def load_lora(self, path: Path) -> None:
+        self.loaded = Path(path)
+
+    def unload_lora(self) -> None:
+        self.loaded = None
+
+    def generate(self, prompt: str, *, context: dict | None = None) -> str:  # pragma: no cover - stub
+        return "ok"
+
 
 @pytest.fixture()
 def lora_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
-    """Provide a test client with llama.cpp stubs configured."""
+    registry = tmp_path / "registry"
+    adapter_dir = registry / "demo"
+    adapter_dir.mkdir(parents=True)
+    (tmp_path / "model.gguf").write_bytes(b"gguf")
+    adapter_path = adapter_dir / "adapter.gguf"
+    adapter_path.write_bytes(b"adapter")
+    manifest = {
+        "name": "demo",
+        "base": "meta-llama/Llama-3-8b-Instruct",
+        "type": "gguf",
+        "seq_len": 4096,
+        "created_at": "2024-01-01T00:00:00Z",
+    }
+    (adapter_dir / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
 
-    data_dir = tmp_path / "data"
-    data_dir.mkdir()
-    base_model = tmp_path / "base.gguf"
-    base_model.write_bytes(b"model")
+    provider = StubProvider()
 
-    monkeypatch.setenv("DATA_DIR", str(data_dir))
-    monkeypatch.setenv("DB_URL", f"sqlite:///{tmp_path / 'ingest.db'}")
-    monkeypatch.setenv("LLM_MODEL_NAME", str(base_model))
-    monkeypatch.setenv("LLM_MODEL_PATH", str(base_model))
-    monkeypatch.setenv("VECTOR_BACKEND", "faiss")
+    monkeypatch.setenv("LORA_REGISTRY_DIR", str(registry))
+    monkeypatch.setenv("LORA_DEFAULT_ADAPTER", "none")
+    monkeypatch.setenv("USE_LORA", "1")
+    monkeypatch.setenv("LLM_MODEL_NAME", manifest["base"])
+    monkeypatch.setenv("LLM_MODEL_PATH", str(tmp_path / "model.gguf"))
+    monkeypatch.setenv("DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setenv("DB_URL", f"sqlite:///{tmp_path / 'db.sqlite'}")
     monkeypatch.setenv("AUTH_DISABLED_FOR_TESTS", "1")
+    monkeypatch.setenv("RERANK_ENABLED", "0")
 
-    install_service_stubs()
+    from app.llm import cache as cache_module
+    from app.llm import lora_runtime
 
-    import importlib
-
-    import app.api.v1.lora as lora_module
-    import app.core.deps as deps_module
-    import app.llm.manager as manager_module
-    import app.llm.llama_cpp_provider as provider_module
-    importlib.reload(provider_module)
-    importlib.reload(manager_module)
-    importlib.reload(deps_module)
-    importlib.reload(lora_module)
-
-    from app.core import config as config_module
+    monkeypatch.setattr(cache_module, "get_cached_provider", lambda settings=None: provider)
+    monkeypatch.setattr(lora_runtime, "get_cached_provider", lambda settings=None: provider)
 
     config_module.get_settings.cache_clear()
 
+    from importlib import reload
     import app.main as app_main
 
     reload(app_main)
-    app = app_main.app
-    app.dependency_overrides = {}
-    client = TestClient(app)
-    stub_llm = SimpleNamespace(
-        name="stub-llm",
-        ensure_ready=lambda: None,
-        ensure_model=lambda: None,
-        ensure_adapter=lambda: None,
-    )
-    app.state.llm_provider = stub_llm
-    app.state.llm_client = stub_llm
+    client = TestClient(app_main.app)
     try:
         yield client
     finally:
-        close = getattr(client, "close", None)
-        if callable(close):
-            close()
+        client.close()
         config_module.get_settings.cache_clear()
 
 
@@ -386,21 +376,23 @@ def test_scaling_validation_rejects_non_numeric(tmp_path: Path) -> None:
     assert excinfo.value.detail == "INVALID_SCALING"
 
 
-def test_load_endpoint_preserves_original_request_model(tmp_path: Path) -> None:
-    adapter_path = _create_adapter(tmp_path, "immutable.gguf")
 
-    payload = LoraLoadRequest.model_construct(path=adapter_path, scaling=Decimal("0.75"))
+def test_load_and_unload_cycle(lora_client: TestClient) -> None:
+    load = lora_client.post("/admin/lora/load", json={"name": "demo"})
+    assert load.status_code == 200, load.json()
+    payload = load.json()
+    assert payload["loaded"] is True
+    assert payload["adapter"]["name"] == "demo"
 
-    status_payload = SimpleNamespace(
-        loaded=True,
-        path=adapter_path,
-        scaling=0.75,
-        adapter_name="immutable",
-    )
+    ready = lora_client.get("/ready")
+    ready_payload = ready.json()["details"]["lora"]
+    assert ready_payload["status"] == "ok"
+    assert ready_payload["detail"]["loaded"] is True
 
-    manager = SimpleNamespace(load_adapter=AsyncMock(return_value=status_payload))
+    unload = lora_client.post("/admin/lora/unload", json={"name": "demo"})
+    assert unload.status_code == 200
+    assert unload.json()["loaded"] is False
 
-    response = asyncio.run(load_lora_adapter(payload, manager=manager))
 
     assert isinstance(response, lora_module.LoraStatusResponse)
     manager.load_adapter.assert_awaited_once_with(adapter_path, 0.75)

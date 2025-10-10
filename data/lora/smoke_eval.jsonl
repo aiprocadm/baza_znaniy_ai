@@ -1,0 +1,10 @@
+{"instruction": "Summarise fact #1", "input": "Fact 1: The number 1 is odd.", "output": "Fact 1 states that 1 is odd."}
+{"instruction": "Summarise fact #2", "input": "Fact 2: The number 2 is even.", "output": "Fact 2 states that 2 is even."}
+{"instruction": "Summarise fact #3", "input": "Fact 3: The number 3 is odd.", "output": "Fact 3 states that 3 is odd."}
+{"instruction": "Summarise fact #4", "input": "Fact 4: The number 4 is even.", "output": "Fact 4 states that 4 is even."}
+{"instruction": "Summarise fact #5", "input": "Fact 5: The number 5 is odd.", "output": "Fact 5 states that 5 is odd."}
+{"instruction": "Summarise fact #6", "input": "Fact 6: The number 6 is even.", "output": "Fact 6 states that 6 is even."}
+{"instruction": "Summarise fact #7", "input": "Fact 7: The number 7 is odd.", "output": "Fact 7 states that 7 is odd."}
+{"instruction": "Summarise fact #8", "input": "Fact 8: The number 8 is even.", "output": "Fact 8 states that 8 is even."}
+{"instruction": "Summarise fact #9", "input": "Fact 9: The number 9 is odd.", "output": "Fact 9 states that 9 is odd."}
+{"instruction": "Summarise fact #10", "input": "Fact 10: The number 10 is even.", "output": "Fact 10 states that 10 is even."}
