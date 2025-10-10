@@ -1,0 +1,78 @@
+name: lora-smoke
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "scripts/**"
+      - "app/**"
+      - "data/lora/**"
+      - "data/dev.jsonl"
+      - "requirements.txt"
+      - ".github/workflows/lora.yml"
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: Validate dataset
+        run: |
+          python scripts/validate_dataset.py \
+            --path data/dev.jsonl \
+            --base-model sshleifer/tiny-gpt2 \
+            --max-seq-len 128 \
+            --short-threshold 2
+
+      - name: Smoke train LoRA
+        env:
+          LORA_USE_QLORA: "0"
+        run: |
+          python scripts/train_lora.py \
+            --base-model sshleifer/tiny-gpt2 \
+            --train data/lora/smoke_train.jsonl \
+            --eval data/lora/smoke_eval.jsonl \
+            --output data/lora/runs \
+            --max-seq-len 128 \
+            --epochs 1 \
+            --lr 5e-4 \
+            --batch-size 1 \
+            --gradient-accumulation 1 \
+            --lora-r 4 \
+            --lora-alpha 8 \
+            --lora-dropout 0.1 \
+            --target-modules c_attn,c_proj \
+            --no-qlora
+
+      - name: Evaluate adapter
+        run: |
+          ADAPTER_DIR=$(ls -td data/lora/runs/*/adapter | head -n1)
+          python scripts/eval_lora.py \
+            --base-model sshleifer/tiny-gpt2 \
+            --adapter "$ADAPTER_DIR/adapter.safetensors" \
+            --dataset data/lora/smoke_eval.jsonl \
+            --max-new-tokens 64 \
+            --min-em 0.0 \
+            --min-rouge 0.0 \
+            --output data/lora/eval_reports
+
+      - name: Upload adapter artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: lora-smoke-adapter
+          path: |
+            data/lora/runs/*/adapter
+            data/lora/runs/*/metrics.json
+            data/lora/eval_reports

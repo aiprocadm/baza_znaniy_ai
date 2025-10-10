@@ -9,6 +9,7 @@ from pathlib import Path
 from fastapi import APIRouter
 
 from app.api import routes as root_routes
+from app.api.routes_lora import router as lora_admin_router
 
 
 def _ensure_v1_package() -> None:
@@ -35,6 +36,7 @@ from app.api.v1 import router as v1_router
 api_router = APIRouter()
 
 api_router.include_router(root_routes.router)
+api_router.include_router(lora_admin_router)
 
 try:  # pragma: no cover - exercised in real FastAPI runtime
     api_router.include_router(v1_router, prefix="/api/v1")

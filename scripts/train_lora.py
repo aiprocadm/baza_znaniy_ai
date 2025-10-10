@@ -1,262 +1,207 @@
-"""Utilities for training QLoRA adapters and exporting them for llama.cpp."""
+#!/usr/bin/env python3
+"""Train a PEFT LoRA adapter with optional QLoRA quantisation."""
+
 from __future__ import annotations
 
 import argparse
-import csv
 import json
 import logging
+import os
 import sys
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterable, List, Dict, Any
-import importlib
-import subprocess
+from typing import Any, Sequence
 
-from dotenv import load_dotenv
+import torch
+from datasets import load_dataset
+from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
+from transformers import (
+    AutoModelForCausalLM,
+    AutoTokenizer,
+    BitsAndBytesConfig,
+    Trainer,
+    TrainingArguments,
+)
+from transformers.trainer_callback import TrainerCallback
 
 LOGGER = logging.getLogger(__name__)
+PROMPT_TEMPLATE = "<s>[INST] {instruction}\n{input} [/INST]\n"
 
 
-@dataclass
-class Example:
-    question: str
-    context: str
-    answer: str
+@dataclass(slots=True)
+class TrainingConfig:
+    base_model: str
+    train_path: Path
+    eval_path: Path | None
+    output_dir: Path
+    max_seq_len: int
+    epochs: float
+    learning_rate: float
+    batch_size: int
+    grad_accumulation: int
+    lora_r: int
+    lora_alpha: int
+    lora_dropout: float
+    target_modules: list[str] | None
+    use_qlora: bool
+    use_fp16: bool
+    use_bf16: bool
+    seed: int
+    logging_steps: int
 
 
-def load_examples(path: Path) -> List[Example]:
-    if not path.exists():
-        raise FileNotFoundError(f"Dataset file not found: {path}")
-    suffix = path.suffix.lower()
-    if suffix == ".jsonl":
-        return _load_jsonl(path)
-    if suffix == ".csv":
-        return _load_csv(path)
-    raise ValueError("Unsupported dataset format. Use CSV or JSONL with question/context/answer columns.")
+class JsonLogCallback(TrainerCallback):
+    """Write training metrics as JSON lines for easy ingestion."""
+
+    def __init__(self, log_path: Path) -> None:
+        self._path = log_path
+        self._handle = None
+
+    def on_log(self, args, state, control, logs=None, **kwargs):  # type: ignore[override]
+        if not logs:
+            return
+        if self._handle is None:
+            self._path.parent.mkdir(parents=True, exist_ok=True)
+            self._handle = self._path.open("w", encoding="utf-8")
+        record = {"step": state.global_step, **logs}
+        self._handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+        self._handle.flush()
+
+    def on_train_end(self, args, state, control, **kwargs):  # type: ignore[override]
+        if self._handle is not None:
+            self._handle.close()
+            self._handle = None
 
 
-def _load_jsonl(path: Path) -> List[Example]:
-    rows: List[Example] = []
-    with path.open("r", encoding="utf-8") as handle:
-        for line_no, line in enumerate(handle, start=1):
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                payload = json.loads(line)
-            except json.JSONDecodeError as exc:
-                raise ValueError(f"Invalid JSON on line {line_no}: {exc}") from exc
-            rows.append(_example_from_mapping(payload, line_no))
-    return rows
-
-
-def _load_csv(path: Path) -> List[Example]:
-    rows: List[Example] = []
-    with path.open("r", encoding="utf-8") as handle:
-        reader = csv.DictReader(handle)
-        if reader.fieldnames is None:
-            raise ValueError("CSV file must have a header row with question, context and answer columns.")
-        for line_no, row in enumerate(reader, start=2):
-            rows.append(_example_from_mapping(row, line_no))
-    return rows
-
-
-def _example_from_mapping(mapping: Dict[str, Any], line_no: int) -> Example:
-    try:
-        question = str(mapping["question"]).strip()
-        context = str(mapping["context"]).strip()
-        answer = str(mapping["answer"]).strip()
-    except KeyError as exc:
-        raise ValueError(f"Missing required field {exc!s} on line {line_no}") from exc
-    if not question or not answer:
-        raise ValueError(f"Question and answer must be non-empty (line {line_no}).")
-    return Example(question=question, context=context, answer=answer)
-
-
-def parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Train a QLoRA adapter and export GGML weights")
-    parser.add_argument("dataset", type=Path, help="Path to CSV or JSONL dataset with question/context/answer columns")
-    parser.add_argument("base_model", type=str, help="Base Hugging Face model identifier or local path")
-    parser.add_argument("output_dir", type=Path, help="Directory to store training artefacts")
-    parser.add_argument("--lora-r", type=int, default=16, help="Rank of the LoRA adapters (8-16 recommended)")
-    parser.add_argument("--lora-alpha", type=int, default=32, help="Alpha parameter for LoRA (16-32 recommended)")
-    parser.add_argument("--lora-dropout", type=float, default=0.05, help="Dropout rate for LoRA layers")
-    parser.add_argument("--num-epochs", type=float, default=1.0, help="Number of training epochs")
-    parser.add_argument("--learning-rate", type=float, default=2e-4, help="Learning rate for the optimizer")
-    parser.add_argument("--per-device-train-batch-size", type=int, default=1, help="Per-device batch size")
-    parser.add_argument("--gradient-accumulation-steps", type=int, default=1, help="Gradient accumulation steps")
-    parser.add_argument("--max-seq-length", type=int, default=1024, help="Maximum sequence length for tokenization")
-    parser.add_argument("--logging-steps", type=int, default=10, help="Steps between logging updates")
-    parser.add_argument("--save-steps", type=int, default=500, help="Steps between checkpoints")
-    parser.add_argument("--max-steps", type=int, default=-1, help="Stop training after the specified number of steps")
-    parser.add_argument("--bf16", action="store_true", help="Use bfloat16 when supported")
-    parser.add_argument("--fp16", action="store_true", help="Use float16 when supported")
-    parser.add_argument("--no-convert", action="store_true", help="Skip conversion to GGML LoRA")
-    parser.add_argument("--ggml-name", default="adapter.ggml", help="Filename for the GGML LoRA output")
-    parser.add_argument("--seed", type=int, default=42, help="Random seed")
+def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
+    env = os.getenv
+    parser = argparse.ArgumentParser(description="Train a LoRA adapter")
+    parser.add_argument("--base-model", required=True, help="Base model identifier or local path")
+    parser.add_argument("--train", required=True, type=Path, help="Training dataset in JSONL format")
+    parser.add_argument("--eval", type=Path, default=None, help="Optional evaluation dataset")
+    parser.add_argument("--output", required=True, type=Path, help="Directory to store training artefacts")
+    parser.add_argument("--max-seq-len", type=int, default=int(env("LORA_TRAIN_MAX_SEQ_LEN", "4096")))
+    parser.add_argument("--epochs", type=float, default=1.0)
+    parser.add_argument("--lr", type=float, default=2e-4, help="Learning rate")
+    parser.add_argument("--batch-size", type=int, default=1, help="Per device batch size")
+    parser.add_argument("--gradient-accumulation", type=int, default=1)
+    parser.add_argument("--lora-r", type=int, default=16)
+    parser.add_argument("--lora-alpha", type=int, default=32)
+    parser.add_argument("--lora-dropout", type=float, default=0.05)
+    parser.add_argument(
+        "--target-modules",
+        type=str,
+        default="",
+        help="Comma separated list of target modules (defaults to auto-detect)",
+    )
+    parser.add_argument("--use-qlora", dest="use_qlora", action="store_true", default=_env_flag("LORA_USE_QLORA", True))
+    parser.add_argument("--no-qlora", dest="use_qlora", action="store_false")
+    precision = parser.add_mutually_exclusive_group()
+    precision.add_argument("--fp16", action="store_true", default=_env_flag("LORA_FP16", True))
+    precision.add_argument("--bf16", action="store_true", default=_env_flag("LORA_BF16", False))
+    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--logging-steps", type=int, default=25)
     return parser.parse_args(list(argv) if argv is not None else None)
 
 
-def validate_args(args: argparse.Namespace) -> None:
-    if not args.dataset.exists():
-        raise FileNotFoundError(f"Dataset file not found: {args.dataset}")
-    if args.dataset.suffix.lower() not in {".csv", ".jsonl"}:
-        raise ValueError("Dataset must be a CSV or JSONL file.")
-    if args.lora_r <= 0:
-        raise ValueError("--lora-r must be positive")
-    if args.lora_alpha <= 0:
-        raise ValueError("--lora-alpha must be positive")
-    if not (0.0 <= args.lora_dropout < 1.0):
-        raise ValueError("--lora-dropout must be in [0.0, 1.0)")
-    if args.learning_rate <= 0:
-        raise ValueError("--learning-rate must be positive")
-    if args.per_device_train_batch_size <= 0:
-        raise ValueError("--per-device-train-batch-size must be positive")
-    if args.gradient_accumulation_steps <= 0:
-        raise ValueError("--gradient-accumulation-steps must be positive")
-    if args.max_seq_length <= 0:
-        raise ValueError("--max-seq-length must be positive")
-    args.output_dir.mkdir(parents=True, exist_ok=True)
+def _env_flag(name: str, default: bool) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
-def format_example(example: Example) -> str:
-    parts = [f"### Question\n{example.question.strip()}" ]
-    if example.context:
-        parts.append(f"### Context\n{example.context.strip()}")
-    parts.append(f"### Answer\n{example.answer.strip()}")
-    return "\n\n".join(parts)
-
-
-@dataclass
-class TrainingResult:
-    adapter_dir: Path
-    checkpoints_dir: Path
-
-
-def train_lora_adapter(examples: List[Example], *, base_model: str, output_dir: Path, args: argparse.Namespace) -> TrainingResult:
-    if not examples:
-        raise ValueError("Dataset is empty after loading.")
-    try:
-        from transformers import AutoModelForCausalLM, AutoTokenizer, TrainingArguments, Trainer
-        from transformers.trainer_utils import set_seed
-        from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
-    except ImportError as exc:
-        raise ImportError("train_lora_adapter requires transformers, peft and torch packages") from exc
-
-    LOGGER.info("Loaded %d training examples", len(examples))
-    set_seed(args.seed)
-
-    tokenizer = AutoTokenizer.from_pretrained(base_model, use_fast=True)
-    if tokenizer.pad_token is None:
-        tokenizer.pad_token = tokenizer.eos_token
-    tokenizer.padding_side = "right"
-
-    tokenized_dataset = _build_dataset(tokenizer, examples, max_length=args.max_seq_length)
-
-    bnb_config = _build_bnb_config()
-    LOGGER.info("Loading base model %s", base_model)
-    if bnb_config is not None:
-        model = AutoModelForCausalLM.from_pretrained(
-            base_model,
-            device_map="auto",
-            quantization_config=bnb_config,
-        )
-        model = prepare_model_for_kbit_training(model)
-    else:
-        model = AutoModelForCausalLM.from_pretrained(base_model)
-        model = prepare_model_for_kbit_training(model)
-
-    lora_config = LoraConfig(
-        r=args.lora_r,
+def _load_config(args: argparse.Namespace) -> TrainingConfig:
+    target_modules = [item.strip() for item in args.target_modules.split(",") if item.strip()] or None
+    if args.batch_size <= 0 or args.gradient_accumulation <= 0:
+        raise ValueError("Batch size and gradient accumulation must be positive")
+    if args.lora_r <= 0 or args.lora_alpha <= 0:
+        raise ValueError("LoRA rank and alpha must be positive")
+    if not 0 <= args.lora_dropout < 1:
+        raise ValueError("LoRA dropout must be within [0, 1)")
+    if args.max_seq_len <= 0:
+        raise ValueError("Maximum sequence length must be positive")
+    return TrainingConfig(
+        base_model=args.base_model,
+        train_path=args.train,
+        eval_path=args.eval,
+        output_dir=args.output,
+        max_seq_len=args.max_seq_len,
+        epochs=args.epochs,
+        learning_rate=args.lr,
+        batch_size=args.batch_size,
+        grad_accumulation=args.gradient_accumulation,
+        lora_r=args.lora_r,
         lora_alpha=args.lora_alpha,
-        target_modules=None,
         lora_dropout=args.lora_dropout,
-        bias="none",
-        task_type="CAUSAL_LM",
-    )
-    model = get_peft_model(model, lora_config)
-
-    training_dir = output_dir / "checkpoints"
-    adapter_dir = output_dir / "adapter"
-    training_args = TrainingArguments(
-        output_dir=str(training_dir),
-        per_device_train_batch_size=args.per_device_train_batch_size,
-        gradient_accumulation_steps=args.gradient_accumulation_steps,
-        num_train_epochs=args.num_epochs,
-        learning_rate=args.learning_rate,
-        logging_steps=args.logging_steps,
-        save_steps=args.save_steps,
-        max_steps=args.max_steps if args.max_steps > 0 else None,
-        bf16=args.bf16,
-        fp16=args.fp16,
-        report_to=["tensorboard"],
-        logging_dir=str(output_dir / "logs"),
-        save_total_limit=2,
-    )
-
-    def data_collator(data):
-        return _collate(tokenizer, data)
-
-    trainer = Trainer(
-        model=model,
-        args=training_args,
-        train_dataset=tokenized_dataset,
-        tokenizer=tokenizer,
-        data_collator=data_collator,
-    )
-
-    LOGGER.info("Starting training")
-    trainer.train()
-    LOGGER.info("Training completed, saving adapter to %s", adapter_dir)
-    trainer.model.save_pretrained(adapter_dir)
-    tokenizer.save_pretrained(adapter_dir)
-    return TrainingResult(adapter_dir=adapter_dir, checkpoints_dir=training_dir)
-
-
-def _build_bnb_config():
-    try:
-        from transformers import BitsAndBytesConfig
-    except ImportError:
-        LOGGER.warning("bitsandbytes is not available, falling back to full precision training")
-        return None
-    return BitsAndBytesConfig(
-        load_in_4bit=True,
-        bnb_4bit_use_double_quant=True,
-        bnb_4bit_quant_type="nf4",
-        bnb_4bit_compute_dtype="float16",
+        target_modules=target_modules,
+        use_qlora=bool(args.use_qlora),
+        use_fp16=bool(args.fp16),
+        use_bf16=bool(args.bf16),
+        seed=args.seed,
+        logging_steps=max(1, int(args.logging_steps)),
     )
 
 
-def _build_dataset(tokenizer, examples: List[Example], max_length: int):
-    try:
-        from datasets import Dataset
-    except ImportError as exc:
-        raise ImportError("datasets package is required for preprocessing") from exc
-
-    texts = [format_example(example) for example in examples]
-
-    def _tokenize(batch: Dict[str, List[str]]):
-        result = tokenizer(
-            batch["text"],
-            truncation=True,
-            padding="max_length",
-            max_length=max_length,
-            return_tensors="pt",
-        )
-        result["labels"] = result["input_ids"].clone()
-        return result
-
-    dataset = Dataset.from_dict({"text": texts})
-    tokenized_dataset = dataset.map(_tokenize, batched=True, remove_columns=["text"])
-    return tokenized_dataset
+def _format_prompt(instruction: str, context: str) -> str:
+    context_block = context or ""
+    return PROMPT_TEMPLATE.format(instruction=instruction, input=context_block)
 
 
-def _collate(tokenizer, features: List[Dict[str, Any]]):
-    import torch
+def _normalise_example(example: dict[str, Any]) -> tuple[str, str, str]:
+    def pick(fields: tuple[str, ...]) -> str:
+        for field in fields:
+            value = example.get(field)
+            if value is None:
+                continue
+            text = str(value).strip()
+            if text:
+                return text
+        return ""
 
-    input_ids = torch.stack([feature["input_ids"] for feature in features])
-    attention_mask = torch.stack([feature["attention_mask"] for feature in features])
-    labels = torch.stack([feature["labels"] for feature in features])
+    instruction = pick(("instruction", "prompt", "question"))
+    output = pick(("output", "response", "answer"))
+    context = pick(("input", "context", "background"))
+    if not instruction or not output:
+        raise ValueError("Dataset rows must contain instruction/prompt and output/response fields")
+    return instruction, context, output
+
+
+def _build_feature(example: dict[str, Any], tokenizer: AutoTokenizer, *, max_seq_len: int) -> dict[str, list[int]]:
+    instruction, context, output = _normalise_example(example)
+    prompt_prefix = _format_prompt(instruction, context)
+    prompt_tokens = tokenizer(prompt_prefix, add_special_tokens=False)["input_ids"]
+    response_tokens = tokenizer(output, add_special_tokens=False)["input_ids"]
+    if tokenizer.eos_token_id is not None:
+        response_tokens = response_tokens + [tokenizer.eos_token_id]
+
+    combined = prompt_tokens + response_tokens
+    if len(combined) > max_seq_len:
+        overflow = len(combined) - max_seq_len
+        if overflow >= len(prompt_tokens):
+            overflow -= len(prompt_tokens)
+            prompt_tokens = []
+            if overflow > 0:
+                response_tokens = response_tokens[overflow:]
+        else:
+            prompt_tokens = prompt_tokens[overflow:]
+        combined = prompt_tokens + response_tokens
+        if len(combined) > max_seq_len:
+            combined = combined[-max_seq_len:]
+
+    labels_core = [-100] * len(prompt_tokens) + response_tokens
+    if len(labels_core) > len(combined):
+        labels_core = labels_core[-len(combined) :]
+    elif len(labels_core) < len(combined):
+        labels_core = [-100] * (len(combined) - len(labels_core)) + labels_core
+
+    pad_id = tokenizer.pad_token_id
+    padding = max_seq_len - len(combined)
+    input_ids = [pad_id] * padding + combined
+    labels = [-100] * padding + labels_core
+    attention_mask = [0] * padding + [1] * len(combined)
+
     return {
         "input_ids": input_ids,
         "attention_mask": attention_mask,
@@ -264,66 +209,181 @@ def _collate(tokenizer, features: List[Dict[str, Any]]):
     }
 
 
-def load_llama_cpp():
-    return importlib.import_module("llama_cpp")
+def _tokenizer_for_base(model_name: str) -> AutoTokenizer:
+    tokenizer = AutoTokenizer.from_pretrained(model_name, use_fast=True)
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+    tokenizer.padding_side = "left"
+    return tokenizer
 
 
-def convert_adapter_to_ggml(adapter_dir: Path, output_dir: Path, base_model: str, *, filename: str = "adapter.ggml") -> Path:
-    output_dir.mkdir(parents=True, exist_ok=True)
-    output_path = output_dir / filename
-    try:
-        llama_cpp = load_llama_cpp()
-    except ModuleNotFoundError:
-        LOGGER.info("llama_cpp not available, using CLI conversion fallback")
-        cmd = [
-            sys.executable,
-            "-m",
-            "llama_cpp.convert_lora",
-            "--base-model",
-            base_model,
-            "--adapter",
-            str(adapter_dir),
-            "--output",
-            str(output_path),
-        ]
-        LOGGER.debug("Running conversion command: %s", " ".join(cmd))
-        subprocess.run(cmd, check=True)
-        return output_path
+def _load_datasets(config: TrainingConfig, tokenizer: AutoTokenizer):
+    data_files: dict[str, str] = {"train": str(config.train_path)}
+    if config.eval_path:
+        data_files["validation"] = str(config.eval_path)
 
-    convert_fn = None
-    if hasattr(llama_cpp, "convert_lora_to_ggml"):
-        convert_fn = llama_cpp.convert_lora_to_ggml
-    elif hasattr(llama_cpp, "convert_lora_to_ggml_file"):
-        convert_fn = llama_cpp.convert_lora_to_ggml_file
+    raw = load_dataset("json", data_files=data_files)
 
-    if convert_fn is None:
-        raise RuntimeError("llama_cpp does not expose a GGML conversion helper. Upgrade llama-cpp-python.")
+    def _process(example: dict[str, Any]) -> dict[str, Any]:
+        return _build_feature(example, tokenizer, max_seq_len=config.max_seq_len)
 
-    LOGGER.info("Converting adapter at %s to GGML format", adapter_dir)
-    convert_fn(base_model=base_model, adapter_path=str(adapter_dir), output_path=str(output_path))
-    return output_path
+    train_dataset = raw["train"].map(_process, remove_columns=raw["train"].column_names)
+    eval_dataset = None
+    if "validation" in raw:
+        eval_dataset = raw["validation"].map(_process, remove_columns=raw["validation"].column_names)
+
+    train_dataset.set_format(type="torch")
+    if eval_dataset is not None:
+        eval_dataset.set_format(type="torch")
+
+    return train_dataset, eval_dataset
 
 
-def main(argv: Iterable[str] | None = None) -> None:
-    load_dotenv()
-    logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(levelname)s: %(message)s")
-    args = parse_args(argv)
-    validate_args(args)
-    LOGGER.info("Loading dataset from %s", args.dataset)
-    examples = load_examples(args.dataset)
-    training_result = train_lora_adapter(
-        examples,
-        base_model=args.base_model,
-        output_dir=args.output_dir,
-        args=args,
+def _build_model(config: TrainingConfig, tokenizer: AutoTokenizer) -> torch.nn.Module:
+    dtype = torch.float32
+    if config.use_bf16:
+        dtype = torch.bfloat16
+    elif config.use_fp16:
+        dtype = torch.float16
+
+    if config.use_qlora:
+        compute_dtype = dtype if dtype != torch.float32 else torch.float16
+        bnb_config = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_quant_type="nf4",
+            bnb_4bit_use_double_quant=True,
+            bnb_4bit_compute_dtype=compute_dtype,
+        )
+        base_model = AutoModelForCausalLM.from_pretrained(
+            config.base_model,
+            quantization_config=bnb_config,
+            device_map="auto",
+        )
+        model = prepare_model_for_kbit_training(base_model)
+        model.gradient_checkpointing_enable()
+    else:
+        model = AutoModelForCausalLM.from_pretrained(config.base_model)
+        if config.use_fp16 or config.use_bf16:
+            model = model.to(dtype)
+
+    model.config.use_cache = False
+
+    lora_config = LoraConfig(
+        r=config.lora_r,
+        lora_alpha=config.lora_alpha,
+        lora_dropout=config.lora_dropout,
+        bias="none",
+        task_type="CAUSAL_LM",
+        target_modules=config.target_modules,
     )
-    if args.no_convert:
-        LOGGER.info("Skipping GGML conversion by request")
-        return
-    ggml_dir = args.output_dir / "ggml"
-    convert_adapter_to_ggml(training_result.adapter_dir, ggml_dir, args.base_model, filename=args.ggml_name)
-    LOGGER.info("GGML adapter saved to %s", ggml_dir / args.ggml_name)
+    peft_model = get_peft_model(model, lora_config)
+    peft_model.print_trainable_parameters()
+    return peft_model
 
 
-if __name__ == "__main__":
-    main()
+def _training_arguments(config: TrainingConfig, run_dir: Path, *, evaluation: bool) -> TrainingArguments:
+    logging_dir = run_dir / "logs"
+    checkpoint_dir = run_dir / "checkpoints"
+    return TrainingArguments(
+        output_dir=str(checkpoint_dir),
+        overwrite_output_dir=True,
+        num_train_epochs=config.epochs,
+        learning_rate=config.learning_rate,
+        per_device_train_batch_size=config.batch_size,
+        gradient_accumulation_steps=config.grad_accumulation,
+        warmup_steps=0,
+        logging_steps=config.logging_steps,
+        logging_dir=str(logging_dir),
+        save_total_limit=2,
+        evaluation_strategy="epoch" if evaluation else "no",
+        bf16=config.use_bf16,
+        fp16=config.use_fp16 and not config.use_bf16,
+        gradient_checkpointing=config.use_qlora,
+        report_to=["tensorboard"],
+        seed=config.seed,
+    )
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    args = parse_args(argv)
+    try:
+        config = _load_config(args)
+    except Exception as exc:
+        LOGGER.error("Invalid configuration: %s", exc)
+        return 2
+
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    base_short = Path(config.base_model).name if Path(config.base_model).exists() else config.base_model.split("/")[-1]
+    run_name = f"{timestamp}_{base_short}_r{config.lora_r}_a{config.lora_alpha}"
+    run_dir = config.output_dir / run_name
+    adapter_dir = run_dir / "adapter"
+    logs_path = run_dir / "logs" / "training.jsonl"
+
+    run_dir.mkdir(parents=True, exist_ok=True)
+
+    tokenizer = _tokenizer_for_base(config.base_model)
+    train_dataset, eval_dataset = _load_datasets(config, tokenizer)
+
+    model = _build_model(config, tokenizer)
+
+    training_args = _training_arguments(config, run_dir, evaluation=eval_dataset is not None)
+    json_logger = JsonLogCallback(logs_path)
+
+    trainer = Trainer(
+        model=model,
+        args=training_args,
+        train_dataset=train_dataset,
+        eval_dataset=eval_dataset,
+        tokenizer=tokenizer,
+        callbacks=[json_logger],
+    )
+
+    torch.manual_seed(config.seed)
+
+    train_result = trainer.train()
+    trainer.save_state()
+    adapter_dir.mkdir(parents=True, exist_ok=True)
+    trainer.model.save_pretrained(adapter_dir)
+
+    adapter_file = adapter_dir / "adapter_model.safetensors"
+    target_adapter = adapter_dir / "adapter.safetensors"
+    if adapter_file.exists():
+        adapter_file.replace(target_adapter)
+    else:
+        # Fallback to the first safetensors file created by `save_pretrained`.
+        candidates = sorted(adapter_dir.glob("*.safetensors"))
+        if candidates:
+            candidates[0].replace(target_adapter)
+        else:
+            raise FileNotFoundError(
+                f"No safetensors adapter produced in {adapter_dir}."
+            )
+    tokenizer.save_pretrained(run_dir / "tokenizer")
+
+    metrics = train_result.metrics
+    if eval_dataset is not None:
+        eval_metrics = trainer.evaluate()
+        metrics.update({f"eval_{k}": v for k, v in eval_metrics.items()})
+
+    metrics_path = run_dir / "metrics.json"
+    metrics_path.write_text(json.dumps(metrics, indent=2), encoding="utf-8")
+
+    state_path = run_dir / "trainer_state.json"
+    checkpoint_state = Path(training_args.output_dir) / "trainer_state.json"
+    if checkpoint_state.exists():
+        state_path.write_text(checkpoint_state.read_text(encoding="utf-8"), encoding="utf-8")
+
+    summary = {
+        "run_name": run_name,
+        "adapter_name": run_name,
+        "adapter_dir": str(adapter_dir),
+        "adapter_path": str(target_adapter),
+        "metrics_path": str(metrics_path),
+    }
+    print(json.dumps(summary, ensure_ascii=False))
+    return 0
+
+
+if __name__ == "__main__":  # pragma: no cover - CLI entrypoint
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
+    sys.exit(main())
