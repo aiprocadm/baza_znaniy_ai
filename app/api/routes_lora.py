@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
+from app.api.status_codes import HTTP_UNPROCESSABLE_CONTENT
 from app.core.auth import require_admin_user
 from app.llm.lora_runtime import (
     AdapterCompatibilityError,
@@ -19,7 +20,7 @@ router = APIRouter(prefix="/admin/lora", tags=["lora"], dependencies=[Depends(re
 
 HTTP_BAD_REQUEST = getattr(status, "HTTP_400_BAD_REQUEST", 400)
 HTTP_NOT_FOUND = getattr(status, "HTTP_404_NOT_FOUND", 404)
-HTTP_UNPROCESSABLE = getattr(status, "HTTP_422_UNPROCESSABLE_ENTITY", 422)
+HTTP_UNPROCESSABLE = HTTP_UNPROCESSABLE_CONTENT
 
 
 @router.get("/list", response_model=list[LoraAdapterInfo])

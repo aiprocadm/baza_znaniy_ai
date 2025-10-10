@@ -194,6 +194,13 @@ def install_service_stubs() -> None:
         sys.modules["apscheduler.schedulers.asyncio"] = asyncio_module
         setattr(apscheduler_module, "schedulers", schedulers_module)
 
+    if "prometheus_client" not in sys.modules or not hasattr(
+        sys.modules.get("prometheus_client"), "Gauge"
+    ):
+        from tests.stubs import prometheus_client as prom_stub
+
+        sys.modules["prometheus_client"] = prom_stub
+
     if "apscheduler.triggers.cron" not in sys.modules:
         apscheduler_module = sys.modules.setdefault("apscheduler", types.ModuleType("apscheduler"))
         triggers_module = sys.modules.setdefault("apscheduler.triggers", types.ModuleType("apscheduler.triggers"))

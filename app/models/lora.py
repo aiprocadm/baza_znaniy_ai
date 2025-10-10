@@ -12,6 +12,16 @@ if TYPE_CHECKING:  # pragma: no cover - circular import guard for type checking
     from app.llm.lora_runtime import AdapterInfo
 
 
+LoraAdapterName = Annotated[
+    str,
+    Field(
+        min_length=1,
+        max_length=128,
+        description="Human readable adapter identifier",
+    ),
+]
+
+
 ScalingFactor = Annotated[
     float,
     Field(
@@ -31,7 +41,7 @@ class LoraBaseRequest(BaseModel):
     def model_post_init(self, __context: Any) -> None:  # pragma: no cover - simple assignment
         object.__setattr__(self, "scaling", float(self.scaling))
 
-    @field_validator("name")
+    @field_validator("path")
     @classmethod
     def _validate_path(cls, value: object) -> Path:
         if value in {None, "", Ellipsis}:

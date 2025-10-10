@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+import warnings
 from pathlib import Path
 
 # The lightweight dependency stubs now live under ``tests/stubs``.  Prepending
@@ -36,3 +37,9 @@ for module_name in (
 
 if STUBS_PATH.exists():
     sys.path.insert(0, str(STUBS_PATH))
+
+warnings.filterwarnings(
+    "ignore",
+    category=DeprecationWarning,
+    message=r"builtin type swigvarlink has no __module__ attribute",
+)

@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import inspect
 import mimetypes
-import secrets
 import sys
 from pathlib import Path
 from tempfile import SpooledTemporaryFile
@@ -432,12 +432,18 @@ async def upload_file(
             except Exception:  # pragma: no cover - defensive cleanup
                 pass
 
-    tenant_dir = data_dir / tenant
-    tenant_dir.mkdir(parents=True, exist_ok=True)
-
-    file_id = secrets.token_hex(16)
-    target = tenant_dir / f"{file_id}.{selected_extension}"
-    target.write_bytes(payload)
+    sha_value = hashlib.sha256(payload).hexdigest()
+    data_root = data_dir.resolve()
+    data_root.mkdir(parents=True, exist_ok=True)
+    tenant_root = (data_root / tenant).resolve()
+    if tenant_root != data_root and data_root not in tenant_root.parents:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="UPLOAD_INVALID_TENANT")
+    bucket = tenant_root / sha_value[:2]
+    bucket.mkdir(parents=True, exist_ok=True)
+    suffix = f".{selected_extension}" if selected_extension else ""
+    target = bucket / f"{sha_value}{suffix}"
+    if not target.exists():
+        target.write_bytes(payload)
 
     mime_type = selected_content_type
     if not mime_type:
