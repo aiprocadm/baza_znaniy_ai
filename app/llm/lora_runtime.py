@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -197,7 +198,18 @@ def load_adapter(name: str) -> AdapterInfo:
     else:
         raise AdapterCompatibilityError(f"Unsupported adapter format: {candidate.format}")
 
-    candidate.scaling = float(settings.lora_scaling)
+    scaling_value = getattr(settings, "lora_scaling", None)
+    if scaling_value is None:
+        numeric_scaling = float(candidate.scaling)
+    else:
+        try:
+            numeric_scaling = float(scaling_value)
+        except (TypeError, ValueError) as exc:
+            raise AdapterCompatibilityError("Invalid LoRA scaling factor configured") from exc
+        if not math.isfinite(numeric_scaling):
+            raise AdapterCompatibilityError("Invalid LoRA scaling factor configured")
+
+    candidate.scaling = numeric_scaling
     set_active_adapter(candidate)
     return candidate
 
