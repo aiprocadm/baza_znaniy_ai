@@ -102,19 +102,38 @@ docker compose up --build
 API будет доступно на `http://localhost:8000`, Qdrant — на `http://localhost:6333`.
 Тома `./var/data` и `./models` автоматически монтируются в оба сервиса.
 
-## Установка зависимостей
+## Установка в Codespaces/на VPS без GPU
 
-Рекомендуется использовать виртуальное окружение и устанавливать зависимости без
-кеша, чтобы гарантировать совместимость wheel-пакетов `llama-cpp-python`.
-Перед запуском тестов необходимо установить как основные, так и dev-зависимости:
+В средах без GPU рекомендуется сразу ставить CPU-сборку PyTorch, а уже затем остальные пакеты:
 
 ```bash
 python3.12 -m venv .venv
 source .venv/bin/activate
 pip install --upgrade pip
-pip install --no-cache-dir -r requirements.txt
-pip install --no-cache-dir -r requirements-dev.txt
+pip cache purge
+pip install --index-url https://download.pytorch.org/whl/cpu torch==2.4.1
+pip install -r requirements-runtime.txt -r requirements-llm.txt
+pip install -r requirements-dev.txt
 ```
+
+## Установка зависимостей
+
+Зависимости разделены по сценариям использования:
+
+- `requirements-runtime.txt` — API, воркер и пайплайны индексации (без Torch и PEFT).
+- `requirements-llm.txt` — локальный инференс (`llama.cpp`, эмбеддинги и FAISS).
+- `requirements-train.txt` — обучение LoRA/QLoRA (Accelerate, PEFT, Transformers).
+- `requirements-dev.txt` — линтеры, тесты и вспомогательные тулзы.
+
+Можно установить их по отдельности либо через extras из `pyproject.toml`:
+
+```bash
+pip install .[runtime,llm]
+pip install .[train]  # при необходимости обучения
+pip install .[dev]
+```
+
+Команды `make install` и `make dev` выполняют те же шаги: первая ставит CPU PyTorch вместе с runtime+llm зависимостями, вторая добавляет dev-набор.
 
 ## Makefile и автоматизация
 
@@ -122,7 +141,9 @@ pip install --no-cache-dir -r requirements-dev.txt
 
 | Команда | Действие |
 | --- | --- |
-| `make install` | Устанавливает runtime- и dev-зависимости через `pip`. |
+| `make venv` | Создаёт виртуальное окружение (`.venv`). |
+| `make install` | CPU-режим: PyTorch (CPU) + runtime + llm зависимости. |
+| `make dev` | Добавляет dev-зависимости поверх `make install`. |
 | `make lint` | Запускает `ruff` и `black --check`. |
 | `make format` | Применяет автоформатирование `black` и `ruff --fix`. |
 | `make test` | Выполняет `pytest -q`. |
@@ -545,10 +566,23 @@ Front-end состоит из одного HTML-файла с нативным J
 2. Выполните `python -m scripts.export_all ./var/backups/index.tar.gz`. Архив содержит `vector_payloads.json`, в котором для каждого чанка хранится исходный текст и дополнительные поля.
 3. Сформируйте тренировочный набор с колонками `question`, `context`, `answer`. Для простого чата можно использовать заголовок чанка в качестве вопроса, сам текст в поле контекста и ожидаемый ответ (либо пустую строку) — сохраните файл в формате CSV или JSONL.
 
+### Аппаратные требования
+
+- **CUDA**. Для обучения на GPU требуется установленный драйвер NVIDIA и CUDA 12.x. После проверки `nvidia-smi` можно дополнительно поставить `bitsandbytes`, чтобы активировать 4-битный режим.
+- **Минимум VRAM**. Для моделей до 8B параметров достаточно 12 ГБ видеопамяти (QLoRA с градиентным накоплением). Для 13B потребуется 24 ГБ. На CPU обучение тоже возможно, но займёт часы/сутки и потребует 32+ ГБ RAM.
+
 ### Обучение QLoRA на CPU или GPU
 
-1. Установите дополнительные пакеты: `pip install transformers peft datasets bitsandbytes accelerate` (для CPU можно пропустить `bitsandbytes`).
-2. Запустите обучение: 
+1. Установите зависимости для обучения:
+
+   ```bash
+   pip install --index-url https://download.pytorch.org/whl/cpu torch==2.4.1
+   pip install -r requirements-train.txt
+   # или через extras: pip install .[train]
+   ```
+
+   При наличии CUDA дополнительно выполните `pip install bitsandbytes` и убедитесь, что `nvidia-smi` отображает устройство.
+2. Запустите обучение:
    ```bash
    python -m scripts.train_lora \
        ./data/dataset.jsonl \

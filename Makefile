@@ -5,13 +5,20 @@ APP_MODULE := app.main:app
 HOST ?= 0.0.0.0
 PORT ?= 8000
 IMAGE ?= kb-ai:local
+TORCH_INDEX ?= https://download.pytorch.org/whl/cpu
 
-.PHONY: install lint format test run worker build clean
+.PHONY: venv install dev lint format test run worker build clean
+
+venv:
+	$(PYTHON) -m venv .venv
 
 install:
 	$(PIP) install --upgrade pip
-	$(PIP) install -r requirements.txt
-	if [ -f requirements-dev.txt ]; then $(PIP) install -r requirements-dev.txt; fi
+	$(PIP) install --index-url $(TORCH_INDEX) torch==2.4.1
+	$(PIP) install -r requirements-runtime.txt -r requirements-llm.txt
+
+dev: install
+	$(PIP) install -r requirements-dev.txt
 
 lint:
 	ruff check .

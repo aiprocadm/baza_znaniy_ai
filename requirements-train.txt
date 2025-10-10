@@ -1,0 +1,7 @@
+# Устанавливать так:
+# pip install --index-url https://download.pytorch.org/whl/cpu torch==2.4.1
+# pip install -r requirements-train.txt
+accelerate==0.34.2
+datasets==3.1.0
+peft==0.17.1
+transformers==4.57.0
