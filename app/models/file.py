@@ -180,10 +180,7 @@ def _ensure_sqlmodel_metadata(metadata: Any | None) -> MetaData:
             logger.error(
                 "SQLModel.metadata.create_all is not callable; skipping schema creation"
             )
-            _sanitize_metadata_tables(_rebuild_sqlmodel_metadata())
-            raise RuntimeError(
-                "SQLModel metadata initialisation failed: metadata.create_all is not callable"
-            )
+            return _sanitize_metadata_tables(_rebuild_sqlmodel_metadata())
 
     candidate = getattr(SQLModel, "metadata", None)
     if isinstance(candidate, MetaData):
