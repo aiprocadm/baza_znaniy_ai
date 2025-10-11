@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Callable, Iterable, Iterator, Sequence
+from typing import Callable, Iterable, Iterator, Sequence, cast
 
 import numpy as np
 from qdrant_client import QdrantClient
@@ -39,6 +39,7 @@ except Exception:  # pragma: no cover - lightweight fallback used in tests
             return array.tolist()
 
 from app.core.config import Settings, get_settings
+from app.retriever.embedding_protocol import EmbedderProtocol
 
 __all__ = ["QdrantVectorStore"]
 
@@ -50,13 +51,15 @@ class QdrantVectorStore:
         self,
         settings: Settings | None = None,
         *,
-        embedder_factory: Callable[[str], SentenceTransformer] | None = None,
+        embedder_factory: Callable[[str], EmbedderProtocol] | None = None,
         client_factory: Callable[..., QdrantClient] | None = None,
     ) -> None:
         self.settings = settings or get_settings()
-        self._embedder_factory = embedder_factory or SentenceTransformer
+        self._embedder_factory: Callable[[str], EmbedderProtocol] = (
+            embedder_factory or cast(Callable[[str], EmbedderProtocol], SentenceTransformer)
+        )
         self._client_factory = client_factory or QdrantClient
-        self._model: SentenceTransformer | None = None
+        self._model: EmbedderProtocol | None = None
         self._client: QdrantClient | None = None
 
         self._storage_dir = Path(self.settings.qdrant_path_resolved)
@@ -64,7 +67,7 @@ class QdrantVectorStore:
 
     # ------------------------------------------------------------------
     # Internal helpers
-    def _embedder(self) -> SentenceTransformer:
+    def _embedder(self) -> EmbedderProtocol:
         if self._model is None:
             model = self._embedder_factory(self.settings.vector_embed_model)
             dimension = self._resolve_dimension(model)
@@ -77,7 +80,7 @@ class QdrantVectorStore:
         return self._model
 
     @staticmethod
-    def _resolve_dimension(model: SentenceTransformer) -> int:
+    def _resolve_dimension(model: EmbedderProtocol) -> int:
         if hasattr(model, "get_sentence_embedding_dimension"):
             return int(model.get_sentence_embedding_dimension())
         sample = model.encode([""], convert_to_numpy=True)

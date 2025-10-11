@@ -21,6 +21,11 @@ from fastapi import UploadFile as FastAPIUploadFile
 from starlette.datastructures import MutableHeaders
 
 from app.api.status_codes import HTTP_CONTENT_TOO_LARGE
+from app.api.upload_policies import (
+    ALLOWED_CONTENT_TYPES_BY_EXTENSION,
+    UploadContentTypeError,
+    evaluate_content_type,
+)
 from app.api.upload_utils import create_upload_file
 from app.core.auth import ensure_tenant_access, get_current_active_user
 from app.core.deps import (
@@ -34,6 +39,8 @@ from app.models import UploadResponse
 from app.ingest.service import IngestQueueFullError, IngestService
 
 router = APIRouter(tags=["upload"])
+
+_ALLOWED_CONTENT_TYPES_BY_EXTENSION = ALLOWED_CONTENT_TYPES_BY_EXTENSION
 
 _UNSUPPORTED_MEDIA_TYPE = getattr(status, "HTTP_415_UNSUPPORTED_MEDIA_TYPE", 415)
 
@@ -279,7 +286,6 @@ async def upload_file(
     if extension not in limits.allowed_extensions:
         raise HTTPException(_UNSUPPORTED_MEDIA_TYPE, detail="UPLOAD_INVALID_EXT")
 
-
     def _as_bytes(value: object) -> bytes:
         if isinstance(value, bytes):
             return value
@@ -418,6 +424,13 @@ async def upload_file(
         selected_extension = _normalise_extension(selected_filename or "")
         if selected_extension not in limits.allowed_extensions:
             raise HTTPException(_UNSUPPORTED_MEDIA_TYPE, detail="UPLOAD_INVALID_EXT")
+
+        try:
+            evaluation = evaluate_content_type(selected_extension, selected_content_type)
+        except UploadContentTypeError as exc:
+            raise HTTPException(_UNSUPPORTED_MEDIA_TYPE, detail="UPLOAD_INVALID_TYPE") from exc
+        if evaluation.content_type:
+            selected_content_type = evaluation.content_type
 
         payload = await _read_file(upload, limits)
     finally:

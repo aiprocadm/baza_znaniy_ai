@@ -42,6 +42,12 @@ from app.observability.metrics import (
 )
 from app.retriever.rerank import apply_rerank
 from app.api.status_codes import HTTP_CONTENT_TOO_LARGE
+from app.api.upload_policies import (
+    ALLOWED_CONTENT_TYPES_BY_EXTENSION,
+    GENERIC_ALLOWED_CONTENT_TYPES,
+    UploadContentTypeError,
+    evaluate_content_type,
+)
 from app.api.upload_utils import create_upload_file
 
 try:  # pragma: no cover - optional Starlette dependency in some environments
@@ -58,22 +64,8 @@ _UNSUPPORTED_MEDIA_TYPE = getattr(status, "HTTP_415_UNSUPPORTED_MEDIA_TYPE", 415
 _REQUEST_TOO_LARGE = HTTP_CONTENT_TOO_LARGE
 
 _ABSOLUTE_MAX_UPLOAD_BYTES = 50 * 1024 * 1024
-_ALLOWED_CONTENT_TYPES_BY_EXTENSION: dict[str, set[str]] = {
-    "pdf": {"application/pdf"},
-    "docx": {
-        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-    },
-    "pptx": {
-        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-    },
-    "xlsx": {
-        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    },
-    "txt": {"text/plain"},
-    "md": {"text/markdown", "text/plain"},
-    "html": {"text/html", "application/xhtml+xml"},
-}
-_GENERIC_ALLOWED_CONTENT_TYPES = {"application/octet-stream"}
+_ALLOWED_CONTENT_TYPES_BY_EXTENSION = ALLOWED_CONTENT_TYPES_BY_EXTENSION
+_GENERIC_ALLOWED_CONTENT_TYPES = GENERIC_ALLOWED_CONTENT_TYPES
 
 
 class _LLMCompatProvider:
@@ -708,19 +700,17 @@ def _content_length_exceeds_limits(request: Request, limits: UploadLimits) -> bo
 def _enforce_content_type(extension: str, upload: UploadFile) -> None:
     """Validate the upload content-type against the expected mapping."""
 
-    content_type = (upload.content_type or "").split(";", 1)[0].strip().lower()
-    allowed = _ALLOWED_CONTENT_TYPES_BY_EXTENSION.get(extension)
-    if allowed:
-        if content_type not in allowed:
-            raise HTTPException(_UNSUPPORTED_MEDIA_TYPE, "UPLOAD_INVALID_TYPE")
-        return
-    if not content_type:
-        raise HTTPException(_UNSUPPORTED_MEDIA_TYPE, "UPLOAD_INVALID_TYPE")
-    if content_type not in _GENERIC_ALLOWED_CONTENT_TYPES:
+    try:
+        evaluation = evaluate_content_type(extension, upload.content_type)
+    except UploadContentTypeError as exc:
+        raise HTTPException(_UNSUPPORTED_MEDIA_TYPE, "UPLOAD_INVALID_TYPE") from exc
+    if evaluation.content_type:
+        upload.content_type = evaluation.content_type
+    if evaluation.requires_logging:
         logger.debug(
             "Accepting upload with extension %s and non-standard content-type %s",
             extension,
-            content_type,
+            evaluation.content_type,
         )
 
 

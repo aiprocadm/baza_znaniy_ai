@@ -6,7 +6,7 @@ import json
 import os
 from collections import OrderedDict
 from pathlib import Path
-from typing import Callable, Iterable, Sequence
+from typing import Callable, Iterable, Sequence, cast
 
 import faiss  # type: ignore[import]
 import numpy as np
@@ -40,6 +40,10 @@ except Exception:  # pragma: no cover - lightweight fallback used in tests
             return array.tolist()
 
 from app.core.config import Settings, get_settings
+from app.retriever.embedding_protocol import EmbedderProtocol
+
+EmbedderFactory = Callable[[str], EmbedderProtocol]
+_default_embedder_factory: EmbedderFactory = cast(EmbedderFactory, SentenceTransformer)
 
 
 class FaissVectorStore:
@@ -49,11 +53,11 @@ class FaissVectorStore:
         self,
         settings: Settings | None = None,
         *,
-        embedder_factory: Callable[[str], SentenceTransformer] | None = None,
+        embedder_factory: EmbedderFactory | None = None,
     ) -> None:
         self.settings = settings or get_settings()
-        self._embedder_factory = embedder_factory or SentenceTransformer
-        self._model: SentenceTransformer | None = None
+        self._embedder_factory: EmbedderFactory = embedder_factory or _default_embedder_factory
+        self._model: EmbedderProtocol | None = None
         self._index: faiss.Index | None = None
         self._payloads: "OrderedDict[str, dict[str, object]]" = OrderedDict()
         self._ordered_ids: list[str] = []
@@ -67,7 +71,7 @@ class FaissVectorStore:
 
     # ------------------------------------------------------------------
     # Internal helpers
-    def _embedder(self) -> SentenceTransformer:
+    def _embedder(self) -> EmbedderProtocol:
         if self._model is None:
             model = self._embedder_factory(self.settings.vector_embed_model)
             dimension = self._resolve_dimension(model)
@@ -80,7 +84,7 @@ class FaissVectorStore:
         return self._model
 
     @staticmethod
-    def _resolve_dimension(model: SentenceTransformer) -> int:
+    def _resolve_dimension(model: EmbedderProtocol) -> int:
         if hasattr(model, "get_sentence_embedding_dimension"):
             return int(model.get_sentence_embedding_dimension())
         sample = model.encode([""], convert_to_numpy=True)
