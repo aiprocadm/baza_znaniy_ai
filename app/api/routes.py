@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import hashlib
 import io
 import logging
 import os
 import re
+import unicodedata
 import sqlite3
 import sys
 import time
@@ -651,14 +653,29 @@ def _normalise_extension(filename: str) -> str:
 
 
 def _normalise_filename(filename: str | None) -> str:
-    """Return a safe filename stripped of directory components."""
+    """Return a safe filename stripped of path components and controls."""
 
     candidate = (filename or "uploaded").strip() or "uploaded"
+    # Remove any path separators or parent directory references.
     name = Path(candidate).name
+    if name in {"..", "."}:
+        name = "uploaded"
+
+    # Normalise unicode to NFKC and drop control characters.
+    name = unicodedata.normalize("NFKC", name)
+    name = "".join(ch for ch in name if ch.isprintable() and ord(ch) >= 0x20)
+
     sanitized = re.sub(r"[\s\x00]+", " ", name).strip()
     sanitized = re.sub(r"[^A-Za-z0-9_.\- ]", "_", sanitized)
     sanitized = sanitized.replace(" ", "_")
-    return sanitized or "uploaded"
+
+    if not sanitized:
+        return "uploaded"
+
+    if sanitized in {"..", "."}:
+        return "uploaded"
+
+    return sanitized
 
 
 def _resolve_upload_limits(request: Request) -> UploadLimits:
@@ -695,6 +712,27 @@ def _content_length_exceeds_limits(request: Request, limits: UploadLimits) -> bo
 
     hard_limit = min(limits.max_bytes, _ABSOLUTE_MAX_UPLOAD_BYTES)
     return content_length > hard_limit
+
+
+async def _read_limited_upload(upload: UploadFile, limits: UploadLimits) -> bytes:
+    """Read an upload stream while enforcing the configured size limit."""
+
+    max_allowed = min(limits.max_bytes, _ABSOLUTE_MAX_UPLOAD_BYTES)
+    chunk_size = 1024 * 1024
+    buffer = bytearray()
+
+    while True:
+        chunk = await upload.read(chunk_size)
+        if not chunk:
+            break
+        buffer.extend(chunk)
+        if len(buffer) > max_allowed:
+            raise HTTPException(_REQUEST_TOO_LARGE, "UPLOAD_TOO_LARGE")
+
+    if not buffer:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "UPLOAD_EMPTY")
+
+    return bytes(buffer)
 
 
 def _enforce_content_type(extension: str, upload: UploadFile) -> None:
@@ -971,6 +1009,7 @@ async def upload(
 
     stored_files: list[str] = []
     total_chunks = 0
+    seen_hashes: set[str] = set()
 
     for upload_file in upload_items:
         filename = _normalise_filename(upload_file.filename)
@@ -980,11 +1019,11 @@ async def upload(
 
         _enforce_content_type(ext, upload_file)
 
-        data = await upload_file.read()
-        if not data:
-            raise HTTPException(status.HTTP_400_BAD_REQUEST, "UPLOAD_EMPTY")
-        if len(data) > min(limits.max_size, _ABSOLUTE_MAX_UPLOAD_BYTES):
-            raise HTTPException(_REQUEST_TOO_LARGE, "UPLOAD_TOO_LARGE")
+        data = await _read_limited_upload(upload_file, limits)
+        digest = hashlib.sha256(data).hexdigest()
+        if digest in seen_hashes:
+            continue
+        seen_hashes.add(digest)
 
         chunks = parser(filename, data)
         if not chunks:

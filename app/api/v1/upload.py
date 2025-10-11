@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import re
+import unicodedata
 import inspect
 import mimetypes
 import sys
@@ -242,12 +244,22 @@ def _normalise_extension(filename: str) -> str:
 
 
 async def _read_file(upload: UploadFile, limits: UploadLimits) -> bytes:
-    data = await upload.read()
-    if not data:
+    max_allowed = limits.max_size
+    chunk_size = 1024 * 1024
+    buffer = bytearray()
+
+    while True:
+        chunk = await upload.read(chunk_size)
+        if not chunk:
+            break
+        buffer.extend(chunk)
+        if len(buffer) > max_allowed:
+            raise HTTPException(HTTP_CONTENT_TOO_LARGE, detail="UPLOAD_TOO_LARGE")
+
+    if not buffer:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="UPLOAD_EMPTY")
-    if len(data) > limits.max_size:
-        raise HTTPException(HTTP_CONTENT_TOO_LARGE, detail="UPLOAD_TOO_LARGE")
-    return data
+
+    return bytes(buffer)
 
 
 @router.post("/upload", response_model=UploadResponse, status_code=status.HTTP_201_CREATED)
@@ -419,7 +431,7 @@ async def upload_file(
             coerced[0],
         )
 
-        selected_filename = upload.filename
+        selected_filename = _normalise_filename(upload.filename)
         selected_content_type = getattr(upload, "content_type", None)
         selected_extension = _normalise_extension(selected_filename or "")
         if selected_extension not in limits.allowed_extensions:
@@ -607,4 +619,18 @@ def _coerce_upload_argument(item: object) -> UploadFile:
 
     return create_upload_file(filename, content, content_type)
 
+
+def _normalise_filename(filename: str | None) -> str:
+    candidate = (filename or "uploaded").strip() or "uploaded"
+    name = Path(candidate).name
+    if name in {"..", "."}:
+        name = "uploaded"
+    name = unicodedata.normalize("NFKC", name)
+    name = "".join(ch for ch in name if ch.isprintable() and ord(ch) >= 0x20)
+    sanitized = re.sub(r"[\s\x00]+", " ", name).strip()
+    sanitized = re.sub(r"[^A-Za-z0-9_.\- ]", "_", sanitized)
+    sanitized = sanitized.replace(" ", "_")
+    if not sanitized or sanitized in {"..", "."}:
+        return "uploaded"
+    return sanitized
 

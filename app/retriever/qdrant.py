@@ -182,7 +182,11 @@ class QdrantVectorStore:
             return
 
         points: list[qmodels.PointStruct] = []
+        batch_size = 512
+        client = self._client_instance()
+
         for embedding, (identifier, chunk) in zip(embeddings, unique.items()):
+            vector = embedding.tolist() if hasattr(embedding, "tolist") else list(embedding)
             payload = {
                 "file": chunk.get("file"),
                 "page": int(chunk.get("page") or 0),
@@ -192,13 +196,22 @@ class QdrantVectorStore:
             points.append(
                 qmodels.PointStruct(
                     id=identifier,
-                    vector=embedding.tolist(),
+                    vector=vector,
                     payload=payload,
                 )
             )
+            if len(points) >= batch_size:
+                client.upsert(
+                    collection_name=self.settings.qdrant_collection,
+                    points=list(points),
+                )
+                points.clear()
 
-        client = self._client_instance()
-        client.upsert(collection_name=self.settings.qdrant_collection, points=points)
+        if points:
+            client.upsert(
+                collection_name=self.settings.qdrant_collection,
+                points=list(points),
+            )
 
     def search(self, query: str, top_k: int) -> list[dict[str, object]]:
         if top_k <= 0:
