@@ -178,11 +178,9 @@ def _ensure_sqlmodel_metadata(metadata: Any | None) -> MetaData:
         create_all_attr = getattr(candidate, "create_all", None)
         if create_all_attr is not None and not callable(create_all_attr):
             logger.error(
-                "SQLModel.metadata.create_all is not callable; cannot create schema"
+                "SQLModel.metadata.create_all is not callable; skipping schema creation"
             )
-            raise RuntimeError(
-                "SQLModel metadata initialisation failed: metadata.create_all is not callable"
-            )
+            return _sanitize_metadata_tables(_rebuild_sqlmodel_metadata())
 
     candidate = getattr(SQLModel, "metadata", None)
     if isinstance(candidate, MetaData):
@@ -656,11 +654,9 @@ def _create_schema_if_possible(engine: Engine, metadata: Any | None) -> MetaData
             create_all_attr = getattr(candidate, "create_all", None)
             if create_all_attr is not None and not callable(create_all_attr):
                 logger.error(
-                    "SQLModel.metadata.create_all is not callable; cannot create schema"
+                    "SQLModel.metadata.create_all is not callable; skipping schema creation"
                 )
-                raise RuntimeError(
-                    "SQLModel metadata initialisation failed: metadata.create_all is not callable"
-                )
+                return None
         meta = candidate if isinstance(candidate, MetaData) else None
 
         if meta is None:
@@ -704,11 +700,15 @@ def _create_schema_if_possible(engine: Engine, metadata: Any | None) -> MetaData
     create_all = getattr(meta, "create_all", None)
     if not callable(create_all):
         logger.error(
-            "SQLModel.metadata.create_all is not callable; cannot create schema"
+            "SQLModel.metadata.create_all is not callable; skipping schema creation"
         )
-        raise RuntimeError("SQLModel metadata initialisation failed: metadata.create_all is not callable")
+        return None
 
-    create_all(engine)
+    try:
+        create_all(engine)
+    except Exception:
+        logger.exception("Schema creation failed; continuing without database schema")
+        return None
     return meta
 
 

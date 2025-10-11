@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Iterable, List
+from collections import deque
+from collections.abc import Iterable, MutableSequence
+from threading import Lock
+from typing import List
 
 from app.core.config import get_settings
 from app.retriever.vector_store import get_vector_store
@@ -12,26 +15,32 @@ from app.observability.metrics import record_index_operation, record_search_oper
 
 LOGGER = logging.getLogger(__name__)
 
-_DEFAULT_FALLBACK: List[dict[str, object]] = []
-_FALLBACK_STORAGE: List[dict[str, object]] | None = _DEFAULT_FALLBACK
+FallbackStorage = MutableSequence[dict[str, object]] | deque[dict[str, object]]
+
+_DEFAULT_FALLBACK: FallbackStorage = deque()
+_FALLBACK_STORAGE: FallbackStorage | None = _DEFAULT_FALLBACK
+_FALLBACK_LOCK = Lock()
 _VECTOR_STORE: object | None = None
 
 
-def set_fallback_storage(storage: List[dict[str, object]] | None) -> None:
+def set_fallback_storage(storage: FallbackStorage | None) -> None:
     """Configure the container used for the in-memory fallback index."""
 
     global _FALLBACK_STORAGE
-    if storage is None:
-        storage = []
-    _FALLBACK_STORAGE = storage
+    with _FALLBACK_LOCK:
+        if storage is None:
+            storage = deque()
+        _FALLBACK_STORAGE = storage
 
 
-def get_fallback_storage() -> List[dict[str, object]]:
+def get_fallback_storage() -> FallbackStorage:
     """Return the active fallback container, creating one when needed."""
 
     global _FALLBACK_STORAGE
     if _FALLBACK_STORAGE is None:
-        _FALLBACK_STORAGE = []
+        with _FALLBACK_LOCK:
+            if _FALLBACK_STORAGE is None:
+                _FALLBACK_STORAGE = deque()
     return _FALLBACK_STORAGE
 
 
@@ -53,18 +62,22 @@ def index_chunks(chunks: Iterable[dict[str, object]]) -> int:
 
     start = time.perf_counter()
 
+    def _store_in_fallback() -> int:
+        fallback_start = time.perf_counter()
+        with _FALLBACK_LOCK:
+            get_fallback_storage().extend(items)
+        record_index_operation(
+            "success", "fallback", len(items), time.perf_counter() - fallback_start
+        )
+        return len(items)
+
     try:
         store = _resolve_vector_store()
     except Exception:  # pragma: no cover - backend unavailable or optional deps missing
         duration = time.perf_counter() - start
         record_index_operation("error", "vector", len(items), duration)
         LOGGER.exception("Falling back to in-memory index")
-        fallback_start = time.perf_counter()
-        get_fallback_storage().extend(items)
-        record_index_operation(
-            "success", "fallback", len(items), time.perf_counter() - fallback_start
-        )
-        return len(items)
+        return _store_in_fallback()
 
     try:
         store.ensure_ready()
@@ -73,12 +86,7 @@ def index_chunks(chunks: Iterable[dict[str, object]]) -> int:
         duration = time.perf_counter() - start
         record_index_operation("error", "vector", len(items), duration)
         LOGGER.exception("Falling back to in-memory index")
-        fallback_start = time.perf_counter()
-        get_fallback_storage().extend(items)
-        record_index_operation(
-            "success", "fallback", len(items), time.perf_counter() - fallback_start
-        )
-        return len(items)
+        return _store_in_fallback()
 
     record_index_operation("success", "vector", len(items), time.perf_counter() - start)
     return len(items)
@@ -91,7 +99,10 @@ def _search_fallback(query: str, top_k: int) -> List[dict[str, object]]:
         return []
     hits: List[tuple[float, dict[str, object]]] = []
     needle = query.lower()
-    for chunk in get_fallback_storage():
+    with _FALLBACK_LOCK:
+        snapshot = list(get_fallback_storage())
+
+    for chunk in snapshot:
         text = str(chunk.get("text", ""))
         haystack = text.lower()
         if not haystack:
@@ -133,7 +144,8 @@ def search(query: str, top_k: int = 10) -> List[dict[str, object]]:
 def clear_fallback() -> None:
     """Reset the in-memory fallback index (used in tests)."""
 
-    get_fallback_storage().clear()
+    with _FALLBACK_LOCK:
+        get_fallback_storage().clear()
 
 
 __all__ = [
