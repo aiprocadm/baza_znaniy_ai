@@ -17,16 +17,16 @@ from app.ingest.service import IngestService
 from app.services.files import FileStore, IngestQueue
 
 
-DEFAULT_ALLOWED_EXTENSIONS = frozenset(
-    {"pdf", "docx", "pptx", "xlsx", "txt", "md", "html"}
-)
+ALLOWED_EXTENSION_WHITELIST = frozenset({"pdf", "docx", "pptx", "xlsx", "txt", "md"})
+
+DEFAULT_ALLOWED_EXTENSIONS = frozenset(sorted(ALLOWED_EXTENSION_WHITELIST))
 
 
 @dataclass
 class UploadLimits:
     """Configuration describing upload restrictions."""
 
-    max_upload_mb: int = 40
+    max_upload_mb: int = 50
     allowed_extensions: set[str] = field(default_factory=lambda: set(DEFAULT_ALLOWED_EXTENSIONS))
 
     max_bytes: int = field(init=False, repr=False)
@@ -65,10 +65,18 @@ class UploadLimits:
     @staticmethod
     def _normalise_extensions(value: object) -> set[str]:
         if isinstance(value, str):
-            return {piece.strip().lower() for piece in value.split(",") if piece.strip()}
-        if isinstance(value, Iterable):
-            return {str(item).lower() for item in value}
-        raise ValueError("allowed_extensions must be a string or iterable")
+            candidates = {piece.strip().lower() for piece in value.split(",") if piece.strip()}
+        elif isinstance(value, Iterable):
+            candidates = {str(item).lower() for item in value}
+        else:
+            raise ValueError("allowed_extensions must be a string or iterable")
+
+        allowed = candidates & ALLOWED_EXTENSION_WHITELIST
+        if not allowed:
+            raise ValueError(
+                "allowed_extensions must contain at least one supported extension"
+            )
+        return allowed
 
 
 def get_data_dir() -> Path:

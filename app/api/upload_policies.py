@@ -17,7 +17,6 @@ ALLOWED_CONTENT_TYPES_BY_EXTENSION: dict[str, set[str]] = {
     },
     "txt": {"text/plain"},
     "md": {"text/markdown", "text/plain"},
-    "html": {"text/html", "application/xhtml+xml"},
 }
 GENERIC_ALLOWED_CONTENT_TYPES = {"application/octet-stream"}
 

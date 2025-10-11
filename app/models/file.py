@@ -888,20 +888,16 @@ def get_engine(url: Optional[str] = None, *, create_schema: bool = True) -> Engi
 
     if create_schema:
         meta = _ensure_metadata_with_recovery(metadata, reason="schema creation")
-        create_all = getattr(meta, "create_all", None)
-        if callable(create_all) and not is_fallback_value(engine):
-            create_all(engine)
-        elif not callable(create_all):
-            logger.error(
-                "SQLModel.metadata.create_all is not callable; cannot create schema"
-            )
-            raise RuntimeError(
-                "SQLModel metadata initialisation failed: metadata.create_all is not callable"
-            )
-        else:
+        if is_fallback_value(engine):
             logger.warning(
                 "Skipping schema creation because SQLAlchemy engine is operating in fallback mode"
             )
+        else:
+            schema = _create_schema_if_possible(engine, meta)
+            if schema is None:
+                logger.warning(
+                    "Database schema was not created; continuing without persistent metadata"
+                )
         current_metadata = getattr(SQLModel, "metadata", meta)
         _record_sqlmodel_metadata_health(current_metadata, origin="get_engine")
     else:
