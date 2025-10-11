@@ -6,6 +6,7 @@ import logging
 from contextlib import asynccontextmanager
 from datetime import timezone
 from importlib import import_module
+from types import SimpleNamespace
 from typing import Sequence
 
 from fastapi import FastAPI
@@ -56,7 +57,21 @@ except ImportError:  # pragma: no cover - fallback when cache reset is unavailab
 
     def reset_provider_cache() -> None:  # type: ignore[redefining-outer-name]
         return None
-from app.llm import lora_runtime
+try:  # pragma: no cover - allow heavily stubbed llm modules in tests
+    from app.llm import lora_runtime
+except ImportError:  # pragma: no cover - lightweight fallback when runtime missing
+    def _lora_not_available(*_args, **_kwargs):
+        raise RuntimeError("LoRA runtime is not available in this environment")
+
+
+    lora_runtime = SimpleNamespace(  # type: ignore[assignment]
+        load_adapter=_lora_not_available,
+        unload_adapter=_lora_not_available,
+        set_active_adapter=lambda *_args, **_kwargs: None,
+        active_adapter=lambda: None,
+        AdapterCompatibilityError=RuntimeError,
+        RegistryError=RuntimeError,
+    )
 from app.llm.manager import LlamaLoraManager
 from app.observability.metadata_guard import (
     check_sqlmodel_metadata,
