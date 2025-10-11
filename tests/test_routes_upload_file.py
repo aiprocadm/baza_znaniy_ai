@@ -75,7 +75,9 @@ def test_upload_rejects_oversized_body(docs_client: TestClient) -> None:
     )
 
     assert response.status_code == HTTP_CONTENT_TOO_LARGE
-    assert response.json()["detail"] == "UPLOAD_TOO_LARGE"
+    payload = response.json()
+    assert payload["message"] == "UPLOAD_TOO_LARGE"
+    assert payload["status"] == HTTP_CONTENT_TOO_LARGE
 
 
 _INVALID_CONTENT_TYPE_CANDIDATES = [
@@ -116,7 +118,9 @@ def test_upload_rejects_invalid_content_type_matrix(
     )
 
     assert response.status_code == status.HTTP_415_UNSUPPORTED_MEDIA_TYPE
-    assert response.json()["detail"] == "UPLOAD_INVALID_TYPE"
+    payload = response.json()
+    assert payload["message"] == "UPLOAD_INVALID_TYPE"
+    assert payload["status"] == status.HTTP_415_UNSUPPORTED_MEDIA_TYPE
 
 
 def test_upload_enforces_content_length_header(docs_client: TestClient) -> None:
@@ -128,7 +132,9 @@ def test_upload_enforces_content_length_header(docs_client: TestClient) -> None:
     )
 
     assert response.status_code == HTTP_CONTENT_TOO_LARGE
-    assert response.json()["detail"] == "UPLOAD_TOO_LARGE"
+    payload = response.json()
+    assert payload["message"] == "UPLOAD_TOO_LARGE"
+    assert payload["status"] == HTTP_CONTENT_TOO_LARGE
 
 
 def test_upload_sanitises_filename(docs_client: TestClient) -> None:

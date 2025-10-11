@@ -317,7 +317,8 @@ def test_chat_returns_503_when_model_missing(api_client: TestClient) -> None:
 
     assert response.status_code == 503
     payload = response.json()
-    assert payload["detail"] == "LLM_MODEL_MISSING"
+    assert payload["message"] == "LLM_MODEL_MISSING"
+    assert payload["status"] == 503
 
 
 def test_version_endpoint_reports_versions(api_client: TestClient) -> None:

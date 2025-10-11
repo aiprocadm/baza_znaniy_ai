@@ -3,6 +3,7 @@ from dataclasses import asdict, dataclass, is_dataclass
 from pathlib import Path
 from tempfile import SpooledTemporaryFile
 from types import ModuleType, SimpleNamespace
+from typing import Mapping
 
 import hashlib
 import warnings
@@ -377,6 +378,11 @@ def _v1_invalid_mime_matrix() -> list[tuple[str, str]]:
     return cases
 
 
+def _stub_request(headers: Mapping[str, str] | None = None) -> SimpleNamespace:
+    normalized = {str(key).lower(): str(value) for key, value in (headers or {}).items()}
+    return SimpleNamespace(headers=normalized)
+
+
 def test_upload_file_accepts_uploadfile_instance(tmp_path: Path) -> None:
     limits = UploadLimits(max_upload_mb=1, allowed_extensions={"txt"})
     service = _StubIngestService()
@@ -400,6 +406,7 @@ def test_upload_file_accepts_uploadfile_instance(tmp_path: Path) -> None:
             _=object(),
             tenant="default",
             ingest_service=service,  # type: ignore[arg-type]
+            request=_stub_request(),
         )
     )
 
@@ -447,6 +454,7 @@ def test_upload_file_coerces_tuple_and_list_payloads(tmp_path: Path, monkeypatch
             _=object(),
             tenant="acme",
             ingest_service=service,  # type: ignore[arg-type]
+            request=_stub_request(),
         )
     )
 
@@ -474,6 +482,7 @@ def test_upload_file_tuple_input_preserves_payload(tmp_path: Path) -> None:
             _=object(),
             tenant="tuple-tenant",
             ingest_service=service,  # type: ignore[arg-type]
+            request=_stub_request(),
         )
     )
 
@@ -505,6 +514,7 @@ def test_upload_file_list_input_preserves_payload(tmp_path: Path) -> None:
             _=object(),
             tenant="list-tenant",
             ingest_service=service,  # type: ignore[arg-type]
+            request=_stub_request(),
         )
     )
 
@@ -538,6 +548,7 @@ def test_upload_file_dict_input_preserves_payload(tmp_path: Path) -> None:
             _=object(),
             tenant="dict-tenant",
             ingest_service=service,  # type: ignore[arg-type]
+            request=_stub_request(),
         )
     )
 
@@ -576,6 +587,7 @@ def test_upload_file_rejects_payload_exceeding_limits(tmp_path: Path) -> None:
                 _=object(),
                 tenant="default",
                 ingest_service=service,  # type: ignore[arg-type]
+                request=_stub_request(),
             )
         )
 
@@ -612,6 +624,7 @@ def test_upload_file_rejects_invalid_content_type(
                 _=object(),
                 tenant="default",
                 ingest_service=service,  # type: ignore[arg-type]
+                request=_stub_request(),
             )
         )
 
@@ -687,6 +700,7 @@ def test_upload_does_not_mutate_original_uploadfile(tmp_path: Path) -> None:
             _=object(),
             tenant="immutable",
             ingest_service=service,  # type: ignore[arg-type]
+            request=_stub_request(),
         )
     )
 

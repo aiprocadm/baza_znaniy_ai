@@ -190,7 +190,9 @@ def test_upload_rejects_invalid_extension(service_app: Any):
 
         expected = getattr(status, "HTTP_415_UNSUPPORTED_MEDIA_TYPE", 415)
         assert response.status_code == expected
-        assert response.json()["detail"] == "UPLOAD_INVALID_EXT"
+        payload = response.json()
+        assert payload["message"] == "UPLOAD_INVALID_EXT"
+        assert payload["status"] == expected
 
 
 def test_chat_returns_citations(service_app: Any):
@@ -418,7 +420,8 @@ def test_upload_returns_no_text_found_when_chunks_missing(
     assert response.status_code == 400
     payload = response.json()
 
-    assert payload["detail"] == "NO_TEXT_FOUND"
+    assert payload["message"] == "NO_TEXT_FOUND"
+    assert payload["status"] == status.HTTP_400_BAD_REQUEST
     assert payload.get("ok") is not True
 
     assert call_counts == {"parse": 1, "save": 0, "upsert": 0}

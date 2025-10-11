@@ -175,7 +175,28 @@ class TestClient:
             if inspect.isawaitable(result):
                 result = self._run_async(result)
         except HTTPException as exc:
-            return _SimpleResponse(exc.status_code, {"detail": exc.detail})
+            detail = exc.detail
+            if isinstance(detail, dict):
+                message = detail.get("message") or detail.get("detail") or "UNKNOWN_ERROR"
+                details = detail.get("details")
+                if details is None:
+                    extras = {
+                        key: value
+                        for key, value in detail.items()
+                        if key not in {"message", "detail", "details"}
+                    }
+                    details = extras or None
+            elif isinstance(detail, (list, tuple)):
+                message = "VALIDATION_ERROR"
+                details = list(detail)
+            elif detail in {None, ""}:
+                message = "UNKNOWN_ERROR"
+                details = None
+            else:
+                message = str(detail)
+                details = None
+            payload = {"status": exc.status_code, "message": message, "details": details}
+            return _SimpleResponse(exc.status_code, payload)
 
         def _collect_backgrounds(*extra: BackgroundTasks | None) -> list[BackgroundTasks]:
             collected: list[BackgroundTasks] = []

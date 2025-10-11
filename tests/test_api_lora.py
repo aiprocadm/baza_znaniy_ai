@@ -167,7 +167,9 @@ def test_load_missing_adapter_returns_not_found(lora_client: TestClient, tmp_pat
         json={"path": str(missing), "scaling": 1.0},
     )
     assert response.status_code == status.HTTP_404_NOT_FOUND
-    assert response.json()["detail"] == "ADAPTER_NOT_FOUND"
+    payload = response.json()
+    assert payload["message"] == "ADAPTER_NOT_FOUND"
+    assert payload["status"] == status.HTTP_404_NOT_FOUND
 
 
 def test_repeat_load_returns_conflict(lora_client: TestClient, tmp_path: Path) -> None:
@@ -184,7 +186,9 @@ def test_repeat_load_returns_conflict(lora_client: TestClient, tmp_path: Path) -
         json={"path": str(adapter_path), "scaling": 1.0},
     )
     assert second.status_code == status.HTTP_409_CONFLICT
-    assert second.json()["detail"] == "ADAPTER_ALREADY_LOADED"
+    payload = second.json()
+    assert payload["message"] == "ADAPTER_ALREADY_LOADED"
+    assert payload["status"] == status.HTTP_409_CONFLICT
 
 
 def test_unload_without_adapter_returns_conflict(lora_client: TestClient, tmp_path: Path) -> None:
@@ -194,7 +198,9 @@ def test_unload_without_adapter_returns_conflict(lora_client: TestClient, tmp_pa
         json={"path": str(adapter_path), "scaling": 1.0},
     )
     assert response.status_code == status.HTTP_409_CONFLICT
-    assert response.json()["detail"] == "ADAPTER_NOT_LOADED"
+    payload = response.json()
+    assert payload["message"] == "ADAPTER_NOT_LOADED"
+    assert payload["status"] == status.HTTP_409_CONFLICT
 
 
 def test_load_adapter_accepts_valid_scaling(lora_client: TestClient, tmp_path: Path) -> None:
@@ -408,7 +414,9 @@ def test_admin_routes_error_mapping(monkeypatch: pytest.MonkeyPatch, lora_client
     )
     error_response = lora_client.post("/admin/lora/load", json={"name": "missing"})
     assert error_response.status_code == status.HTTP_404_NOT_FOUND
-    assert error_response.json()["detail"] == "boom"
+    payload = error_response.json()
+    assert payload["message"] == "boom"
+    assert payload["status"] == status.HTTP_404_NOT_FOUND
 
     monkeypatch.setattr(
         routes_lora_module,
@@ -417,12 +425,16 @@ def test_admin_routes_error_mapping(monkeypatch: pytest.MonkeyPatch, lora_client
     )
     conflict = lora_client.post("/admin/lora/load", json={"name": "bad"})
     assert conflict.status_code == HTTP_UNPROCESSABLE_CONTENT
-    assert conflict.json()["detail"] == "bad"
+    payload = conflict.json()
+    assert payload["message"] == "bad"
+    assert payload["status"] == HTTP_UNPROCESSABLE_CONTENT
 
     monkeypatch.setattr(routes_lora_module, "load_adapter", lambda name: (_ for _ in ()).throw(RuntimeError("broken")))
     generic = lora_client.post("/admin/lora/load", json={"name": "broken"})
     assert generic.status_code == status.HTTP_400_BAD_REQUEST
-    assert generic.json()["detail"] == "broken"
+    payload = generic.json()
+    assert payload["message"] == "broken"
+    assert payload["status"] == status.HTTP_400_BAD_REQUEST
 
     monkeypatch.setattr(
         routes_lora_module,
@@ -431,7 +443,9 @@ def test_admin_routes_error_mapping(monkeypatch: pytest.MonkeyPatch, lora_client
     )
     unload_error = lora_client.post("/admin/lora/unload", json={"name": "demo"})
     assert unload_error.status_code == status.HTTP_400_BAD_REQUEST
-    assert unload_error.json()["detail"] == "oops"
+    payload = unload_error.json()
+    assert payload["message"] == "oops"
+    assert payload["status"] == status.HTTP_400_BAD_REQUEST
 
 
 def test_lora_runtime_manager_handles_provider(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
