@@ -16,6 +16,13 @@ from urllib.parse import unquote, urlparse
 from sqlalchemy import Column, JSON, MetaData, Text, UniqueConstraint, text
 from sqlalchemy.engine import Engine, make_url
 from sqlalchemy.ext.asyncio import create_async_engine
+try:  # pragma: no cover - optional dependency during lightweight test runs
+    from sqlalchemy.exc import NoSuchModuleError as _SQLAlchemyNoSuchModuleError
+except Exception:  # pragma: no cover - fallback when SQLAlchemy is stubbed
+    class _SQLAlchemyNoSuchModuleError(Exception):
+        """Placeholder exception when SQLAlchemy is unavailable."""
+
+        pass
 
 try:  # pragma: no cover - optional dependency during lightweight test runs
     from sqlalchemy.util import FacadeDict as _SQLAlchemyFacadeDict
@@ -165,6 +172,26 @@ def _rebuild_sqlmodel_metadata(
             )
 
     return new_metadata
+
+
+def _recover_sqlmodel_metadata(*, reason: str) -> MetaData:
+    """Rebuild SQLModel metadata when the current instance is unusable."""
+
+    logger.warning("Rebuilding SQLModel metadata due to %s", reason)
+    rebuilt = _rebuild_sqlmodel_metadata()
+    return _sanitize_metadata_tables(rebuilt)
+
+
+def _ensure_metadata_with_recovery(metadata: Any | None, *, reason: str) -> MetaData:
+    """Validate SQLModel metadata, rebuilding it on failure."""
+
+    try:
+        return _ensure_sqlmodel_metadata(metadata)
+    except RuntimeError:
+        logger.debug(
+            "SQLModel metadata validation failed during %s; attempting recovery", reason
+        )
+        return _recover_sqlmodel_metadata(reason=reason)
 
 
 def _ensure_sqlmodel_metadata(metadata: Any | None) -> MetaData:
@@ -466,6 +493,34 @@ class _EngineFallbackConnection:
         return _EngineFallbackResult(statement)
 
 
+def _build_engine_fallback(url: str) -> Engine:
+    """Create a lightweight engine replacement when SQLAlchemy is unavailable."""
+
+    fallback_engine = SimpleNamespace()
+
+    def _fallback_connect(*_: Any, **__: Any) -> _EngineFallbackConnection:
+        return _EngineFallbackConnection()
+
+    def _fallback_dispose(*_: Any, **__: Any) -> None:
+        return None
+
+    mark_fallback(_fallback_connect)
+    mark_fallback(_fallback_dispose)
+
+    fallback_engine.connect = _fallback_connect  # type: ignore[attr-defined]
+    fallback_engine.dispose = _fallback_dispose  # type: ignore[attr-defined]
+    fallback_engine.dialect = _synthesise_dialect(url)  # type: ignore[attr-defined]
+    try:
+        fallback_engine.url = make_url(url)  # type: ignore[attr-defined]
+    except (_SQLAlchemyNoSuchModuleError, ModuleNotFoundError):
+        fallback_engine.url = url  # type: ignore[attr-defined]
+    except Exception:
+        fallback_engine.url = url  # type: ignore[attr-defined]
+
+    mark_fallback(fallback_engine)
+    return _ensure_engine_surface(fallback_engine, url)
+
+
 def _synthesise_dialect(url: str) -> Any:
     """Create a minimal dialect object exposing ``name``/``driver`` attributes."""
 
@@ -480,7 +535,13 @@ def _synthesise_dialect(url: str) -> Any:
     if parsed is not None and hasattr(parsed, "get_backend_name"):
         backend = parsed.get_backend_name()  # type: ignore[assignment]
         get_driver = getattr(parsed, "get_driver_name", lambda: backend)
-        driver = get_driver() or backend
+        try:
+            driver = get_driver() or backend
+        except (_SQLAlchemyNoSuchModuleError, ModuleNotFoundError):
+            logger.debug(
+                "Unable to resolve SQLAlchemy driver for %s; defaulting to backend", url
+            )
+            driver = backend
     else:
         scheme = str(parsed).split(":", 1)[0]
         if "+" in scheme:
@@ -735,7 +796,9 @@ def get_engine(url: Optional[str] = None, *, create_schema: bool = True) -> Engi
     # Ensure additional SQLModel definitions are imported before metadata creation
     __import__("app.models.entities")
 
-    metadata = _ensure_sqlmodel_metadata(getattr(SQLModel, "metadata", None))
+    metadata = _ensure_metadata_with_recovery(
+        getattr(SQLModel, "metadata", None), reason="engine initialisation"
+    )
 
     engine_url = db_url_str
 
@@ -795,27 +858,49 @@ def get_engine(url: Optional[str] = None, *, create_schema: bool = True) -> Engi
                     exc_info=True,
                 )
 
-        engine = create_engine(
-            engine_url, echo=False, connect_args=_connect_args(engine_url)
-        )
+        try:
+            engine = create_engine(
+                engine_url, echo=False, connect_args=_connect_args(engine_url)
+            )
+        except (_SQLAlchemyNoSuchModuleError, ModuleNotFoundError):
+            logger.error(
+                "SQLAlchemy is missing the '%s' dialect; falling back to stub engine",
+                engine_url,
+                exc_info=True,
+            )
+            engine = _build_engine_fallback(engine_url)
     else:
-        engine = create_engine(db_url, echo=False, connect_args=_connect_args(db_url_str))
+        try:
+            engine = create_engine(
+                db_url, echo=False, connect_args=_connect_args(db_url_str)
+            )
+        except (_SQLAlchemyNoSuchModuleError, ModuleNotFoundError):
+            logger.error(
+                "SQLAlchemy is missing the '%s' dialect; falling back to stub engine",
+                db_url_str,
+                exc_info=True,
+            )
+            engine = _build_engine_fallback(db_url_str)
 
     _maybe_configure_sqlite_engine(engine, engine_url)
     engine = SyncEngineGuard(engine, engine_url).ensure_sync()
     engine = _ensure_engine_surface(engine, engine_url)
 
     if create_schema:
-        meta = _ensure_sqlmodel_metadata(metadata)
+        meta = _ensure_metadata_with_recovery(metadata, reason="schema creation")
         create_all = getattr(meta, "create_all", None)
-        if callable(create_all):
+        if callable(create_all) and not is_fallback_value(engine):
             create_all(engine)
-        else:
+        elif not callable(create_all):
             logger.error(
                 "SQLModel.metadata.create_all is not callable; cannot create schema"
             )
             raise RuntimeError(
                 "SQLModel metadata initialisation failed: metadata.create_all is not callable"
+            )
+        else:
+            logger.warning(
+                "Skipping schema creation because SQLAlchemy engine is operating in fallback mode"
             )
         current_metadata = getattr(SQLModel, "metadata", meta)
         _record_sqlmodel_metadata_health(current_metadata, origin="get_engine")
