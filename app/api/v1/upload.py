@@ -4,13 +4,15 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-import re
-import unicodedata
 import inspect
 import mimetypes
+import re
 import sys
+import unicodedata
+from collections import deque
 from pathlib import Path
 from tempfile import SpooledTemporaryFile
+from time import monotonic
 from typing import List, Optional
 
 try:  # pragma: no cover - starlette is optional when running with stubs
@@ -31,6 +33,7 @@ from app.api.upload_policies import (
 from app.api.upload_utils import create_upload_file, validate_upload_request
 from app.core.auth import ensure_tenant_access, get_current_active_user
 from app.core.deps import (
+    ALLOWED_EXTENSION_WHITELIST,
     UploadLimits,
     get_data_dir,
     get_ingest_service,
@@ -41,6 +44,13 @@ from app.models import UploadResponse
 from app.ingest.service import IngestQueueFullError, IngestService
 
 router = APIRouter(tags=["upload"])
+
+_STRICT_ALLOWED_EXTENSIONS = frozenset(ALLOWED_EXTENSION_WHITELIST)
+
+_RATE_LOCK = asyncio.Lock()
+_RATE_HISTORY: dict[str, deque[float]] = {}
+_RATE_WINDOW = 60.0
+_RATE_LIMIT = 10
 
 _ALLOWED_CONTENT_TYPES_BY_EXTENSION = ALLOWED_CONTENT_TYPES_BY_EXTENSION
 
@@ -237,10 +247,22 @@ _ensure_fastapi_test_helpers()
 
 
 def _normalise_extension(filename: str) -> str:
-    name = (filename or "").strip()
-    if "." not in name:
+    suffix = Path(filename or "").suffix.lower()
+    if not suffix:
         return ""
-    return name.rsplit(".", 1)[-1].lower()
+    return suffix.lstrip(".")
+
+
+async def _check_rate_limit(key: str) -> None:
+    token = key or "anonymous"
+    now = monotonic()
+    async with _RATE_LOCK:
+        bucket = _RATE_HISTORY.setdefault(token, deque())
+        while bucket and now - bucket[0] >= _RATE_WINDOW:
+            bucket.popleft()
+        if len(bucket) >= _RATE_LIMIT:
+            raise HTTPException(status_code=429, detail="RATE_LIMIT")
+        bucket.append(now)
 
 
 async def _read_file(upload: UploadFile, limits: UploadLimits) -> bytes:
@@ -287,18 +309,25 @@ async def upload_file(
 
     initial_candidates = [_coerce_upload_argument(item) for item in raw_uploads]
 
+    await _check_rate_limit(f"{tenant}:{getattr(request.client, 'host', '')}")
+
     validate_upload_request(request, initial_candidates, limits)
+
+    effective_allowed = set(limits.allowed_extensions) & _STRICT_ALLOWED_EXTENSIONS
+    if not effective_allowed:
+        raise HTTPException(_UNSUPPORTED_MEDIA_TYPE, detail="UPLOAD_INVALID_EXT")
+    limits.allowed_extensions = effective_allowed
 
     upload = next(
         (
             item
             for item in initial_candidates
-            if _normalise_extension((item.filename or "")) in limits.allowed_extensions
+            if _normalise_extension((item.filename or "")) in effective_allowed
         ),
         initial_candidates[0],
     )
     extension = _normalise_extension(upload.filename or "")
-    if extension not in limits.allowed_extensions:
+    if extension not in effective_allowed:
         raise HTTPException(_UNSUPPORTED_MEDIA_TYPE, detail="UPLOAD_INVALID_EXT")
 
     def _as_bytes(value: object) -> bytes:

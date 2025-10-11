@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import uuid
 from contextlib import asynccontextmanager
 from datetime import timezone
 from importlib import import_module
@@ -11,6 +12,7 @@ from typing import Sequence
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.api.error_responses import register_error_handlers
 
@@ -85,6 +87,17 @@ from app.services import vectorstore as vectorstore_service
 from app.ui import router as ui_router
 
 logger = logging.getLogger(__name__)
+
+
+class RequestIDMiddleware(BaseHTTPMiddleware):
+    """Attach a request identifier to the request state and response headers."""
+
+    async def dispatch(self, request, call_next):  # type: ignore[override]
+        request_id = request.headers.get("X-Request-ID") or uuid.uuid4().hex
+        request.state.request_id = request_id
+        response = await call_next(request)
+        response.headers.setdefault("X-Request-ID", request_id)
+        return response
 
 
 def _prepare_cors_origins(origins: Sequence[str] | None) -> list[str]:
@@ -214,6 +227,7 @@ def create_app(provider: LLMProvider | None = None) -> FastAPI:
         allow_credentials=False,
         expose_headers=["*"],
     )
+    application.add_middleware(RequestIDMiddleware)
 
     register_error_handlers(application)
 

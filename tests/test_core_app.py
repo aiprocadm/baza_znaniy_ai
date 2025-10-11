@@ -3,7 +3,8 @@ import sys
 import types
 
 import pytest
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
+from fastapi.testclient import TestClient
 from importlib.machinery import ModuleSpec
 
 
@@ -176,6 +177,10 @@ def core_app(monkeypatch):
     router_module = types.ModuleType("app.api.router")
     router_module.__spec__ = ModuleSpec("app.api.router", loader=None)
     router_module.api_router = APIRouter()
+
+    @router_module.api_router.get("/ping")
+    def _ping(request: Request):  # pragma: no cover - used via test client
+        return {"request_id": getattr(request.state, "request_id", None)}
     monkeypatch.setitem(sys.modules, "app.api.router", router_module)
 
     api_module = types.ModuleType("app.api")
@@ -183,6 +188,9 @@ def core_app(monkeypatch):
     api_module.api_router = router_module.api_router
     api_module.router = router_module
     monkeypatch.setitem(sys.modules, "app.api", api_module)
+    error_responses_module = types.ModuleType("app.api.error_responses")
+    error_responses_module.register_error_handlers = lambda _app: None
+    monkeypatch.setitem(sys.modules, "app.api.error_responses", error_responses_module)
     monkeypatch.setitem(sys.modules, "app.api.routes", types.ModuleType("app.api.routes"))
 
     return importlib.import_module("app.core.app")
@@ -430,3 +438,21 @@ def test_create_app_excludes_reranker_when_disabled(core_app, monkeypatch):
 
     assert application.state.reranker is None
     assert application.state.rerank_enabled is False
+
+def test_request_id_middleware_adds_header(core_app, monkeypatch):
+    dependencies = _stub_app_dependencies(core_app, monkeypatch)
+
+    settings = DummySettings(cors_allow_origins=["*"], rerank_enabled=False)
+    monkeypatch.setattr(core_app, "get_settings", lambda: settings)
+
+    app = core_app.create_app()
+    client = TestClient(app)
+
+    response = client.get("/ping")
+
+    assert response.status_code == 200
+    header_request_id = response.headers.get("X-Request-ID")
+    assert header_request_id is not None
+    assert response.json()["request_id"] == header_request_id
+    assert app.state.file_store is dependencies["file_store"]
+    assert app.state.ingest_queue is dependencies["ingest_queue"]

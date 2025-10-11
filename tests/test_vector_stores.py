@@ -211,6 +211,38 @@ def test_qdrant_upsert_batches_embeddings(tmp_path: Path, monkeypatch: pytest.Mo
     assert [list(call) for call in embedder.calls] == [["a", "b"], ["c"]]
 
 
+def test_qdrant_upsert_stream_batches(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    settings = _make_settings(tmp_path, backend="qdrant")
+    object.__setattr__(settings, "qdrant_upsert_batch", 2)
+
+    embedder = _StubEmbedder("stub")
+
+    class _PointStruct:
+        def __init__(self, id: str, vector: Sequence[float], payload: dict[str, object]):
+            self.id = id
+            self.vector = list(vector)
+            self.payload = payload
+
+    monkeypatch.setattr(qmodule.qmodels, "PointStruct", _PointStruct)
+
+    client = _StubClient()
+    store = QdrantVectorStore(
+        settings=settings,
+        embedder_factory=lambda _: embedder,
+        client_factory=lambda **_: client,
+    )
+
+    chunks = (
+        {"sha256": str(index), "text": f"chunk-{index}", "file": "f", "page": index}
+        for index in range(5)
+    )
+
+    store.upsert(chunks)
+
+    assert len(client.upserts) == 3  # 5 items batched by 2 => 3 network calls
+    assert sum(len(batch) for batch in client.upserts) == 5
+
+
 def test_qdrant_initialises_embedded_client_when_url_missing(tmp_path: Path) -> None:
     storage_dir = tmp_path / "embedded"
     settings = _make_settings(

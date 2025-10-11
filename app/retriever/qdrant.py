@@ -163,55 +163,53 @@ class QdrantVectorStore:
         self._ensure_schema(client)
 
     def upsert(self, chunks: Iterable[dict[str, object]]) -> None:
-        items = list(chunks)
-        if not items:
-            return
-
         self.ensure_ready()
 
-        unique: dict[str, dict[str, object]] = {}
-        for chunk in items:
+        client = self._client_instance()
+        collection = self.settings.qdrant_collection
+        max_batch = max(1, int(getattr(self.settings, "qdrant_upsert_batch", 512)))
+
+        pending: dict[str, dict[str, object]] = {}
+
+        def _flush() -> None:
+            if not pending:
+                return
+
+            texts = [str(item.get("text") or item.get("content") or "") for item in pending.values()]
+            embeddings = self._batched_encode(texts)
+            if not len(embeddings):
+                pending.clear()
+                return
+
+            points: list[qmodels.PointStruct] = []
+            for embedding, (identifier, chunk) in zip(embeddings, pending.items()):
+                vector = embedding.tolist() if hasattr(embedding, "tolist") else list(embedding)
+                payload = {
+                    "file": chunk.get("file"),
+                    "page": int(chunk.get("page") or 0),
+                    "sha256": chunk.get("sha256"),
+                    "text": chunk.get("text") or chunk.get("content"),
+                }
+                points.append(
+                    qmodels.PointStruct(
+                        id=identifier,
+                        vector=vector,
+                        payload=payload,
+                    )
+                )
+
+            client.upsert(collection_name=collection, points=points)
+            pending.clear()
+
+        for chunk in chunks:
             identifier = str(chunk.get("sha256") or chunk.get("id") or "")
             if not identifier:
                 raise ValueError("Chunk is missing sha256 identifier")
-            unique[identifier] = chunk
+            pending[identifier] = chunk
+            if len(pending) >= max_batch:
+                _flush()
 
-        texts = [str(chunk.get("text") or chunk.get("content") or "") for chunk in unique.values()]
-        embeddings = self._batched_encode(texts)
-        if not len(embeddings):
-            return
-
-        points: list[qmodels.PointStruct] = []
-        batch_size = 512
-        client = self._client_instance()
-
-        for embedding, (identifier, chunk) in zip(embeddings, unique.items()):
-            vector = embedding.tolist() if hasattr(embedding, "tolist") else list(embedding)
-            payload = {
-                "file": chunk.get("file"),
-                "page": int(chunk.get("page") or 0),
-                "sha256": chunk.get("sha256"),
-                "text": chunk.get("text") or chunk.get("content"),
-            }
-            points.append(
-                qmodels.PointStruct(
-                    id=identifier,
-                    vector=vector,
-                    payload=payload,
-                )
-            )
-            if len(points) >= batch_size:
-                client.upsert(
-                    collection_name=self.settings.qdrant_collection,
-                    points=list(points),
-                )
-                points.clear()
-
-        if points:
-            client.upsert(
-                collection_name=self.settings.qdrant_collection,
-                points=list(points),
-            )
+        _flush()
 
     def search(self, query: str, top_k: int) -> list[dict[str, object]]:
         if top_k <= 0:
