@@ -8,10 +8,16 @@ export const NotificationStack = () => {
   const { notifications, remove } = useNotifications();
 
   return (
-    <div className="pointer-events-none fixed inset-y-0 right-0 flex w-80 flex-col gap-3 p-6">
+    <div
+      role="region"
+      aria-live="polite"
+      aria-label="Notifications"
+      className="pointer-events-none fixed inset-y-0 right-0 flex w-80 flex-col gap-3 p-6"
+    >
       {notifications.map((notification) => (
         <div
           key={notification.id}
+          data-testid={`notification-${notification.id}`}
           className={cn(
             'pointer-events-auto rounded-xl border bg-white/90 p-4 shadow-lg backdrop-blur transition dark:bg-slate-900/90',
             notification.type === 'success' && 'border-green-200 text-green-600 dark:border-green-800 dark:text-green-300',
@@ -22,7 +28,9 @@ export const NotificationStack = () => {
           <div className="flex items-start justify-between gap-4">
             <div>
               <p className="text-sm font-semibold">{notification.title}</p>
-              {notification.description && <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{notification.description}</p>}
+              {notification.description && (
+                <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{notification.description}</p>
+              )}
             </div>
             <button
               type="button"
