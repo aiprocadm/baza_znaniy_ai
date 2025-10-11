@@ -5,6 +5,7 @@ from __future__ import annotations
 import io
 import logging
 import os
+import re
 import sqlite3
 import sys
 import time
@@ -55,6 +56,24 @@ logger = logging.getLogger(__name__)
 _SERVICE_UNAVAILABLE = getattr(status, "HTTP_503_SERVICE_UNAVAILABLE", 503)
 _UNSUPPORTED_MEDIA_TYPE = getattr(status, "HTTP_415_UNSUPPORTED_MEDIA_TYPE", 415)
 _REQUEST_TOO_LARGE = HTTP_CONTENT_TOO_LARGE
+
+_ABSOLUTE_MAX_UPLOAD_BYTES = 50 * 1024 * 1024
+_ALLOWED_CONTENT_TYPES_BY_EXTENSION: dict[str, set[str]] = {
+    "pdf": {"application/pdf"},
+    "docx": {
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    },
+    "pptx": {
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    },
+    "xlsx": {
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    },
+    "txt": {"text/plain"},
+    "md": {"text/markdown", "text/plain"},
+    "html": {"text/html", "application/xhtml+xml"},
+}
+_GENERIC_ALLOWED_CONTENT_TYPES = {"application/octet-stream"}
 
 
 class _LLMCompatProvider:
@@ -639,6 +658,17 @@ def _normalise_extension(filename: str) -> str:
     return name.rsplit(".", 1)[-1].lower()
 
 
+def _normalise_filename(filename: str | None) -> str:
+    """Return a safe filename stripped of directory components."""
+
+    candidate = (filename or "uploaded").strip() or "uploaded"
+    name = Path(candidate).name
+    sanitized = re.sub(r"[\s\x00]+", " ", name).strip()
+    sanitized = re.sub(r"[^A-Za-z0-9_.\- ]", "_", sanitized)
+    sanitized = sanitized.replace(" ", "_")
+    return sanitized or "uploaded"
+
+
 def _resolve_upload_limits(request: Request) -> UploadLimits:
     app = getattr(request, "app", None)
     state = getattr(app, "state", None)
@@ -671,7 +701,27 @@ def _content_length_exceeds_limits(request: Request, limits: UploadLimits) -> bo
     except (TypeError, ValueError):  # pragma: no cover - defensive branch
         return False
 
-    return content_length > limits.max_bytes
+    hard_limit = min(limits.max_bytes, _ABSOLUTE_MAX_UPLOAD_BYTES)
+    return content_length > hard_limit
+
+
+def _enforce_content_type(extension: str, upload: UploadFile) -> None:
+    """Validate the upload content-type against the expected mapping."""
+
+    content_type = (upload.content_type or "").split(";", 1)[0].strip().lower()
+    allowed = _ALLOWED_CONTENT_TYPES_BY_EXTENSION.get(extension)
+    if allowed:
+        if content_type not in allowed:
+            raise HTTPException(_UNSUPPORTED_MEDIA_TYPE, "UPLOAD_INVALID_TYPE")
+        return
+    if not content_type:
+        raise HTTPException(_UNSUPPORTED_MEDIA_TYPE, "UPLOAD_INVALID_TYPE")
+    if content_type not in _GENERIC_ALLOWED_CONTENT_TYPES:
+        logger.debug(
+            "Accepting upload with extension %s and non-standard content-type %s",
+            extension,
+            content_type,
+        )
 
 
 def _resolve_callable(state: Any, attribute: str, default: Callable | None = None):
@@ -905,6 +955,9 @@ async def upload(
         if isinstance(candidate, UploadFile):
             upload_items.append(candidate)
             return
+        if StarletteUploadFile is not None and isinstance(candidate, StarletteUploadFile):
+            upload_items.append(_coerce_upload_file(candidate))
+            return
         if isinstance(candidate, (list, tuple, set)):
             for item in candidate:
                 _add_upload(item)
@@ -930,15 +983,17 @@ async def upload(
     total_chunks = 0
 
     for upload_file in upload_items:
-        filename = (upload_file.filename or "uploaded").strip() or "uploaded"
+        filename = _normalise_filename(upload_file.filename)
         ext = _normalise_extension(filename)
         if ext not in allowed_extensions:
             raise HTTPException(_UNSUPPORTED_MEDIA_TYPE, "UPLOAD_INVALID_EXT")
 
+        _enforce_content_type(ext, upload_file)
+
         data = await upload_file.read()
         if not data:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "UPLOAD_EMPTY")
-        if len(data) > limits.max_size:
+        if len(data) > min(limits.max_size, _ABSOLUTE_MAX_UPLOAD_BYTES):
             raise HTTPException(_REQUEST_TOO_LARGE, "UPLOAD_TOO_LARGE")
 
         chunks = parser(filename, data)

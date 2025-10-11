@@ -3,20 +3,26 @@ from __future__ import annotations
 import importlib
 import sys
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 
 import pytest
 
 
 @pytest.fixture()
 def security(monkeypatch):
-    monkeypatch.setenv("SECRET_KEY", "unit-test-secret")
-    monkeypatch.setenv("JWT_ALGORITHM", "HS256")
-    monkeypatch.setenv("ACCESS_TOKEN_EXPIRE_MINUTES", "5")
+    settings = SimpleNamespace(
+        secret_key="unit-test-secret",
+        jwt_algorithm="HS256",
+        access_token_expire_minutes=5,
+    )
 
     if "app.security" in sys.modules:
         module = importlib.reload(sys.modules["app.security"])
     else:
         module = importlib.import_module("app.security")
+
+    monkeypatch.setattr(module, "get_settings", lambda: settings, raising=False)
+    module._test_settings = settings  # type: ignore[attr-defined]
     return module
 
 
@@ -65,11 +71,9 @@ def test_create_access_token_includes_expiry(security):
     assert timedelta(seconds=0) <= expires_at - now <= timedelta(minutes=1, seconds=5)
 
 
-def test_create_access_token_uses_default_expiry(monkeypatch, security):
+def test_create_access_token_uses_default_expiry(security):
     default_expiry_minutes = 2
-    monkeypatch.setattr(
-        security, "ACCESS_TOKEN_EXPIRE_MINUTES", default_expiry_minutes, raising=False
-    )
+    security._test_settings.access_token_expire_minutes = default_expiry_minutes  # type: ignore[attr-defined]
 
     now = datetime.now(timezone.utc)
     token = security.create_access_token({"sub": "user"})
@@ -107,10 +111,11 @@ def test_create_access_token_allows_none_payload(security):
 
 def test_decode_token_normalizes_datetime_exp(security):
     expire_at = datetime.now(timezone.utc) + timedelta(minutes=5)
+    secret, algorithm, _ = security._jwt_parameters()
     token = security.jwt.encode(
         {"sub": "legacy", "exp": expire_at},
-        security.SECRET_KEY,
-        algorithm=security.ALGORITHM,
+        secret,
+        algorithm=algorithm,
     )
 
     payload = security.decode_token(token)

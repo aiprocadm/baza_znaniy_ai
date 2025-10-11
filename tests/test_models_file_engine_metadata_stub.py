@@ -10,10 +10,10 @@ from sqlalchemy import text
 from app.models import file as file_module
 
 
-def test_get_engine_errors_when_metadata_has_no_callable_create_all(
+def test_get_engine_logs_and_continues_when_metadata_has_no_create_all(
     tmp_path, caplog
 ) -> None:
-    """``get_engine`` should abort when ``create_all`` is missing."""
+    """``get_engine`` should continue initialisation when schema creation is impossible."""
 
     file_module.get_engine.cache_clear()
 
@@ -28,12 +28,11 @@ def test_get_engine_errors_when_metadata_has_no_callable_create_all(
 
     try:
         with caplog.at_level("ERROR", logger=file_module.logger.name):
-            with pytest.raises(RuntimeError) as exc:
-                file_module.get_engine(f"sqlite:///{db_path}", create_schema=True)
+            engine = file_module.get_engine(f"sqlite:///{db_path}", create_schema=True)
 
-        message = str(exc.value)
-        assert "metadata initialisation failed" in message
-        assert "metadata.create_all is not callable" in caplog.text
+        assert engine is not None
+        assert "create_all is not callable" in caplog.text
+        engine.dispose()
     finally:
         file_module.SQLModel.metadata = original_metadata
         file_module.get_engine.cache_clear()

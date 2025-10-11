@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict
+from typing import Any, Dict, Tuple
 
 from jose import JWTError, jwt
 from passlib.context import CryptContext
@@ -12,11 +12,6 @@ from passlib.exc import UnknownHashError
 from app.core.config import get_settings
 
 _pwd_context = CryptContext(schemes=["argon2"], deprecated="auto")
-
-_initial_settings = get_settings()
-SECRET_KEY = _initial_settings.secret_key
-ALGORITHM = _initial_settings.jwt_algorithm
-ACCESS_TOKEN_EXPIRE_MINUTES = _initial_settings.access_token_expire_minutes
 
 
 class InvalidTokenError(Exception):
@@ -64,19 +59,27 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
         return False
 
 
+def _jwt_parameters() -> Tuple[str, str, int]:
+    """Return the secret, algorithm and default expiry from settings."""
+
+    settings = get_settings()
+    return (
+        settings.secret_key,
+        settings.jwt_algorithm,
+        int(settings.access_token_expire_minutes),
+    )
+
+
 def create_access_token(
     data: Dict[str, Any], *, expires_delta: timedelta | None = None
 ) -> str:
     """Create a signed JWT carrying the provided payload."""
 
     to_encode = dict(data) if data is not None else {}
-    settings = get_settings()
-    expire_minutes = globals().get("ACCESS_TOKEN_EXPIRE_MINUTES", settings.access_token_expire_minutes)
-    expire_delta = expires_delta or timedelta(minutes=expire_minutes)
+    secret, algorithm, default_expiry_minutes = _jwt_parameters()
+    expire_delta = expires_delta or timedelta(minutes=default_expiry_minutes)
     expire = datetime.now(timezone.utc) + expire_delta
     to_encode["exp"] = _coerce_exp_to_numeric(expire)
-    secret = globals().get("SECRET_KEY", settings.secret_key)
-    algorithm = globals().get("ALGORITHM", settings.jwt_algorithm)
     return jwt.encode(to_encode, secret, algorithm=algorithm)
 
 
@@ -84,9 +87,7 @@ def decode_token(token: str) -> Dict[str, Any]:
     """Decode a JWT and return its payload, raising on errors."""
 
     try:
-        settings = get_settings()
-        secret = globals().get("SECRET_KEY", settings.secret_key)
-        algorithm = globals().get("ALGORITHM", settings.jwt_algorithm)
+        secret, algorithm, _ = _jwt_parameters()
         payload = jwt.decode(token, secret, algorithms=[algorithm])
         exp_value = payload.get("exp")
         if exp_value is not None:

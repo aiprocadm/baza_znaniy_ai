@@ -76,3 +76,40 @@ def test_upload_rejects_oversized_body(docs_client: TestClient) -> None:
 
     assert response.status_code == HTTP_CONTENT_TOO_LARGE
     assert response.json()["detail"] == "UPLOAD_TOO_LARGE"
+
+
+def test_upload_rejects_invalid_content_type(docs_client: TestClient) -> None:
+    response = docs_client.post(
+        "/api/docs/upload",
+        data={"user_id": "tester"},
+        files={"file": ("document.pdf", b"valid", "application/octet-stream")},
+    )
+
+    assert response.status_code == status.HTTP_415_UNSUPPORTED_MEDIA_TYPE
+    assert response.json()["detail"] == "UPLOAD_INVALID_TYPE"
+
+
+def test_upload_enforces_content_length_header(docs_client: TestClient) -> None:
+    response = docs_client.post(
+        "/api/docs/upload",
+        data={"user_id": "tester"},
+        files={"file": ("tiny.txt", b"ok", "text/plain")},
+        headers={"content-length": str(60 * 1024 * 1024)},
+    )
+
+    assert response.status_code == HTTP_CONTENT_TOO_LARGE
+    assert response.json()["detail"] == "UPLOAD_TOO_LARGE"
+
+
+def test_upload_sanitises_filename(docs_client: TestClient) -> None:
+    payload = b"data"
+
+    response = docs_client.post(
+        "/api/docs/upload",
+        data={"user_id": "tester"},
+        files={"file": ("../..//evil name?.txt", payload, "text/plain")},
+    )
+
+    assert response.status_code == status.HTTP_200_OK
+    body = response.json()
+    assert body["files"] == ["evil_name_.txt"]

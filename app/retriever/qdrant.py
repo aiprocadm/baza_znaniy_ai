@@ -264,7 +264,9 @@ class QdrantVectorStore:
 
     def import_payloads(self, payloads: Iterable[dict[str, object]]) -> None:
         self.ensure_ready()
-        points: list[qmodels.PointStruct] = []
+        client = self._client_instance()
+        collection = self.settings.qdrant_collection
+        batch: list[qmodels.PointStruct] = []
         for payload in payloads:
             vector = payload.get("vector")
             text = payload.get("text")
@@ -273,7 +275,7 @@ class QdrantVectorStore:
             vector_list = list(vector.tolist()) if hasattr(vector, "tolist") else list(vector)
             if not vector_list:
                 continue
-            points.append(
+            batch.append(
                 qmodels.PointStruct(
                     id=str(payload.get("id") or payload.get("sha256") or ""),
                     vector=vector_list,
@@ -285,6 +287,8 @@ class QdrantVectorStore:
                     },
                 )
             )
-        if points:
-            client = self._client_instance()
-            client.upsert(collection_name=self.settings.qdrant_collection, points=points)
+            if len(batch) >= 512:
+                client.upsert(collection_name=collection, points=list(batch))
+                batch.clear()
+        if batch:
+            client.upsert(collection_name=collection, points=list(batch))
