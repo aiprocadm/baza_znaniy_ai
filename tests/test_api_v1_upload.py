@@ -349,6 +349,34 @@ class _StubIngestService:
         return record, True
 
 
+_INVALID_CONTENT_TYPE_CANDIDATES = [
+    "application/octet-stream",
+    "application/pdf",
+    "text/plain",
+    "text/markdown",
+    "text/html",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+]
+
+
+def _v1_invalid_mime_matrix() -> list[tuple[str, str]]:
+    cases: list[tuple[str, str]] = []
+    mapping = getattr(upload_module, "_ALLOWED_CONTENT_TYPES_BY_EXTENSION", {})
+    for extension, allowed in sorted(mapping.items()):
+        invalid_type = next(
+            (
+                candidate
+                for candidate in _INVALID_CONTENT_TYPE_CANDIDATES
+                if candidate not in allowed
+            ),
+            f"application/x-{extension}",
+        )
+        cases.append((extension, invalid_type))
+    return cases
+
+
 def test_upload_file_accepts_uploadfile_instance(tmp_path: Path) -> None:
     limits = UploadLimits(max_upload_mb=1, allowed_extensions={"txt"})
     service = _StubIngestService()
@@ -521,6 +549,75 @@ def test_upload_file_dict_input_preserves_payload(tmp_path: Path) -> None:
     assert stored_path.exists()
     assert stored_path.read_bytes() == payload
     assert recorded["size"] == len(payload)
+
+
+def test_upload_file_rejects_payload_exceeding_limits(tmp_path: Path) -> None:
+    limits = UploadLimits(max_upload_mb=1, allowed_extensions={"txt"})
+    service = _StubIngestService()
+
+    payload = b"x" * (limits.max_size + 1)
+    stream = SpooledTemporaryFile(mode="w+b")
+    stream.write(payload)
+    stream.seek(0)
+
+    upload = upload_module.UploadFile(
+        filename="too-big.txt",
+        file=stream,
+        content_type="text/plain",
+    )
+
+    with pytest.raises(upload_module.HTTPException) as excinfo:
+        asyncio.run(
+            upload_module.upload_file(
+                file=[upload],
+                files=None,
+                limits=limits,
+                data_dir=tmp_path,
+                _=object(),
+                tenant="default",
+                ingest_service=service,  # type: ignore[arg-type]
+            )
+        )
+
+    assert excinfo.value.status_code == upload_module.HTTP_CONTENT_TOO_LARGE
+    assert excinfo.value.detail == "UPLOAD_TOO_LARGE"
+    assert service.calls == []
+
+
+@pytest.mark.parametrize("extension, invalid_type", _v1_invalid_mime_matrix())
+def test_upload_file_rejects_invalid_content_type(
+    tmp_path: Path, extension: str, invalid_type: str
+) -> None:
+    limits = UploadLimits(max_upload_mb=1, allowed_extensions={extension})
+    service = _StubIngestService()
+
+    payload = b"valid"
+    stream = SpooledTemporaryFile(mode="w+b")
+    stream.write(payload)
+    stream.seek(0)
+
+    upload = upload_module.UploadFile(
+        filename=f"document.{extension}",
+        file=stream,
+        content_type=invalid_type,
+    )
+
+    with pytest.raises(upload_module.HTTPException) as excinfo:
+        asyncio.run(
+            upload_module.upload_file(
+                file=[upload],
+                files=None,
+                limits=limits,
+                data_dir=tmp_path,
+                _=object(),
+                tenant="default",
+                ingest_service=service,  # type: ignore[arg-type]
+            )
+        )
+
+    assert excinfo.value.status_code == getattr(upload_module, "_UNSUPPORTED_MEDIA_TYPE", 415)
+    assert excinfo.value.detail == "UPLOAD_INVALID_TYPE"
+    assert service.calls == []
 
 
 def test_upload_endpoint_handles_multiple_formats(tmp_path: Path) -> None:

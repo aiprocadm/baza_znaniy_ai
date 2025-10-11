@@ -78,11 +78,41 @@ def test_upload_rejects_oversized_body(docs_client: TestClient) -> None:
     assert response.json()["detail"] == "UPLOAD_TOO_LARGE"
 
 
-def test_upload_rejects_invalid_content_type(docs_client: TestClient) -> None:
+_INVALID_CONTENT_TYPE_CANDIDATES = [
+    "application/octet-stream",
+    "application/pdf",
+    "text/plain",
+    "text/markdown",
+    "text/html",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+]
+
+
+def _invalid_mime_matrix() -> list[tuple[str, str]]:
+    cases: list[tuple[str, str]] = []
+    for extension, allowed in sorted(routes_module._ALLOWED_CONTENT_TYPES_BY_EXTENSION.items()):
+        invalid_type = next(
+            (
+                candidate
+                for candidate in _INVALID_CONTENT_TYPE_CANDIDATES
+                if candidate not in allowed
+            ),
+            f"application/x-{extension}",
+        )
+        cases.append((extension, invalid_type))
+    return cases
+
+
+@pytest.mark.parametrize("extension, invalid_type", _invalid_mime_matrix())
+def test_upload_rejects_invalid_content_type_matrix(
+    docs_client: TestClient, extension: str, invalid_type: str
+) -> None:
     response = docs_client.post(
         "/api/docs/upload",
         data={"user_id": "tester"},
-        files={"file": ("document.pdf", b"valid", "application/octet-stream")},
+        files={"file": (f"document.{extension}", b"valid", invalid_type)},
     )
 
     assert response.status_code == status.HTTP_415_UNSUPPORTED_MEDIA_TYPE
