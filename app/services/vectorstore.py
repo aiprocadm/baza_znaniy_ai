@@ -9,6 +9,15 @@ from collections.abc import Iterable, MutableSequence
 from threading import Lock
 from typing import List
 
+try:  # pragma: no cover - optional dependency for deployments with Qdrant
+    from qdrant_client.http.exceptions import (
+        ApiException as QdrantApiException,
+        ResponseHandlingException as QdrantResponseHandlingException,
+        UnexpectedResponse as QdrantUnexpectedResponse,
+    )
+except Exception:  # pragma: no cover - fallback when qdrant-client not installed
+    QdrantApiException = QdrantResponseHandlingException = QdrantUnexpectedResponse = None
+
 from app.core.config import get_settings
 from app.retriever.vector_store import get_vector_store
 from app.observability.metrics import record_index_operation, record_search_operation
@@ -21,6 +30,22 @@ _DEFAULT_FALLBACK: FallbackStorage = deque()
 _FALLBACK_STORAGE: FallbackStorage | None = _DEFAULT_FALLBACK
 _FALLBACK_LOCK = Lock()
 _VECTOR_STORE: object | None = None
+
+_VECTOR_ERRORS: tuple[type[Exception], ...] = tuple(
+    filter(
+        None,
+        (
+            RuntimeError,
+            ValueError,
+            ConnectionError,
+            TimeoutError,
+            ImportError,
+            QdrantApiException,
+            QdrantResponseHandlingException,
+            QdrantUnexpectedResponse,
+        ),
+    )
+)
 
 
 def set_fallback_storage(storage: FallbackStorage | None) -> None:
@@ -73,19 +98,19 @@ def index_chunks(chunks: Iterable[dict[str, object]]) -> int:
 
     try:
         store = _resolve_vector_store()
-    except Exception:  # pragma: no cover - backend unavailable or optional deps missing
+    except _VECTOR_ERRORS as exc:  # pragma: no cover - backend unavailable
         duration = time.perf_counter() - start
         record_index_operation("error", "vector", len(items), duration)
-        LOGGER.exception("Falling back to in-memory index")
+        LOGGER.exception("Falling back to in-memory index", exc_info=exc)
         return _store_in_fallback()
 
     try:
         store.ensure_ready()
         store.upsert(items)
-    except Exception:  # pragma: no cover - gracefully degrade when Qdrant is unavailable
+    except _VECTOR_ERRORS as exc:  # pragma: no cover - gracefully degrade when Qdrant is unavailable
         duration = time.perf_counter() - start
         record_index_operation("error", "vector", len(items), duration)
-        LOGGER.exception("Falling back to in-memory index")
+        LOGGER.exception("Falling back to in-memory index", exc_info=exc)
         return _store_in_fallback()
 
     record_index_operation("success", "vector", len(items), time.perf_counter() - start)
@@ -123,10 +148,10 @@ def search(query: str, top_k: int = 10) -> List[dict[str, object]]:
         store = _resolve_vector_store()
         store.ensure_ready()
         hits = store.search(query, top_k=top_k)
-    except Exception:  # pragma: no cover - fallback path used in tests
+    except _VECTOR_ERRORS as exc:  # pragma: no cover - fallback path used in tests
         duration = time.perf_counter() - start
         record_search_operation("vector", "error", duration, 0)
-        LOGGER.exception("Falling back to in-memory search")
+        LOGGER.exception("Falling back to in-memory search", exc_info=exc)
         fallback_start = time.perf_counter()
         fallback_hits = _search_fallback(query, top_k)
         record_search_operation(

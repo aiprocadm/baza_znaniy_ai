@@ -23,6 +23,29 @@ from app.api.status_codes import HTTP_CONTENT_TOO_LARGE, HTTP_UNPROCESSABLE_CONT
 
 _UNSUPPORTED_MEDIA_TYPE = getattr(status, "HTTP_415_UNSUPPORTED_MEDIA_TYPE", 415)
 
+
+def _error_payload(status_code: int, detail: object) -> dict[str, object]:
+    if isinstance(detail, dict):
+        message = detail.get("message") or detail.get("detail") or "UNKNOWN_ERROR"
+        details = detail.get("details")
+        if details is None:
+            extras = {
+                key: value
+                for key, value in detail.items()
+                if key not in {"message", "detail", "details"}
+            }
+            details = extras or None
+    elif isinstance(detail, (list, tuple)):
+        message = "VALIDATION_ERROR"
+        details = list(detail)
+    elif detail in {None, ""}:
+        message = "UNKNOWN_ERROR"
+        details = None
+    else:
+        message = str(detail)
+        details = None
+    return {"status": status_code, "message": message, "details": details}
+
 _original_request = getattr(_FastAPITestClient, "_kb_original_request", None)
 if _original_request is None:
     _original_request = getattr(_FastAPITestClient, "request", None)
@@ -92,7 +115,9 @@ def _compat_request(self, method: str, url: str, *args: Any, **kwargs: Any):  # 
                 _add_upload(kwargs.get("file"))
                 _add_upload(kwargs.get("files"))
             except HTTPException as exc:
-                return httpx.Response(exc.status_code, json={"detail": exc.detail})
+                return httpx.Response(
+                    exc.status_code, json=_error_payload(exc.status_code, exc.detail)
+                )
 
             form_payload = kwargs.get("data") or {}
             if isinstance(form_payload, (list, tuple, set)):
@@ -115,7 +140,7 @@ def _compat_request(self, method: str, url: str, *args: Any, **kwargs: Any):  # 
             if not uploads:
                 return httpx.Response(
                     status.HTTP_400_BAD_REQUEST,
-                    json={"detail": "UPLOAD_INVALID_FILE"},
+                    json=_error_payload(status.HTTP_400_BAD_REQUEST, "UPLOAD_INVALID_FILE"),
                 )
 
             try:
@@ -123,7 +148,9 @@ def _compat_request(self, method: str, url: str, *args: Any, **kwargs: Any):  # 
                     upload_document(tuple(uploads), str(user_id or ""), conversation_id)
                 )
             except HTTPException as exc:
-                return httpx.Response(exc.status_code, json={"detail": exc.detail})
+                return httpx.Response(
+                    exc.status_code, json=_error_payload(exc.status_code, exc.detail)
+                )
 
             return httpx.Response(status.HTTP_200_OK, json=asdict(result))
         if method.upper() == "POST" and url.startswith("/api/chat"):
@@ -133,13 +160,16 @@ def _compat_request(self, method: str, url: str, *args: Any, **kwargs: Any):  # 
             except Exception as exc:
                 return httpx.Response(
                     HTTP_UNPROCESSABLE_CONTENT,
-                    json={"detail": str(exc)},
+                    json=_error_payload(HTTP_UNPROCESSABLE_CONTENT, str(exc)),
                 )
             try:
                 result = chat(chat_request)
             except HTTPException as exc:
                 if exc.status_code != status.HTTP_403_FORBIDDEN:
-                    return httpx.Response(exc.status_code, json={"detail": exc.detail})
+                    return httpx.Response(
+                        exc.status_code,
+                        json=_error_payload(exc.status_code, exc.detail),
+                    )
 
                 memory_store = getattr(app_instance.state, "memory_store", None)
                 if hasattr(memory_store, "record"):

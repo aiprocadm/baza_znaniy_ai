@@ -12,6 +12,8 @@ from typing import Sequence
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.api.error_responses import register_error_handlers
+
 try:  # pragma: no cover - optional dependency resolution
     from apscheduler.schedulers.asyncio import AsyncIOScheduler
     from apscheduler.schedulers.base import STATE_RUNNING
@@ -212,6 +214,8 @@ def create_app(provider: LLMProvider | None = None) -> FastAPI:
         allow_credentials=False,
         expose_headers=["*"],
     )
+
+    register_error_handlers(application)
 
     chat_store = init_chat_store(settings)
     memory_store = init_memory_store(settings)

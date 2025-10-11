@@ -18,7 +18,7 @@ try:  # pragma: no cover - starlette is optional when running with stubs
 except Exception:  # pragma: no cover - fallback when starlette is not installed
     StarletteUploadFile = None  # type: ignore[assignment]
 
-from fastapi import APIRouter, Depends, File, HTTPException, status
+from fastapi import APIRouter, Depends, File, HTTPException, Request, status
 from fastapi import UploadFile as FastAPIUploadFile
 from starlette.datastructures import MutableHeaders
 
@@ -28,7 +28,7 @@ from app.api.upload_policies import (
     UploadContentTypeError,
     evaluate_content_type,
 )
-from app.api.upload_utils import create_upload_file
+from app.api.upload_utils import create_upload_file, validate_upload_request
 from app.core.auth import ensure_tenant_access, get_current_active_user
 from app.core.deps import (
     UploadLimits,
@@ -267,6 +267,7 @@ async def upload_file(
     *,
     file: Optional[List[UploadFile]] = File(None, alias="file"),
     files: Optional[List[UploadFile]] = File(None, alias="files"),
+    request: Request,
     limits: UploadLimits = Depends(get_upload_limits),
     data_dir: Path = Depends(get_data_dir),
     _: UserRecord = Depends(get_current_active_user),
@@ -285,6 +286,8 @@ async def upload_file(
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="UPLOAD_EMPTY")
 
     initial_candidates = [_coerce_upload_argument(item) for item in raw_uploads]
+
+    validate_upload_request(request, initial_candidates, limits)
 
     upload = next(
         (

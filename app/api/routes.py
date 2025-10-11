@@ -50,7 +50,7 @@ from app.api.upload_policies import (
     UploadContentTypeError,
     evaluate_content_type,
 )
-from app.api.upload_utils import create_upload_file
+from app.api.upload_utils import create_upload_file, validate_upload_request
 
 try:  # pragma: no cover - optional Starlette dependency in some environments
     from starlette.datastructures import UploadFile as StarletteUploadFile
@@ -1006,6 +1006,8 @@ async def upload(
         if _content_length_exceeds_limits(request, limits):
             raise HTTPException(_REQUEST_TOO_LARGE, "UPLOAD_TOO_LARGE")
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "UPLOAD_INVALID_FILE")
+
+    validate_upload_request(request, upload_items, limits)
 
     stored_files: list[str] = []
     total_chunks = 0
