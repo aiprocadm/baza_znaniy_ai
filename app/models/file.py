@@ -178,9 +178,18 @@ def _ensure_sqlmodel_metadata(metadata: Any | None) -> MetaData:
         create_all_attr = getattr(candidate, "create_all", None)
         if create_all_attr is not None and not callable(create_all_attr):
             logger.error(
-                "SQLModel.metadata.create_all is not callable; skipping schema creation"
+                "SQLModel.metadata.create_all is not callable; refusing schema creation"
             )
-            return _sanitize_metadata_tables(_rebuild_sqlmodel_metadata())
+            raise RuntimeError(
+                "SQLModel metadata initialisation failed: metadata.create_all is not callable"
+            )
+
+        logger.error(
+            "SQLModel metadata object is not an instance of sqlalchemy.MetaData"
+        )
+        raise RuntimeError(
+            "SQLModel metadata initialisation failed: metadata must be an instance of sqlalchemy.MetaData"
+        )
 
     candidate = getattr(SQLModel, "metadata", None)
     if isinstance(candidate, MetaData):
