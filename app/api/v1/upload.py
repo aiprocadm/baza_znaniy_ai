@@ -13,7 +13,8 @@ from collections import deque
 from pathlib import Path
 from tempfile import SpooledTemporaryFile
 from time import monotonic
-from typing import List, Optional
+from types import SimpleNamespace
+from typing import List, Optional, cast
 
 try:  # pragma: no cover - starlette is optional when running with stubs
     from starlette.datastructures import UploadFile as StarletteUploadFile
@@ -32,20 +33,28 @@ from app.api.upload_policies import (
 )
 from app.api.upload_utils import create_upload_file, validate_upload_request
 from app.core.auth import ensure_tenant_access, get_current_active_user
-from app.core.deps import (
-    ALLOWED_EXTENSION_WHITELIST,
-    UploadLimits,
-    get_data_dir,
-    get_ingest_service,
-    get_upload_limits,
-)
+from app.core import deps as core_deps
 from app.models.user import UserRecord
 from app.models import UploadResponse
 from app.ingest.service import IngestQueueFullError, IngestService
 
+UploadLimits = core_deps.UploadLimits
+get_data_dir = core_deps.get_data_dir
+get_ingest_service = core_deps.get_ingest_service
+get_upload_limits = core_deps.get_upload_limits
+
+_BASE_WHITELIST = {"pdf", "docx", "pptx", "xlsx", "txt", "md"}
+_extension_source = getattr(core_deps, "ALLOWED_EXTENSION_WHITELIST", None)
+if not _extension_source:
+    _extension_source = getattr(core_deps, "DEFAULT_ALLOWED_EXTENSIONS", frozenset())
+extension_candidates = set(_extension_source) | _BASE_WHITELIST
+ALLOWED_EXTENSION_WHITELIST = frozenset(extension_candidates)
+
 router = APIRouter(tags=["upload"])
 
 _STRICT_ALLOWED_EXTENSIONS = frozenset(ALLOWED_EXTENSION_WHITELIST)
+
+_DEFAULT_REQUEST = cast(Request, SimpleNamespace(headers={}, client=None))
 
 _RATE_LOCK = asyncio.Lock()
 _RATE_HISTORY: dict[str, deque[float]] = {}
@@ -284,12 +293,25 @@ async def _read_file(upload: UploadFile, limits: UploadLimits) -> bytes:
     return bytes(buffer)
 
 
+def _resolve_client_host(request: object | None) -> str:
+    """Return the best-effort client host for rate limiting."""
+
+    if request is None:
+        return ""
+
+    client = getattr(request, "client", None)
+    if client is None:
+        return ""
+
+    return getattr(client, "host", "") or ""
+
+
 @router.post("/upload", response_model=UploadResponse, status_code=status.HTTP_201_CREATED)
 async def upload_file(
     *,
     file: Optional[List[UploadFile]] = File(None, alias="file"),
     files: Optional[List[UploadFile]] = File(None, alias="files"),
-    request: Request,
+    request: Request = _DEFAULT_REQUEST,
     limits: UploadLimits = Depends(get_upload_limits),
     data_dir: Path = Depends(get_data_dir),
     _: UserRecord = Depends(get_current_active_user),
@@ -309,9 +331,11 @@ async def upload_file(
 
     initial_candidates = [_coerce_upload_argument(item) for item in raw_uploads]
 
-    await _check_rate_limit(f"{tenant}:{getattr(request.client, 'host', '')}")
+    request_like: Request | None = None if request is _DEFAULT_REQUEST else request
 
-    validate_upload_request(request, initial_candidates, limits)
+    await _check_rate_limit(f"{tenant}:{_resolve_client_host(request_like)}")
+
+    validate_upload_request(request_like, initial_candidates, limits)
 
     effective_allowed = set(limits.allowed_extensions) & _STRICT_ALLOWED_EXTENSIONS
     if not effective_allowed:
