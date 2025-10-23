@@ -1,0 +1,332 @@
+openapi: 3.0.3
+info:
+  title: KB Platform Contract
+  version: 1.0.0
+  description: >-
+    Combined contract for core and document generation services used in
+    contract testing. Vendor extensions provide routing hints for
+    multi-service validation.
+paths:
+  /auth/login:
+    post:
+      summary: Login
+      description: Authenticate the user and return JWT tokens.
+      tags:
+        - auth
+      x-app: core
+      x-path: /api/v1/auth/login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Successful authentication
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenResponse'
+        '401':
+          description: Authentication failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Tenant or user disabled
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /files/upload:
+    post:
+      summary: Upload file
+      description: Store an uploaded document and enqueue it for ingestion.
+      tags:
+        - files
+      x-app: core
+      x-path: /api/v1/upload
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: '#/components/schemas/UploadRequest'
+      responses:
+        '201':
+          description: File accepted for ingestion
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UploadResponse'
+        '400':
+          description: Invalid upload payload
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Authentication required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Tenant access denied
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '413':
+          description: Upload exceeds configured size limit
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '415':
+          description: Unsupported media type
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+        '429':
+          description: Ingestion queue is full
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /documents/generate:
+    post:
+      summary: Generate document
+      description: Trigger asynchronous document generation from a stored template.
+      tags:
+        - documents
+      x-app: backend
+      x-path: /api/v1/documents/generate
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DocGenerateRequest'
+      responses:
+        '202':
+          description: Document generation scheduled
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DocGenerateAcceptedResponse'
+        '400':
+          description: Invalid payload
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Template not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+  /packs/run:
+    post:
+      summary: Run pack
+      description: Start batch document generation for all templates in the pack.
+      tags:
+        - packs
+      x-app: backend
+      x-path: /api/v1/packs/run
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PackRunRequest'
+      responses:
+        '202':
+          description: Pack execution started
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PackRunAcceptedResponse'
+        '400':
+          description: Invalid pack request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Pack or templates not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '422':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPValidationError'
+components:
+  schemas:
+    LoginRequest:
+      type: object
+      required:
+        - email
+        - password
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          minLength: 1
+    TokenResponse:
+      type: object
+      required:
+        - access_token
+        - refresh_token
+        - expires_in
+      properties:
+        access_token:
+          type: string
+        refresh_token:
+          type: string
+        token_type:
+          type: string
+          default: bearer
+        expires_in:
+          type: integer
+          minimum: 1
+    UploadRequest:
+      type: object
+      description: Multipart form payload allowing single or multiple files.
+      properties:
+        file:
+          anyOf:
+            - type: array
+              items:
+                type: string
+                format: binary
+            - type: "null"
+        files:
+          anyOf:
+            - type: array
+              items:
+                type: string
+                format: binary
+            - type: "null"
+    UploadResponse:
+      type: object
+      description: Response returned after an upload request.
+      required:
+        - file_id
+        - filename
+        - tenant
+        - status
+      properties:
+        file_id:
+          type: string
+        filename:
+          type: string
+        tenant:
+          type: string
+        status:
+          type: string
+        queued:
+          type: boolean
+          default: true
+    DocGenerateRequest:
+      type: object
+      required:
+        - template_id
+      properties:
+        template_id:
+          type: string
+          minLength: 1
+          maxLength: 64
+        document_name:
+          type: string
+          maxLength: 255
+          nullable: true
+        context:
+          type: object
+          additionalProperties: true
+          default: {}
+    DocGenerateAcceptedResponse:
+      type: object
+      required:
+        - task_id
+        - status_url
+      properties:
+        task_id:
+          type: string
+        status_url:
+          type: string
+          format: uri-reference
+    PackRunRequest:
+      type: object
+      required:
+        - pack_id
+      properties:
+        pack_id:
+          type: integer
+          minimum: 1
+    PackRunAcceptedResponse:
+      type: object
+      required:
+        - batch_id
+        - status_url
+      properties:
+        batch_id:
+          type: string
+        status_url:
+          type: string
+          format: uri-reference
+    ErrorResponse:
+      type: object
+      additionalProperties: true
+    HTTPValidationError:
+      type: object
+      properties:
+        detail:
+          type: array
+          items:
+            $ref: '#/components/schemas/ValidationError'
+    ValidationError:
+      type: object
+      required:
+        - loc
+        - msg
+        - type
+      properties:
+        loc:
+          type: array
+          items:
+            anyOf:
+              - type: string
+              - type: integer
+        msg:
+          type: string
+        type:
+          type: string
