@@ -7,7 +7,8 @@ PORT ?= 8000
 IMAGE ?= kb-ai:local
 TORCH_INDEX ?= https://download.pytorch.org/whl/cpu
 
-.PHONY: venv install dev lint format test run worker build clean web-install web-lint web-format web-test web-build web-run
+.PHONY: venv install dev lint format test run worker up down migrate seed build clean \
+        web-install web-lint web-format web-test web-build web-run
 
 venv:
 	$(PYTHON) -m venv .venv
@@ -32,13 +33,25 @@ test:
 	pytest -q
 
 run:
-	uvicorn $(APP_MODULE) --factory --host $(HOST) --port $(PORT)
+        uvicorn $(APP_MODULE) --factory --host $(HOST) --port $(PORT)
 
 worker:
-	python -m app.worker.main
+        python -m app.worker.main
+
+up:
+        docker compose up -d --build
+
+down:
+        docker compose down --remove-orphans
+
+migrate:
+        alembic upgrade head
+
+seed:
+        python -m backend.app.db.seed
 
 build:
-	docker build -t $(IMAGE) .
+        docker build -t $(IMAGE) .
 
 clean:
         rm -rf __pycache__ */__pycache__ .pytest_cache cov_html .coverage coverage.xml

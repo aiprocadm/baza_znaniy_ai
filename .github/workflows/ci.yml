@@ -77,7 +77,7 @@ jobs:
 
       - name: Run pytest with coverage
         run: |
-          coverage run -m pytest -q
+          coverage run -m pytest -q --deselect backend/tests/test_contract_schemathesis.py
           coverage xml
           coverage html -d cov_html
 
@@ -88,6 +88,9 @@ jobs:
           name: coverage-html
           path: cov_html
           if-no-files-found: warn
+
+      - name: Run schemathesis contract tests
+        run: pytest backend/tests/test_contract_schemathesis.py -q
 
   docker-lint-build:
     runs-on: ubuntu-latest
