@@ -337,21 +337,20 @@ async def upload_file(
 
     validate_upload_request(request_like, initial_candidates, limits)
 
-    effective_allowed = set(limits.allowed_extensions) & _STRICT_ALLOWED_EXTENSIONS
-    if not effective_allowed:
+    allowed_extensions = set(limits.allowed_extensions) & _STRICT_ALLOWED_EXTENSIONS
+    if not allowed_extensions:
         raise HTTPException(_UNSUPPORTED_MEDIA_TYPE, detail="UPLOAD_INVALID_EXT")
-    limits.allowed_extensions = effective_allowed
 
     upload = next(
         (
             item
             for item in initial_candidates
-            if _normalise_extension((item.filename or "")) in effective_allowed
+            if _normalise_extension((item.filename or "")) in allowed_extensions
         ),
         initial_candidates[0],
     )
     extension = _normalise_extension(upload.filename or "")
-    if extension not in effective_allowed:
+    if extension not in allowed_extensions:
         raise HTTPException(_UNSUPPORTED_MEDIA_TYPE, detail="UPLOAD_INVALID_EXT")
 
     def _as_bytes(value: object) -> bytes:
@@ -372,7 +371,6 @@ async def upload_file(
             stream.write(payload)
         stream.seek(0)
         return stream
-
 
     def _build_upload(
         filename: str,
@@ -471,7 +469,6 @@ async def upload_file(
         if not any(original is other for other in cleanup_targets):
             cleanup_targets.append(original)
 
-
     selected_extension = ""
     selected_filename: Optional[str] = None
     selected_content_type: Optional[str] = None
@@ -482,7 +479,7 @@ async def upload_file(
             (
                 item
                 for item in coerced
-                if _normalise_extension((item.filename or "")) in limits.allowed_extensions
+                if _normalise_extension((item.filename or "")) in allowed_extensions
             ),
             coerced[0],
         )
@@ -490,7 +487,7 @@ async def upload_file(
         selected_filename = _normalise_filename(upload.filename)
         selected_content_type = getattr(upload, "content_type", None)
         selected_extension = _normalise_extension(selected_filename or "")
-        if selected_extension not in limits.allowed_extensions:
+        if selected_extension not in allowed_extensions:
             raise HTTPException(_UNSUPPORTED_MEDIA_TYPE, detail="UPLOAD_INVALID_EXT")
 
         try:
@@ -689,4 +686,3 @@ def _normalise_filename(filename: str | None) -> str:
     if not sanitized or sanitized in {"..", "."}:
         return "uploaded"
     return sanitized
-
