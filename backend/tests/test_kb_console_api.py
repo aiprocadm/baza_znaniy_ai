@@ -6,6 +6,8 @@ from backend.app.api.constants import MAX_UPLOAD_SIZE_BYTES
 from backend.app.db.utils import init_db
 from backend.app.main import create_app
 
+ADMIN_AUTH_HEADERS = {"Authorization": "Bearer kb_admin_token"}
+
 
 def test_console_endpoints_cover_main_flows() -> None:
     init_db()
@@ -37,17 +39,22 @@ def test_admin_and_auth_endpoints() -> None:
     app = create_app()
     client = TestClient(app)
 
-    users_response = client.get("/api/v1/admin/users")
+    users_response = client.get("/api/v1/admin/users", headers=ADMIN_AUTH_HEADERS)
     assert users_response.status_code == 200
 
     create_user_response = client.post(
         "/api/v1/admin/users",
         json={"name": "Alice", "email": "alice@kb.ai", "roles": ["user"]},
+        headers=ADMIN_AUTH_HEADERS,
     )
     assert create_user_response.status_code == 201
     user_id = create_user_response.json()["id"]
 
-    patch_response = client.patch(f"/api/v1/admin/users/{user_id}", json={"status": "active"})
+    patch_response = client.patch(
+        f"/api/v1/admin/users/{user_id}",
+        json={"status": "active"},
+        headers=ADMIN_AUTH_HEADERS,
+    )
     assert patch_response.status_code == 200
     assert patch_response.json()["status"] == "active"
 
@@ -59,6 +66,7 @@ def test_admin_and_auth_endpoints() -> None:
             "ingestion_parallelism": 6,
             "allow_guest_access": True,
         },
+        headers=ADMIN_AUTH_HEADERS,
     )
     assert settings_response.status_code == 200
     assert settings_response.json()["ingestion_parallelism"] == 6
@@ -77,8 +85,54 @@ def test_admin_and_auth_endpoints() -> None:
     assert refresh_response.status_code == 200
     assert "token" in refresh_response.json()
 
-    delete_response = client.delete(f"/api/v1/admin/users/{user_id}")
+    delete_response = client.delete(f"/api/v1/admin/users/{user_id}", headers=ADMIN_AUTH_HEADERS)
     assert delete_response.status_code == 204
+
+
+def test_login_rejects_invalid_password() -> None:
+    init_db()
+    app = create_app()
+    client = TestClient(app)
+
+    login_response = client.post(
+        "/api/v1/auth/login",
+        json={"email": "admin@kb.ai", "password": "wrong-secret"},
+    )
+
+    assert login_response.status_code == 401
+    assert login_response.json()["detail"] == "Invalid credentials"
+
+
+def test_admin_endpoints_require_token() -> None:
+    init_db()
+    app = create_app()
+    client = TestClient(app)
+
+    no_token_response = client.get("/api/v1/admin/users")
+    assert no_token_response.status_code in (401, 403)
+
+
+def test_admin_endpoints_allow_admin_role() -> None:
+    init_db()
+    app = create_app()
+    client = TestClient(app)
+
+    users_response = client.get("/api/v1/admin/users", headers=ADMIN_AUTH_HEADERS)
+    assert users_response.status_code == 200
+
+    create_user_response = client.post(
+        "/api/v1/admin/users",
+        json={"name": "Bob", "email": "bob@kb.ai", "roles": ["user"]},
+        headers=ADMIN_AUTH_HEADERS,
+    )
+    assert create_user_response.status_code == 201
+    created_user_id = create_user_response.json()["id"]
+
+    delete_user_response = client.delete(
+        f"/api/v1/admin/users/{created_user_id}",
+        headers=ADMIN_AUTH_HEADERS,
+    )
+    assert delete_user_response.status_code == 204
 
 
 def test_upload_rejects_invalid_files() -> None:
