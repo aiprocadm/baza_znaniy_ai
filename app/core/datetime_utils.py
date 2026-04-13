@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 
 __all__ = ["utc_now"]
 
@@ -10,4 +10,4 @@ __all__ = ["utc_now"]
 def utc_now() -> datetime:
     """Return the current UTC time as an aware ``datetime`` instance."""
 
-    return datetime.now(UTC)
+    return datetime.now(timezone.utc)

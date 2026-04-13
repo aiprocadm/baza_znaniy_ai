@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from typing import Final
 
 import sqlite3
@@ -12,8 +12,8 @@ __all__ = ["register_sqlite_datetime_support"]
 
 def _normalise(value: datetime) -> datetime:
     if value.tzinfo is None:
-        return value.replace(tzinfo=UTC)
-    return value.astimezone(UTC)
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
 
 
 def _adapt_datetime(value: datetime) -> str:
