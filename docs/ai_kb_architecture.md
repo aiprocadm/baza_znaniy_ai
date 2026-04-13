@@ -15,6 +15,7 @@
    - Роуты для Operations Console (`status`, `search`, `files`, `activities`, `admin/*`, `auth/*`).
 2. **Application слой**
    - Оркестрация ingestion/search/chat операций.
+   - Chat-flow вынесен в отдельный оркестратор `app/services/chat_orchestrator.py`, чтобы API-роут оставался тонким и переиспользуемым.
    - Инварианты: валидация входа, trace-id, единый формат ошибок.
 3. **Domain слой**
    - Шаблоны документов, паки, версии документов.
