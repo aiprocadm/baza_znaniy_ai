@@ -1,8 +1,13 @@
 from __future__ import annotations
 
+import asyncio
+
+import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from backend.app.api.constants import MAX_UPLOAD_SIZE_BYTES
+from backend.app.api.routes.knowledge_base import upload_file
 from backend.app.db.utils import init_db
 from backend.app.main import create_app
 
@@ -106,3 +111,54 @@ def test_upload_rejects_invalid_files() -> None:
     )
     assert large_upload.status_code == 413
     assert "File is too large" in large_upload.json()["detail"]
+
+
+class _ChunkedUploadFile:
+    def __init__(self, chunks: list[bytes], *, filename: str = "chunked.txt", content_type: str = "text/plain") -> None:
+        self._chunks = chunks
+        self._index = 0
+        self.filename = filename
+        self.content_type = content_type
+        self.read_sizes: list[int] = []
+
+    async def read(self, size: int = -1) -> bytes:
+        self.read_sizes.append(size)
+        if self._index >= len(self._chunks):
+            return b""
+        chunk = self._chunks[self._index]
+        self._index += 1
+        return chunk
+
+
+def test_upload_file_stops_early_when_size_limit_exceeded(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple[str, int, str]] = []
+
+    def _add_file(*, name: str, size: int, mime_type: str):  # type: ignore[no-untyped-def]
+        calls.append((name, size, mime_type))
+        return {"id": "x", "name": name, "size": size, "mime_type": mime_type}
+
+    monkeypatch.setattr("backend.app.api.routes.knowledge_base.runtime_store.add_file", _add_file)
+    upload = _ChunkedUploadFile(chunks=[b"a" * MAX_UPLOAD_SIZE_BYTES, b"b"])
+
+    with pytest.raises(HTTPException) as exc_info:
+        asyncio.run(upload_file(file=upload))  # type: ignore[arg-type]
+
+    assert exc_info.value.status_code == 413
+    assert calls == []
+    assert upload.read_sizes == [1024 * 1024, 1024 * 1024]
+
+
+def test_upload_file_accepts_small_chunked_file(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+
+    def _add_file(*, name: str, size: int, mime_type: str):  # type: ignore[no-untyped-def]
+        captured.update({"name": name, "size": size, "mime_type": mime_type})
+        return {"id": "ok", "name": name, "size": size, "mime_type": mime_type}
+
+    monkeypatch.setattr("backend.app.api.routes.knowledge_base.runtime_store.add_file", _add_file)
+    upload = _ChunkedUploadFile(chunks=[b"hello", b" ", b"kb"])
+
+    result = asyncio.run(upload_file(file=upload))  # type: ignore[arg-type]
+
+    assert result["size"] == 8
+    assert captured == {"name": "chunked.txt", "size": 8, "mime_type": "text/plain"}
