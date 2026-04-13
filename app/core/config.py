@@ -731,6 +731,22 @@ class Settings(BaseSettings):
         default=1024,
         validation_alias=AliasChoices("LLM_MAX_TOKENS", "MAX_GENERATION_TOKENS"),
     )
+    llm_api_base_url: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("LLM_API_BASE_URL", "OPENAI_BASE_URL"),
+    )
+    llm_api_key: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("LLM_API_KEY", "OPENAI_API_KEY"),
+    )
+    llm_api_model: str = Field(
+        default="gpt-4o-mini",
+        validation_alias=AliasChoices("LLM_API_MODEL", "OPENAI_MODEL"),
+    )
+    llm_api_timeout_sec: float = Field(
+        default=60.0,
+        validation_alias=AliasChoices("LLM_API_TIMEOUT_SEC"),
+    )
 
     llm_lora_adapter: str | None = Field(
         default=None,
@@ -936,7 +952,7 @@ class Settings(BaseSettings):
     def iter_secret_fields(self) -> Iterable[str]:
         """Return names of settings that contain sensitive values."""
 
-        return ("secret_key", "qdrant_api_key", "chat_db_dsn")
+        return ("secret_key", "qdrant_api_key", "chat_db_dsn", "llm_api_key")
 
 
 @lru_cache(maxsize=1)

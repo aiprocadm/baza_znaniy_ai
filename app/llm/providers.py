@@ -10,6 +10,7 @@ else:
     SettingsType = Any
 
 from .llama_cpp_provider import LlamaCppProvider
+from .api_provider import ApiProvider
 
 
 @runtime_checkable
@@ -63,6 +64,8 @@ def get_llm_provider(settings: Optional[SettingsType] = None) -> LLMProvider:
 
     if provider_name in {"llama", "llama-cpp", "llama_cpp", "llamacpp"}:
         return LlamaCppProvider(resolved_settings)
+    if provider_name in {"api", "openai", "openai-compatible", "remote-api"}:
+        return ApiProvider(resolved_settings)
 
     raise ValueError(f"Unsupported LLM provider: {raw_provider!r}")
 
@@ -70,5 +73,6 @@ def get_llm_provider(settings: Optional[SettingsType] = None) -> LLMProvider:
 __all__ = [
     "LLMProvider",
     "LlamaCppProvider",
+    "ApiProvider",
     "get_llm_provider",
 ]
