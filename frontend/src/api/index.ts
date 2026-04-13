@@ -1,9 +1,24 @@
 import { apiClient } from './client';
-import type { Role, Session } from '../context/AuthContext';
 
 /**
  * Central API SDK describing backend contracts.
  */
+export type Role = 'user' | 'admin';
+
+export type TokenResponse = {
+  access_token: string;
+  refresh_token: string;
+  token_type?: string;
+  expires_in: number;
+};
+
+export type AuthSession = {
+  user_id: string;
+  email?: string;
+  name?: string;
+  roles: Role[];
+};
+
 export type SystemStatus = {
   services: Array<{
     name: string;
@@ -119,6 +134,6 @@ export const fetchSettings = () => apiClient.get<SystemSettings>('/admin/setting
 
 export const updateSettings = (payload: SystemSettings) => apiClient.put<SystemSettings>('/admin/settings', payload);
 
-export const fetchSession = () => apiClient.get<Session>('/auth/session');
+export const fetchAuthSession = () => apiClient.get<AuthSession>('/auth/session');
 
-export const refreshToken = () => apiClient.post<{ token: string }>('/auth/refresh', {});
+export const refreshToken = (refresh_token: string) => apiClient.post<TokenResponse>('/auth/refresh', { refresh_token });
