@@ -6,7 +6,11 @@ import logging
 import re
 from dataclasses import dataclass
 
-from email_validator import EmailNotValidError, validate_email
+try:
+    from email_validator import EmailNotValidError, validate_email
+except ImportError:  # pragma: no cover - optional dependency in lightweight test envs
+    EmailNotValidError = ValueError
+    validate_email = None
 
 LOGGER = logging.getLogger(__name__)
 
@@ -74,6 +78,13 @@ def normalise_email(email: str) -> str:
     authentication functional we fall back to a conservative ASCII validator in
     that situation while logging the downgrade for observability.
     """
+
+    if validate_email is None:
+        LOGGER.warning(
+            "email-validator dependency not installed; using simplified email validation",
+            extra={"dependency": "email_validator"},
+        )
+        return _fallback_normalise(email).normalised
 
     try:
         info = validate_email(email, check_deliverability=False)

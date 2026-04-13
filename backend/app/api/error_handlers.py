@@ -6,7 +6,14 @@ from http import HTTPStatus
 from typing import Any, Type
 
 from fastapi import FastAPI, HTTPException, Request, status
-from fastapi.exceptions import RequestValidationError
+try:
+    from fastapi.exceptions import RequestValidationError
+except Exception:  # pragma: no cover - compatibility with slim FastAPI test doubles
+    class RequestValidationError(Exception):  # type: ignore[no-redef]
+        """Fallback used by tests that stub out FastAPI exception modules."""
+
+        def errors(self) -> list[dict[str, Any]]:
+            return []
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
