@@ -13,7 +13,7 @@ import { useAuth } from '../context/AuthContext';
 export const DashboardPage = () => {
   const { data: files } = useApi<FileMeta[]>(() => fetchFiles().then((res) => res.data), []);
   const { data: activities } = useApi<ActivityItem[]>(() => fetchActivities().then((res) => res.data), []);
-  const { session } = useAuth();
+  const { user } = useAuth();
 
   const columns: Column<FileMeta>[] = useMemo(
     () => [
@@ -41,7 +41,7 @@ export const DashboardPage = () => {
   return (
     <div className="space-y-6">
       <div className="rounded-2xl border border-slate-200 bg-gradient-to-r from-primary-600 to-primary-800 p-6 text-white shadow-lg dark:border-slate-800">
-        <h1 className="text-2xl font-semibold">Welcome back, {session?.name ?? 'operator'} 👋</h1>
+        <h1 className="text-2xl font-semibold">Welcome back, {user?.name ?? 'operator'} 👋</h1>
         <p className="mt-2 max-w-3xl text-sm text-white/80">
           Track your ingestion jobs, share collections with the team, and collaborate with the assistant using the chat panel on the right.
         </p>

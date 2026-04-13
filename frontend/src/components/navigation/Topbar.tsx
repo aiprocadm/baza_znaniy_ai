@@ -9,7 +9,7 @@ import { useNotifications } from '../../context/NotificationContext';
  * Topbar displays breadcrumbs, search input and session actions.
  */
 export const Topbar = () => {
-  const { session, logout } = useAuth();
+  const { user, logout } = useAuth();
   const { t } = useLocale();
   const navigate = useNavigate();
   const { push } = useNotifications();
@@ -46,7 +46,7 @@ export const Topbar = () => {
           {t('logout')}
         </button>
         <div className="hidden rounded-full border border-primary-200 bg-primary-50 px-4 py-1 text-sm font-semibold text-primary-700 dark:border-slate-700 dark:bg-slate-800 dark:text-white sm:flex">
-          {session?.name}
+          {user?.name}
         </div>
       </div>
     </header>
