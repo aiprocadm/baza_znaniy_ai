@@ -65,6 +65,14 @@ def test_admin_and_auth_endpoints() -> None:
 
     session_response = client.get("/api/v1/auth/session")
     assert session_response.status_code == 200
+
+    login_response = client.post(
+        "/api/v1/auth/login",
+        json={"email": "admin@kb.ai", "password": "secret"},
+    )
+    assert login_response.status_code == 200
+    assert login_response.json()["email"] == "admin@kb.ai"
+
     refresh_response = client.post("/api/v1/auth/refresh")
     assert refresh_response.status_code == 200
     assert "token" in refresh_response.json()

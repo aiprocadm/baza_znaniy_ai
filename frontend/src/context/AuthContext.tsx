@@ -8,11 +8,11 @@ import { apiClient } from '../api/client';
 export type Role = 'user' | 'admin';
 
 export type Session = {
-  id: string;
+  user_id: string;
   email: string;
   name: string;
   roles: Role[];
-  token: string;
+  token_expires_at: string;
 };
 
 type AuthContextValue = {
