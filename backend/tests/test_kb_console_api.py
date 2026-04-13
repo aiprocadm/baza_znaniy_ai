@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
+from backend.app.api.constants import MAX_UPLOAD_SIZE_BYTES
 from backend.app.db.utils import init_db
 from backend.app.main import create_app
 
@@ -70,3 +71,30 @@ def test_admin_and_auth_endpoints() -> None:
 
     delete_response = client.delete(f"/api/v1/admin/users/{user_id}")
     assert delete_response.status_code == 204
+
+
+def test_upload_rejects_invalid_files() -> None:
+    init_db()
+    app = create_app()
+    client = TestClient(app)
+
+    empty_upload = client.post(
+        "/api/v1/upload",
+        files={"file": ("empty.md", b"", "text/markdown")},
+    )
+    assert empty_upload.status_code == 400
+    assert empty_upload.json()["detail"] == "Uploaded file is empty"
+
+    unsupported_upload = client.post(
+        "/api/v1/upload",
+        files={"file": ("archive.zip", b"123", "application/zip")},
+    )
+    assert unsupported_upload.status_code == 415
+    assert "Unsupported media type" in unsupported_upload.json()["detail"]
+
+    large_upload = client.post(
+        "/api/v1/upload",
+        files={"file": ("big.txt", b"a" * (MAX_UPLOAD_SIZE_BYTES + 1), "text/plain")},
+    )
+    assert large_upload.status_code == 413
+    assert "File is too large" in large_upload.json()["detail"]

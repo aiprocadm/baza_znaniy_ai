@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from pathlib import Path
 from uuid import uuid4
 
 from fastapi import APIRouter, File, HTTPException, UploadFile, status
 
+from backend.app.api.constants import ALLOWED_UPLOAD_MIME_TYPES, MAX_UPLOAD_SIZE_BYTES
 from backend.app.schemas.knowledge_base import (
     ActivityItem,
     ApiKey,
@@ -48,7 +50,22 @@ def list_files() -> list[FileMeta]:
 async def upload_file(file: UploadFile = File(...)) -> FileMeta:
     content = await file.read()
     mime_type = file.content_type or "application/octet-stream"
-    return runtime_store.add_file(name=file.filename or "untitled", size=len(content), mime_type=mime_type)
+    filename = Path(file.filename or "untitled").name
+
+    if not content:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Uploaded file is empty")
+    if len(content) > MAX_UPLOAD_SIZE_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=f"File is too large. Max size is {MAX_UPLOAD_SIZE_BYTES} bytes",
+        )
+    if mime_type not in ALLOWED_UPLOAD_MIME_TYPES:
+        raise HTTPException(
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            detail=f"Unsupported media type: {mime_type}",
+        )
+
+    return runtime_store.add_file(name=filename, size=len(content), mime_type=mime_type)
 
 
 @router.get("/admin/users", response_model=list[UserResponse])
