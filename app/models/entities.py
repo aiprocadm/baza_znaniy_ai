@@ -35,7 +35,11 @@ class TenantRecord(SQLModel, table=True):
             data["tenant_id"] = str(slug)
         elif slug in (None, "") and tenant_id:
             data["slug"] = str(tenant_id)
-        super().__init__(**data)
+        try:
+            super().__init__(**data)
+        except TypeError:  # pragma: no cover - SQLModel stubs can expose object.__init__
+            for key, value in data.items():
+                setattr(self, key, value)
 
     tenant_id: Optional[str] = Field(default=None, primary_key=True)
     slug: str = Field(index=True)
@@ -113,7 +117,11 @@ class UserRecord(SQLModel, table=True):
             data["tenant_id"] = str(tenant_slug)
         elif tenant_slug in (None, "") and tenant_id:
             data["tenant_slug"] = str(tenant_id)
-        super().__init__(**data)
+        try:
+            super().__init__(**data)
+        except TypeError:  # pragma: no cover - SQLModel stubs can expose object.__init__
+            for key, value in data.items():
+                setattr(self, key, value)
 
     id: Optional[int] = Field(default=None, primary_key=True)
     tenant_id: str = Field(foreign_key="tenants.tenant_id", index=True)

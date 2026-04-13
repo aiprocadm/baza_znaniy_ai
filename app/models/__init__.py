@@ -8,7 +8,12 @@ from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
 
 from app.core.datetime_utils import utc_now
-from .lora import LoraAdapterInfo, LoraAdapterName, LoraStatusResponse
+try:  # pragma: no cover - allows importing app.models with lightweight test stubs
+    from .lora import LoraAdapterInfo, LoraAdapterName, LoraStatusResponse
+except Exception:  # pragma: no cover - optional during reduced dependency test runs
+    LoraAdapterInfo = None
+    LoraAdapterName = None
+    LoraStatusResponse = None
 
 import importlib
 

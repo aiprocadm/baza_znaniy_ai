@@ -7,7 +7,11 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any
 
 from pydantic import BaseModel, Field, ConfigDict, field_validator, ValidationError
-from pydantic import GetCoreSchemaHandler, GetJsonSchemaHandler
+try:  # pragma: no cover - compatibility with pydantic stubs used in unit tests
+    from pydantic import GetCoreSchemaHandler, GetJsonSchemaHandler
+except ImportError:  # pragma: no cover - pydantic v1/test stubs
+    GetCoreSchemaHandler = Any  # type: ignore[misc,assignment]
+    GetJsonSchemaHandler = Any  # type: ignore[misc,assignment]
 from pydantic_core import PydanticCustomError, core_schema
 
 if TYPE_CHECKING:  # pragma: no cover - circular import guard for type checking
