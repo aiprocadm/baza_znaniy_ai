@@ -99,6 +99,11 @@ class SessionResponse(BaseModel):
     token_expires_at: datetime
 
 
+class LoginPayload(BaseModel):
+    email: str = Field(min_length=3)
+    password: str = Field(min_length=1)
+
+
 class RefreshResponse(BaseModel):
     token: str
 

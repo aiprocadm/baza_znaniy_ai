@@ -9,6 +9,7 @@ from backend.app.schemas.knowledge_base import (
     ActivityItem,
     ApiKey,
     FileMeta,
+    LoginPayload,
     RefreshResponse,
     SearchRequest,
     SearchResponse,
@@ -99,6 +100,14 @@ def put_settings(payload: SystemSettings) -> SystemSettings:
 @router.get("/auth/session", response_model=SessionResponse)
 def get_session() -> SessionResponse:
     return runtime_store.get_session()
+
+
+@router.post("/auth/login", response_model=SessionResponse)
+def login(payload: LoginPayload) -> SessionResponse:
+    session = runtime_store.get_session()
+    if payload.email.strip().lower() != session.email.lower():
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
+    return session
 
 
 @router.post("/auth/refresh", response_model=RefreshResponse)
