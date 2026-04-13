@@ -181,6 +181,46 @@ def test_worker_retries_failed_jobs(
     asyncio.run(scenario())
 
 
+def test_worker_finalization_handles_missing_file_record(
+    monkeypatch: pytest.MonkeyPatch, sqlite_db: str, sample_file: Path
+) -> None:
+    async def scenario() -> None:
+        service = IngestService(max_retries=0, backoff_seconds=0)
+        worker = IngestWorker(service)
+
+        record, queued = await service.register_file(
+            "tenant",
+            str(sample_file),
+            filename=sample_file.name,
+            size=sample_file.stat().st_size,
+            mime_type="text/plain",
+        )
+        assert queued is True
+
+        async def ingest_and_remove_file(self, _job):
+            with Session(self.service.engine) as session:
+                file_obj = session.get(FileRecord, record.id)
+                assert file_obj is not None
+                session.delete(file_obj)
+                session.commit()
+            return 1
+
+        monkeypatch.setattr(IngestWorker, "_ingest_file", ingest_and_remove_file)
+
+        job = await service.queue.get()
+        assert job.job_record_id is not None
+        await worker._process(job)
+        service.queue.task_done()
+
+        with Session(service.engine) as session:
+            job_record = session.get(JobRecord, job.job_record_id)
+            assert job_record is not None
+            assert job_record.status == JobStatus.FAILED
+            assert job_record.error == "FILE_MISSING"
+
+    asyncio.run(scenario())
+
+
 def test_hash_is_based_on_contents(sqlite_db: str, tmp_path: Path) -> None:
     async def scenario() -> None:
         first = tmp_path / "a.txt"

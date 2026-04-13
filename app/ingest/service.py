@@ -871,19 +871,26 @@ class IngestWorker:
         finally:
             with Session(self.service.engine) as session:
                 file_obj = session.get(FileRecord, job.file_id)
-                document_id = job.document_id or file_obj.document_id
-                document = (
-                    session.get(DocumentRecord, document_id)
-                    if document_id is not None
-                    else None
-                )
                 job_record = (
                     session.get(JobRecord, job.job_record_id)
                     if job.job_record_id is not None
                     else None
                 )
                 if not file_obj:
+                    if job_record:
+                        job_record.status = JobStatus.FAILED
+                        job_record.error = "FILE_MISSING"
+                        job_record.finished_at = utc_now()
+                        job_record.updated_at = utc_now()
+                        session.add(job_record)
+                        session.commit()
                     return
+                document_id = job.document_id or file_obj.document_id
+                document = (
+                    session.get(DocumentRecord, document_id)
+                    if document_id is not None
+                    else None
+                )
                 if success:
                     file_obj.status = FileStatus.COMPLETED
                     file_obj.updated_at = utc_now()
