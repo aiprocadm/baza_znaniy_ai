@@ -14,17 +14,15 @@ vi.mock('../api', async () => {
     ...actual,
     searchDocuments: vi.fn().mockResolvedValue({
       data: {
-        results: [
+        hits: [
           {
-            id: '1',
-            title: 'Replication guide',
-            snippet: 'Step-by-step instructions',
+            file: 'docs/replication.md',
+            page: 2,
+            text: 'Step-by-step instructions',
             score: 0.98,
-            source: 'docs/replication.md',
-            updated_at: new Date().toISOString()
           }
         ],
-        total: 1
+        query: 'replication'
       }
     })
   };
@@ -62,9 +60,7 @@ describe('SearchPage', () => {
     await waitFor(() => {
       expect(searchDocuments).toHaveBeenCalledWith({
         query: 'replication',
-        top_k: 10,
-        owner: undefined,
-        tags: undefined
+        top_k: 10
       });
     });
   });

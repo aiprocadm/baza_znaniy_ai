@@ -6,16 +6,13 @@ import { searchDocuments, type SearchResult } from '../api';
 import { DataTable, type Column } from '../components/data/DataTable';
 import { useNotifications } from '../context/NotificationContext';
 import { useDebounce } from '../hooks/useDebounce';
-import { formatDateTime } from '../utils/format';
 
 /**
  * SearchPage provides advanced filtering and ranking preview.
  */
 const schema = z.object({
   query: z.string().min(2, 'Enter at least 2 characters'),
-  top_k: z.coerce.number().min(1).max(50).default(10),
-  owner: z.string().optional(),
-  tags: z.string().optional()
+  top_k: z.coerce.number().min(1).max(50).default(10)
 });
 
 type FormValues = z.infer<typeof schema>;
@@ -35,19 +32,17 @@ export const SearchPage = () => {
   const [loading, setLoading] = useState(false);
 
   const query = watch('query');
-  const owner = watch('owner');
-  const tags = watch('tags');
   const topK = watch('top_k');
 
   const debouncedQuery = useDebounce(query, 400);
 
   const columns: Column<SearchResult>[] = useMemo(
     () => [
-      { key: 'title', header: 'Title' },
+      { key: 'file', header: 'File' },
       {
-        key: 'snippet',
+        key: 'text',
         header: 'Snippet',
-        render: (row) => <span className="text-xs text-slate-500">{row.snippet}</span>
+        render: (row) => <span className="text-xs text-slate-500">{row.text}</span>
       },
       {
         key: 'score',
@@ -55,9 +50,9 @@ export const SearchPage = () => {
         render: (row) => row.score.toFixed(2)
       },
       {
-        key: 'updated_at',
-        header: 'Updated',
-        render: (row) => formatDateTime(row.updated_at)
+        key: 'page',
+        header: 'Page',
+        render: (row) => row.page ?? '—'
       }
     ],
     []
@@ -71,25 +66,21 @@ export const SearchPage = () => {
     setLoading(true);
     searchDocuments({
       query: debouncedQuery,
-      top_k: topK,
-      owner: owner || undefined,
-      tags: tags ? tags.split(',').map((tag) => tag.trim()) : undefined
+      top_k: topK
     })
-      .then((response) => setResults(response.data.results))
+      .then((response) => setResults(response.data.hits))
       .catch((error) => push({ title: 'Search failed', description: error.message, type: 'error' }))
       .finally(() => setLoading(false));
-  }, [debouncedQuery, topK, owner, tags, push]);
+  }, [debouncedQuery, topK, push]);
 
   const onSubmit = handleSubmit(async (values) => {
     try {
       setLoading(true);
       const response = await searchDocuments({
         query: values.query,
-        top_k: values.top_k,
-        owner: values.owner || undefined,
-        tags: values.tags ? values.tags.split(',').map((tag) => tag.trim()) : undefined
+        top_k: values.top_k
       });
-      setResults(response.data.results);
+      setResults(response.data.hits);
     } catch (error) {
       push({ title: 'Search failed', description: (error as Error).message, type: 'error' });
     } finally {
@@ -126,22 +117,6 @@ export const SearchPage = () => {
             {...register('top_k', { valueAsNumber: true })}
           />
           {errors.top_k && <span className="mt-1 block text-xs text-rose-500">{errors.top_k.message}</span>}
-        </label>
-        <label className="block text-sm">
-          <span className="font-medium text-slate-600 dark:text-slate-300">Owner</span>
-          <input
-            className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-primary-400 focus:ring-2 focus:ring-primary-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
-            placeholder="alice@kb.ai"
-            {...register('owner')}
-          />
-        </label>
-        <label className="block text-sm">
-          <span className="font-medium text-slate-600 dark:text-slate-300">Tags</span>
-          <input
-            className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-primary-400 focus:ring-2 focus:ring-primary-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
-            placeholder="production,onboarding"
-            {...register('tags')}
-          />
         </label>
         <div className="lg:col-span-4">
           <button

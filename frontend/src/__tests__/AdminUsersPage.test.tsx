@@ -17,11 +17,15 @@ vi.mock('../api', async () => {
     fetchUsers: vi.fn().mockResolvedValue({
       data: [
         {
-          id: '1',
-          name: 'Alice',
+          id: 1,
+          full_name: 'Alice',
           email: 'alice@example.com',
-          roles: ['user'],
-          status: 'active'
+          role: 'member',
+          is_active: true,
+          tenant_slug: 'default',
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+          last_login_at: null
         }
       ]
     }),
@@ -51,7 +55,17 @@ afterEach(() => {
 beforeEach(() => {
   fetchUsersMock.mockClear().mockResolvedValue({
     data: [
-      { id: '1', name: 'Alice', email: 'alice@example.com', roles: ['user'], status: 'active' }
+      {
+        id: 1,
+        full_name: 'Alice',
+        email: 'alice@example.com',
+        role: 'member',
+        is_active: true,
+        tenant_slug: 'default',
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        last_login_at: null
+      }
     ]
   });
 });
@@ -73,15 +87,21 @@ describe('AdminUsersPage', () => {
       await user.clear(emailInput);
       await user.type(emailInput, 'bob@example.com');
     });
+    const passwordInput = await screen.findByLabelText('Password');
     await act(async () => {
-      await user.click(await screen.findByRole('checkbox', { name: /admin/i }));
+      await user.type(passwordInput, 'password123');
+    });
+    await act(async () => {
       await user.click(screen.getByRole('button', { name: /create/i }));
     });
     await waitFor(() => {
       expect(createUserMock).toHaveBeenCalledWith({
-        name: 'Bob',
+        full_name: 'Bob',
         email: 'bob@example.com',
-        roles: ['user', 'admin']
+        password: 'password123',
+        role: 'member',
+        tenant_slug: 'default',
+        is_active: true
       });
     });
   });

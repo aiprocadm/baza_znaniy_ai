@@ -1,10 +1,11 @@
 import { apiClient } from './client';
-import type { Role, Session } from '../context/AuthContext';
 
 /**
  * Central API SDK describing backend contracts.
  */
 export type SystemStatus = {
+  status: 'ok' | 'degraded' | 'error';
+  version: string;
   services: Array<{
     name: string;
     status: 'healthy' | 'degraded' | 'offline';
@@ -21,17 +22,13 @@ export type SystemStatus = {
 export type SearchFilter = {
   query: string;
   top_k?: number;
-  tags?: string[];
-  owner?: string;
 };
 
 export type SearchResult = {
-  id: string;
-  title: string;
-  snippet: string;
+  file?: string | null;
+  page?: number | null;
   score: number;
-  source: string;
-  updated_at: string;
+  text: string;
 };
 
 export type ActivityItem = {
@@ -52,20 +49,40 @@ export type FileMeta = {
 };
 
 export type User = {
-  id: string;
-  name: string;
+  id: number;
+  full_name?: string | null;
   email: string;
-  roles: Role[];
-  status: 'active' | 'invited' | 'blocked';
+  role: BackendRole;
+  is_active: boolean;
+  tenant_slug?: string | null;
+  created_at: string;
+  updated_at: string;
+  last_login_at?: string | null;
 };
 
 export type CreateUserPayload = {
-  name: string;
+  full_name: string;
   email: string;
-  roles: Role[];
+  password: string;
+  role: 'admin' | 'manager' | 'member';
+  is_active: boolean;
+  tenant_slug: string;
 };
 
-export type UpdateUserPayload = Partial<CreateUserPayload> & { status?: User['status'] };
+export type TokenResponse = {
+  access_token: string;
+  refresh_token: string;
+  token_type: 'bearer';
+  expires_in: number;
+};
+
+export type RefreshRequest = {
+  refresh_token: string;
+};
+
+export type LogoutRequest = {
+  refresh_token: string;
+};
 
 export type ApiKey = {
   id: string;
@@ -82,10 +99,30 @@ export type SystemSettings = {
   allow_guest_access: boolean;
 };
 
-export const fetchSystemStatus = () => apiClient.get<SystemStatus>('/status');
+export const fetchSystemStatus = () =>
+  apiClient.get<{ status: string; version: string }>('/ops/health').then((response) => ({
+    ...response,
+    data: {
+      status: response.data.status === 'ok' ? 'ok' : 'degraded',
+      version: response.data.version,
+      services: [
+        {
+          name: 'api',
+          status: response.data.status === 'ok' ? 'healthy' : 'degraded',
+          latency_ms: 0,
+          last_error: null
+        }
+      ],
+      stats: {
+        documents: 0,
+        ingestions: 0,
+        errors: 0
+      }
+    } satisfies SystemStatus
+  }));
 
 export const searchDocuments = (payload: SearchFilter) =>
-  apiClient.post<{ results: SearchResult[]; total: number }>('/search', payload);
+  apiClient.get<{ query: string; hits: SearchResult[] }>('/search', { params: payload });
 
 export const fetchActivities = () => apiClient.get<ActivityItem[]>('/activities');
 
@@ -102,14 +139,15 @@ export const uploadFile = (file: File, metadata: Record<string, unknown>) => {
   });
 };
 
-export const fetchUsers = () => apiClient.get<User[]>('/admin/users');
+export const fetchUsers = () => apiClient.get<User[]>('/users');
 
-export const createUser = (payload: CreateUserPayload) => apiClient.post<User>('/admin/users', payload);
+export const createUser = (payload: CreateUserPayload) => apiClient.post<User>('/users', payload);
 
-export const updateUser = (id: string, payload: UpdateUserPayload) =>
-  apiClient.patch<User>(`/admin/users/${id}`, payload);
+export const updateUser = () =>
+  Promise.reject(new Error('User update endpoint is not available on backend yet.'));
 
-export const deleteUser = (id: string) => apiClient.delete<void>(`/admin/users/${id}`);
+export const deleteUser = () =>
+  Promise.reject(new Error('User delete endpoint is not available on backend yet.'));
 
 export const fetchApiKeys = () => apiClient.get<ApiKey[]>('/admin/api-keys');
 
@@ -119,6 +157,9 @@ export const fetchSettings = () => apiClient.get<SystemSettings>('/admin/setting
 
 export const updateSettings = (payload: SystemSettings) => apiClient.put<SystemSettings>('/admin/settings', payload);
 
-export const fetchSession = () => apiClient.get<Session>('/auth/session');
-
-export const refreshToken = () => apiClient.post<{ token: string }>('/auth/refresh', {});
+export const login = (email: string, password: string) =>
+  apiClient.post<TokenResponse>('/auth/login', { email, password });
+export const refreshToken = (payload: RefreshRequest) =>
+  apiClient.post<TokenResponse>('/auth/refresh', payload);
+export const logout = (payload: LogoutRequest) => apiClient.post<{ ok: true }>('/auth/logout', payload);
+export type BackendRole = 'admin' | 'manager' | 'member';

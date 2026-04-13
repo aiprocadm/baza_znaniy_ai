@@ -1,5 +1,6 @@
 import { NavLink } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
+import type { Role } from '../../context/AuthContext';
 import { useLocale } from '../../context/LocaleContext';
 import { cn } from '../../utils/cn';
 
@@ -10,11 +11,11 @@ export const Sidebar = () => {
   const { t } = useLocale();
   const { hasRole } = useAuth();
 
-  const links = [
-    { to: '/', label: t('dashboard'), icon: '💡', roles: ['user', 'admin'] },
-    { to: '/search', label: t('search'), icon: '🔍', roles: ['user', 'admin'] },
-    { to: '/dashboard', label: t('documents'), icon: '📂', roles: ['user', 'admin'] },
-    { to: '/dashboard#chat', label: t('chat'), icon: '💬', roles: ['user', 'admin'], external: true }
+  const links: Array<{ to: string; label: string; icon: string; roles: Role[]; external?: boolean }> = [
+    { to: '/', label: t('dashboard'), icon: '💡', roles: ['member', 'manager', 'admin'] },
+    { to: '/search', label: t('search'), icon: '🔍', roles: ['member', 'manager', 'admin'] },
+    { to: '/dashboard', label: t('documents'), icon: '📂', roles: ['member', 'manager', 'admin'] },
+    { to: '/dashboard#chat', label: t('chat'), icon: '💬', roles: ['member', 'manager', 'admin'], external: true }
   ];
 
   const adminLinks = [
@@ -34,7 +35,7 @@ export const Sidebar = () => {
       </div>
       <nav className="mt-8 space-y-1">
         {links
-          .filter((item) => item.roles.some((role) => hasRole(role as never)))
+          .filter((item) => item.roles.some((role) => hasRole(role)))
           .map((link) =>
             link.external ? (
               <a
