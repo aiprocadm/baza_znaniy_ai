@@ -360,6 +360,10 @@ cp .env.example .env
 | `LLM_TOP_P` | `0.95` | Порог nucleus sampling. |
 | `LLM_TOP_K` | `40` | Ограничение словаря при генерации. |
 | `LLM_MAX_TOKENS` | `1024` | Лимит выходных токенов. |
+| `LLM_API_BASE_URL` | пусто | Базовый URL OpenAI-совместимого API (используется при `LLM_PROVIDER=api`). |
+| `LLM_API_KEY` | пусто | Ключ доступа для внешнего API. |
+| `LLM_API_MODEL` | `gpt-4o-mini` | Имя модели во внешнем API. |
+| `LLM_API_TIMEOUT_SEC` | `60` | Таймаут запроса к внешнему API в секундах. |
 | `LLM_LORA_ADAPTER` | пусто | Имя активного адаптера (используется вместе с Ollama). |
 | `LORA_ADAPTER_PATH` | пусто | Файл адаптера для `llama.cpp`. |
 | `LORA_SCALING` | `1.0` | Коэффициент смешивания LoRA. |
