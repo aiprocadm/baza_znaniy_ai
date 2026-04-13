@@ -13,6 +13,14 @@ class ModelNotReadyError(LLMProviderError):
     """Raised when the underlying model has not been initialised."""
 
 
+class RetryableProviderError(ModelNotReadyError):
+    """Raised for transient provider errors that can be retried."""
+
+
+class NonRetryableProviderError(ModelNotReadyError):
+    """Raised for permanent provider errors that should not be retried."""
+
+
 class ModelNotFoundError(LLMProviderError):
     """Raised when a configured model file cannot be located."""
 
@@ -32,6 +40,8 @@ class LoRAAdapterNotFoundError(LLMProviderError):
 __all__ = [
     "LLMProviderError",
     "ModelNotReadyError",
+    "RetryableProviderError",
+    "NonRetryableProviderError",
     "ModelNotFoundError",
     "LoRAAdapterNotFoundError",
 ]
