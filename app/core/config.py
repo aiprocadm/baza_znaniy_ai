@@ -519,6 +519,13 @@ class Settings(BaseSettings):
             "INGEST_SCHEDULER_INTERVAL",
         ),
     )
+    ingest_processing_timeout_seconds: float = Field(
+        default=900.0,
+        validation_alias=AliasChoices(
+            "INGEST_PROCESSING_TIMEOUT_SECONDS",
+            "INGEST_STUCK_PROCESSING_TIMEOUT_SECONDS",
+        ),
+    )
     ingest_maintenance_cron: str = Field(
         default="0 * * * *",
         validation_alias=AliasChoices(
@@ -570,6 +577,14 @@ class Settings(BaseSettings):
         candidate = float(value)
         if candidate <= 0:
             raise ValueError("ingest_worker_interval_seconds must be positive")
+        return candidate
+
+    @field_validator("ingest_processing_timeout_seconds", mode="before")
+    @classmethod
+    def _validate_ingest_processing_timeout(cls, value: object) -> float:
+        candidate = float(value)
+        if candidate <= 0:
+            raise ValueError("ingest_processing_timeout_seconds must be positive")
         return candidate
 
     @field_validator("ingest_job_retention_days", mode="before")

@@ -282,6 +282,9 @@ class IngestService:
         )
         self.maintenance_cron = settings.ingest_maintenance_cron
         self.job_retention_days = max(1, int(settings.ingest_job_retention_days))
+        self.processing_timeout_seconds = max(
+            1.0, float(settings.ingest_processing_timeout_seconds)
+        )
 
     @property
     def engine(self):
@@ -376,9 +379,11 @@ class IngestService:
             logger.exception("Ingest maintenance job failed")
 
     def _perform_maintenance(self) -> None:
-        """Prune stale job records and reset stuck files."""
+        """Prune stale history and fail jobs that exceeded recovery timeout."""
 
-        cutoff = utc_now() - timedelta(days=self.job_retention_days)
+        now = utc_now()
+        cutoff = now - timedelta(days=self.job_retention_days)
+        stale_processing_cutoff = now - timedelta(seconds=self.processing_timeout_seconds)
         removed_jobs = 0
         reset_files = 0
         with Session(self.engine) as session:
@@ -396,7 +401,7 @@ class IngestService:
             stale_files = session.exec(
                 select(FileRecord).where(
                     FileRecord.status == FileStatus.PROCESSING,
-                    FileRecord.updated_at < cutoff,
+                    FileRecord.updated_at < stale_processing_cutoff,
                 )
             ).all()
 
@@ -486,13 +491,24 @@ class IngestService:
         should_commit = False
         try:
             now = utc_now()
+            stale_before = now - timedelta(seconds=self.processing_timeout_seconds)
             statement = text(
                 """
                 WITH next_job AS (
-                    SELECT id
+                    SELECT id, status
                     FROM jobs
-                    WHERE job_type = :job_type AND status = :queued
-                    ORDER BY priority DESC, created_at
+                    WHERE job_type = :job_type
+                      AND (
+                        status = :queued
+                        OR (
+                            status = :processing
+                            AND COALESCE(updated_at, started_at, created_at) <= :stale_before
+                        )
+                      )
+                    ORDER BY
+                        CASE WHEN status = :queued THEN 0 ELSE 1 END,
+                        priority DESC,
+                        created_at
                     LIMIT 1
                 )
                 UPDATE jobs
@@ -500,7 +516,13 @@ class IngestService:
                     started_at = COALESCE(started_at, :ts),
                     updated_at = :ts
                 WHERE id IN (SELECT id FROM next_job)
-                RETURNING id
+                RETURNING
+                    id,
+                    (
+                        SELECT status
+                        FROM next_job
+                        WHERE next_job.id = jobs.id
+                    ) AS previous_status
                 """
             )
             row = session_obj.exec(
@@ -510,22 +532,30 @@ class IngestService:
                     "queued": JobStatus.QUEUED,
                     "processing": JobStatus.PROCESSING,
                     "ts": now,
+                    "stale_before": stale_before,
                 },
             ).first()
             if row is None:
                 return None
 
             job_id: Optional[int] = None
+            previous_status: str | None = None
             mapping = getattr(row, "_mapping", None)
             if mapping is not None and "id" in mapping:
                 job_id = mapping["id"]
+                previous_status = mapping.get("previous_status")
             elif hasattr(row, "__getitem__"):
                 try:
                     job_id = int(row[0])  # type: ignore[index]
                 except Exception:
                     job_id = None
+                try:
+                    previous_status = str(row[1])  # type: ignore[index]
+                except Exception:
+                    previous_status = None
             else:
                 job_id = getattr(row, "id", None)
+                previous_status = getattr(row, "previous_status", None)
 
             if job_id is None:
                 return None
@@ -533,6 +563,21 @@ class IngestService:
             job_record = session_obj.get(JobRecord, job_id)
             if job_record is None:
                 return None
+            recovered_stuck_job = previous_status == JobStatus.PROCESSING
+            if recovered_stuck_job:
+                job_record.attempt = int(job_record.attempt or 0) + 1
+                job_record.error = "RECOVERED_STUCK_JOB"
+                payload = dict(job_record.payload or {})
+                payload.update(
+                    {
+                        "attempt": job_record.attempt,
+                        "recovered_stuck_job": True,
+                        "recovered_at": now.isoformat(),
+                        "recovery_reason": "RECOVERED_STUCK_JOB",
+                    }
+                )
+                job_record.payload = payload
+                session_obj.add(job_record)
 
             payload = dict(job_record.payload or {})
             file_id = payload.get("file_id")
