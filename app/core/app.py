@@ -12,7 +12,15 @@ from typing import Sequence
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from starlette.middleware.base import BaseHTTPMiddleware
+try:
+    from starlette.middleware.base import BaseHTTPMiddleware
+except ModuleNotFoundError:  # pragma: no cover - fallback for stubbed test envs
+    class BaseHTTPMiddleware:  # type: ignore[override]
+        """Fallback base class when Starlette middleware is unavailable."""
+
+        def __init__(self, app):
+            self.app = app
+
 
 from app.api.error_responses import register_error_handlers
 
