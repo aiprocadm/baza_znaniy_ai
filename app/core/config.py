@@ -762,6 +762,14 @@ class Settings(BaseSettings):
         default=60.0,
         validation_alias=AliasChoices("LLM_API_TIMEOUT_SEC"),
     )
+    llm_api_retries: int = Field(
+        default=2,
+        validation_alias=AliasChoices("LLM_API_RETRIES"),
+    )
+    llm_api_backoff_sec: float = Field(
+        default=0.5,
+        validation_alias=AliasChoices("LLM_API_BACKOFF_SEC"),
+    )
 
     llm_lora_adapter: str | None = Field(
         default=None,
