@@ -257,6 +257,7 @@ def test_service_uses_settings_for_retry(monkeypatch: pytest.MonkeyPatch) -> Non
     monkeypatch.setenv("INGEST_MAX_RETRIES", "5")
     monkeypatch.setenv("INGEST_BACKOFF_SECONDS", "2.5")
     monkeypatch.setenv("INGEST_QUEUE_SIZE", "0")
+    monkeypatch.setenv("INGEST_PROCESSING_TIMEOUT_SECONDS", "7")
     from app.core import config as config_module
 
     config_module.get_settings.cache_clear()
@@ -267,6 +268,7 @@ def test_service_uses_settings_for_retry(monkeypatch: pytest.MonkeyPatch) -> Non
     assert service.backoff_seconds == 2.5
     assert service.queue_maxsize == 0
     assert service.queue.maxsize == 0
+    assert service.processing_timeout_seconds == 7.0
 
     config_module.get_settings.cache_clear()
 
@@ -479,3 +481,62 @@ def test_perform_maintenance_resets_stale_processing(
             assert refreshed_document.updated_at > stale_naive
     finally:
         config_module.get_settings.cache_clear()
+
+
+def test_dequeue_recovers_stuck_processing_job(
+    monkeypatch: pytest.MonkeyPatch, sqlite_db: str, sample_file: Path
+) -> None:
+    async def scenario() -> None:
+        monkeypatch.setenv("INGEST_PROCESSING_TIMEOUT_SECONDS", "5")
+        from app.core import config as config_module
+
+        config_module.get_settings.cache_clear()
+        try:
+            service = IngestService(
+                max_retries=1, backoff_seconds=0, auto_process=False, use_local_queue=False
+            )
+            record, queued = await service.register_file(
+                "tenant",
+                str(sample_file),
+                filename=sample_file.name,
+                size=sample_file.stat().st_size,
+                mime_type="text/plain",
+            )
+            assert queued is True
+
+            stale_started = utc_now() - timedelta(seconds=30)
+            stale_naive = stale_started.replace(tzinfo=None)
+            with Session(service.engine) as session:
+                job_record = session.exec(select(JobRecord).where(JobRecord.resource_id == str(record.id))).one()
+                job_record.status = JobStatus.PROCESSING
+                job_record.started_at = stale_naive
+                job_record.updated_at = stale_naive
+                job_record.attempt = 0
+                job_record.error = "WORKER_CRASHED"
+                job_record.payload = {
+                    **dict(job_record.payload or {}),
+                    "attempt": 0,
+                }
+                session.add(job_record)
+                session.commit()
+                job_id = job_record.id
+
+            recovered_job = service.dequeue_next_job()
+            assert recovered_job is not None
+            assert recovered_job.job_record_id == job_id
+            assert recovered_job.attempt == 1
+
+            with Session(service.engine) as session:
+                refreshed = session.get(JobRecord, job_id)
+                assert refreshed is not None
+                assert refreshed.status == JobStatus.PROCESSING
+                assert refreshed.attempt == 1
+                assert refreshed.error == "RECOVERED_STUCK_JOB"
+                assert refreshed.payload is not None
+                assert refreshed.payload.get("recovered_stuck_job") is True
+                assert refreshed.payload.get("recovery_reason") == "RECOVERED_STUCK_JOB"
+                assert refreshed.payload.get("attempt") == 1
+        finally:
+            config_module.get_settings.cache_clear()
+
+    asyncio.run(scenario())
