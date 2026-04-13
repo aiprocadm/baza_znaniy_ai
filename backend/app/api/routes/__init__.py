@@ -1,3 +1,3 @@
-from backend.app.api.routes import documents, packs
+from backend.app.api.routes import documents, knowledge_base, packs
 
-__all__ = ["documents", "packs"]
+__all__ = ["documents", "packs", "knowledge_base"]
