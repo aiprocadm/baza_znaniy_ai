@@ -49,24 +49,32 @@ def list_files() -> list[FileMeta]:
 
 @router.post("/upload", response_model=FileMeta)
 async def upload_file(file: UploadFile = File(...)) -> FileMeta:
-    content = await file.read()
     mime_type = file.content_type or "application/octet-stream"
     filename = Path(file.filename or "untitled").name
+    chunk_size = 1024 * 1024
+    total_size = 0
 
-    if not content:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Uploaded file is empty")
-    if len(content) > MAX_UPLOAD_SIZE_BYTES:
-        raise HTTPException(
-            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-            detail=f"File is too large. Max size is {MAX_UPLOAD_SIZE_BYTES} bytes",
-        )
     if mime_type not in ALLOWED_UPLOAD_MIME_TYPES:
         raise HTTPException(
             status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
             detail=f"Unsupported media type: {mime_type}",
         )
 
-    return runtime_store.add_file(name=filename, size=len(content), mime_type=mime_type)
+    while True:
+        chunk = await file.read(chunk_size)
+        if not chunk:
+            break
+        total_size += len(chunk)
+        if total_size > MAX_UPLOAD_SIZE_BYTES:
+            raise HTTPException(
+                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                detail=f"File is too large. Max size is {MAX_UPLOAD_SIZE_BYTES} bytes",
+            )
+
+    if total_size == 0:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Uploaded file is empty")
+
+    return runtime_store.add_file(name=filename, size=total_size, mime_type=mime_type)
 
 
 @router.get("/admin/users", response_model=list[UserResponse])
