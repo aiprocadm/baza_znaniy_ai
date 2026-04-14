@@ -117,7 +117,13 @@ def index_chunks(chunks: Iterable[dict[str, object]]) -> int:
     return len(items)
 
 
-def _search_fallback(query: str, top_k: int) -> List[dict[str, object]]:
+def _search_fallback(
+    query: str,
+    top_k: int,
+    *,
+    owner: str | None = None,
+    tags: list[str] | None = None,
+) -> List[dict[str, object]]:
     """Very small substring-based search over the fallback index."""
 
     if not query:
@@ -127,7 +133,24 @@ def _search_fallback(query: str, top_k: int) -> List[dict[str, object]]:
     with _FALLBACK_LOCK:
         snapshot = list(get_fallback_storage())
 
+    normalized_tags = {tag.strip().lower() for tag in (tags or []) if tag and tag.strip()}
+    normalized_owner = (owner or "").strip().lower()
+
     for chunk in snapshot:
+        if normalized_owner:
+            chunk_owner = str(chunk.get("owner", "")).strip().lower()
+            if chunk_owner != normalized_owner:
+                continue
+        if normalized_tags:
+            chunk_tags = chunk.get("tags")
+            if not isinstance(chunk_tags, list):
+                continue
+            chunk_tag_set = {
+                str(tag).strip().lower() for tag in chunk_tags if str(tag).strip()
+            }
+            if not normalized_tags.issubset(chunk_tag_set):
+                continue
+
         text = str(chunk.get("text", ""))
         haystack = text.lower()
         if not haystack:
@@ -139,7 +162,13 @@ def _search_fallback(query: str, top_k: int) -> List[dict[str, object]]:
     return [chunk for _score, chunk in hits[:top_k]]
 
 
-def search(query: str, top_k: int = 10) -> List[dict[str, object]]:
+def search(
+    query: str,
+    top_k: int = 10,
+    *,
+    owner: str | None = None,
+    tags: list[str] | None = None,
+) -> List[dict[str, object]]:
     """Run a similarity search returning at most *top_k* hits."""
 
     start = time.perf_counter()
@@ -147,13 +176,13 @@ def search(query: str, top_k: int = 10) -> List[dict[str, object]]:
     try:
         store = _resolve_vector_store()
         store.ensure_ready()
-        hits = store.search(query, top_k=top_k)
+        hits = store.search(query, top_k=top_k, owner=owner, tags=tags)
     except _VECTOR_ERRORS as exc:  # pragma: no cover - fallback path used in tests
         duration = time.perf_counter() - start
         record_search_operation("vector", "error", duration, 0)
         LOGGER.exception("Falling back to in-memory search", exc_info=exc)
         fallback_start = time.perf_counter()
-        fallback_hits = _search_fallback(query, top_k)
+        fallback_hits = _search_fallback(query, top_k, owner=owner, tags=tags)
         record_search_operation(
             "fallback",
             "success",

@@ -33,20 +33,23 @@ export type SystemStatus = {
   };
 };
 
-export type SearchFilter = {
+export type SearchRequestDto = {
   query: string;
   top_k?: number;
   tags?: string[];
   owner?: string;
 };
 
-export type SearchResult = {
-  id: string;
-  title: string;
-  snippet: string;
+export type SearchHitDto = {
+  file?: string | null;
+  page?: number | null;
   score: number;
-  source: string;
-  updated_at: string;
+  text: string;
+};
+
+export type SearchResponseDto = {
+  query: string;
+  hits: SearchHitDto[];
 };
 
 export type ActivityItem = {
@@ -99,8 +102,13 @@ export type SystemSettings = {
 
 export const fetchSystemStatus = () => apiClient.get<SystemStatus>('/status');
 
-export const searchDocuments = (payload: SearchFilter) =>
-  apiClient.post<{ results: SearchResult[]; total: number }>('/search', payload);
+export const searchDocuments = (payload: SearchRequestDto) =>
+  apiClient.get<SearchResponseDto>('/search', {
+    params: payload,
+    paramsSerializer: {
+      indexes: null
+    }
+  });
 
 export const fetchActivities = () => apiClient.get<ActivityItem[]>('/activities');
 
