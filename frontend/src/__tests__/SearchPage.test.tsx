@@ -14,17 +14,15 @@ vi.mock('../api', async () => {
     ...actual,
     searchDocuments: vi.fn().mockResolvedValue({
       data: {
-        results: [
+        hits: [
           {
-            id: '1',
-            title: 'Replication guide',
-            snippet: 'Step-by-step instructions',
+            file: 'docs/replication.md',
+            page: 1,
+            text: 'Step-by-step instructions',
             score: 0.98,
-            source: 'docs/replication.md',
-            updated_at: new Date().toISOString()
           }
         ],
-        total: 1
+        query: 'replication'
       }
     })
   };
@@ -65,6 +63,25 @@ describe('SearchPage', () => {
         top_k: 10,
         owner: undefined,
         tags: undefined
+      });
+    });
+  });
+
+  it('passes owner and tags filters', async () => {
+    renderPage();
+    await act(async () => {
+      await userEvent.type(screen.getByPlaceholderText('How to configure replication?'), 'replication');
+      await userEvent.type(screen.getByPlaceholderText('alice@kb.ai'), 'alice@kb.ai');
+      await userEvent.type(screen.getByPlaceholderText('production,onboarding'), 'production, onboarding');
+      await userEvent.click(screen.getByRole('button', { name: /run search/i }));
+    });
+
+    await waitFor(() => {
+      expect(searchDocuments).toHaveBeenCalledWith({
+        query: 'replication',
+        top_k: 10,
+        owner: 'alice@kb.ai',
+        tags: ['production', 'onboarding']
       });
     });
   });

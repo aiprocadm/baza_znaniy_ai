@@ -15,7 +15,7 @@ class DummyVectorStore:
     def __init__(self) -> None:
         self.ready_calls = 0
         self.upserted: List[List[dict[str, object]]] = []
-        self.search_calls: List[tuple[str, int]] = []
+        self.search_calls: List[tuple[str, int, str | None, list[str] | None]] = []
         self.results: List[dict[str, object]] = []
 
     def ensure_ready(self) -> None:
@@ -24,8 +24,15 @@ class DummyVectorStore:
     def upsert(self, items: Iterable[dict[str, object]]) -> None:
         self.upserted.append(list(items))
 
-    def search(self, query: str, *, top_k: int) -> List[dict[str, object]]:
-        self.search_calls.append((query, top_k))
+    def search(
+        self,
+        query: str,
+        *,
+        top_k: int,
+        owner: str | None = None,
+        tags: list[str] | None = None,
+    ) -> List[dict[str, object]]:
+        self.search_calls.append((query, top_k, owner, tags))
         return self.results[:top_k]
 
 
@@ -42,7 +49,14 @@ class ExplodingVectorStore:
     def upsert(self, items: Iterable[dict[str, object]]) -> None:  # pragma: no cover - not called
         raise RuntimeError("boom")
 
-    def search(self, query: str, *, top_k: int) -> List[dict[str, object]]:  # pragma: no cover - not called
+    def search(
+        self,
+        query: str,
+        *,
+        top_k: int,
+        owner: str | None = None,
+        tags: list[str] | None = None,
+    ) -> List[dict[str, object]]:  # pragma: no cover - not called
         raise RuntimeError("boom")
 
 
@@ -76,7 +90,7 @@ def test_index_chunks_success(monkeypatch: pytest.MonkeyPatch) -> None:
     hits = vectorstore.search("anything", top_k=5)
 
     assert hits == dummy.results
-    assert dummy.search_calls == [("anything", 5)]
+    assert dummy.search_calls == [("anything", 5, None, None)]
 
 
 def test_index_chunks_fallback_and_search_order(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -114,3 +128,19 @@ def test_configurable_fallback_storage(monkeypatch: pytest.MonkeyPatch) -> None:
     assert stored == 1
     assert shared_storage == chunks
     assert vectorstore.get_fallback_storage() is shared_storage
+
+
+def test_fallback_search_filters() -> None:
+    vectorstore.index_chunks(
+        [
+            {"id": 1, "text": "Replication setup", "owner": "alice@kb.ai", "tags": ["prod", "runbook"]},
+            {"id": 2, "text": "Replication setup", "owner": "bob@kb.ai", "tags": ["dev"]},
+            {"id": 3, "text": "Replication setup", "owner": "alice@kb.ai", "tags": ["prod"]},
+        ]
+    )
+
+    owner_hits = vectorstore.search("replication", top_k=10, owner="alice@kb.ai")
+    assert [item["id"] for item in owner_hits] == [1, 3]
+
+    tag_hits = vectorstore.search("replication", top_k=10, tags=["prod", "runbook"])
+    assert [item["id"] for item in tag_hits] == [1]
