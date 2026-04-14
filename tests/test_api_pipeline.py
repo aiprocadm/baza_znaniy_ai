@@ -321,6 +321,61 @@ def test_chat_returns_503_when_model_missing(api_client: TestClient) -> None:
     assert payload["status"] == 503
 
 
+def test_chat_websocket_roundtrip(api_client: TestClient) -> None:
+    """Verify websocket chat request/response flow with partial tokens and final payload."""
+
+    with api_client.websocket_connect("/api/v1/ws/chat") as websocket:
+        websocket.send_json(
+            {
+                "type": "request",
+                "request_id": "req-1",
+                "stream": True,
+                "payload": {
+                    "user_id": "tester",
+                    "message": "Привет",
+                    "conversation_id": None,
+                },
+            }
+        )
+
+        ack = websocket.receive_json()
+        assert ack == {"type": "ack", "request_id": "req-1"}
+
+        partial = websocket.receive_json()
+        assert partial["type"] == "partial"
+        assert partial["request_id"] == "req-1"
+        assert partial["delta"].strip()
+
+        response = websocket.receive_json()
+        assert response["type"] == "response"
+        assert response["request_id"] == "req-1"
+        payload = response["payload"]
+        assert payload["answer"]
+        assert payload["conversation_id"]
+        assert isinstance(payload["citations"], list)
+
+
+def test_chat_websocket_returns_error_for_invalid_payload(api_client: TestClient) -> None:
+    """Ensure websocket channel returns structured validation errors."""
+
+    with api_client.websocket_connect("/api/v1/ws/chat") as websocket:
+        websocket.send_json(
+            {
+                "type": "request",
+                "request_id": "bad-req",
+                "payload": {
+                    "user_id": "tester",
+                    "message": 123,  # type: ignore[arg-type]
+                },
+            }
+        )
+
+        error = websocket.receive_json()
+        assert error["type"] == "error"
+        assert error["request_id"] == "bad-req"
+        assert error["code"] == "INVALID_REQUEST"
+
+
 def test_version_endpoint_reports_versions(api_client: TestClient) -> None:
     response = api_client.get("/version")
     assert response.status_code == 200
