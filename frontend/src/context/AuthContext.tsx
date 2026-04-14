@@ -1,6 +1,13 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import { apiClient } from '../api/client';
+import {
+  clearStoredSession,
+  getStoredSession,
+  getStoredTokens,
+  registerUnauthorizedHandler,
+  setStoredSession
+} from './authStorage';
 
 /**
  * AuthContext encapsulates session management and role-based access control.
@@ -13,6 +20,8 @@ export type Session = {
   name: string;
   roles: Role[];
   token_expires_at: string;
+  access_token?: string;
+  refresh_token?: string;
 };
 
 type AuthContextValue = {
@@ -25,31 +34,24 @@ type AuthContextValue = {
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
-const STORAGE_KEY = 'operations-console.session';
-
-const getStoredSession = (): Session | null => {
-  if (typeof window === 'undefined') {
-    return null;
-  }
-  try {
-    const value = window.localStorage.getItem(STORAGE_KEY);
-    return value ? (JSON.parse(value) as Session) : null;
-  } catch (error) {
-    console.error('Failed to parse session from storage', error);
-    return null;
-  }
-};
 
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
-  const [session, setSession] = useState<Session | null>(getStoredSession);
+  const [session, setSession] = useState<Session | null>(() => getStoredSession<Session>());
 
   useEffect(() => {
     if (!session) {
-      window.localStorage.removeItem(STORAGE_KEY);
+      clearStoredSession();
       return;
     }
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(session));
+
+    setStoredSession(session);
   }, [session]);
+
+  useEffect(() => {
+    return registerUnauthorizedHandler(() => {
+      setSession(null);
+    });
+  }, []);
 
   const login = useCallback(async (email: string, password: string) => {
     const response = await apiClient.post<Session>('/auth/login', { email, password });
@@ -57,7 +59,16 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   }, []);
 
   const logout = useCallback(() => {
+    const { refreshToken } = getStoredTokens();
+
+    clearStoredSession();
     setSession(null);
+
+    if (!refreshToken) {
+      return;
+    }
+
+    void apiClient.post('/auth/logout', { refresh_token: refreshToken }).catch(() => undefined);
   }, []);
 
   const hasRole = useCallback((role: Role) => session?.roles.includes(role) ?? false, [session]);
