@@ -355,6 +355,18 @@ def test_chat_websocket_roundtrip(api_client: TestClient) -> None:
         assert isinstance(payload["citations"], list)
 
 
+
+
+def test_chat_websocket_returns_error_for_bad_message_type(api_client: TestClient) -> None:
+    """Ensure websocket channel reports protocol-level envelope errors."""
+
+    with api_client.websocket_connect("/api/v1/ws/chat") as websocket:
+        websocket.send_json({"type": "unexpected"})
+
+        error = websocket.receive_json()
+        assert error["type"] == "error"
+        assert error["code"] == "BAD_MESSAGE_TYPE"
+
 def test_chat_websocket_returns_error_for_invalid_payload(api_client: TestClient) -> None:
     """Ensure websocket channel returns structured validation errors."""
 
