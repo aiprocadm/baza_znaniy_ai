@@ -65,13 +65,13 @@ class FileMeta(BaseModel):
 class UserPayload(BaseModel):
     name: str = Field(min_length=1)
     email: str = Field(min_length=3)
-    roles: list[Literal["user", "admin"]] = Field(default_factory=lambda: ["user"])
+    roles: list[Literal["user", "tenant-admin", "platform-admin"]] = Field(default_factory=lambda: ["user"])
 
 
 class UserUpdatePayload(BaseModel):
     name: str | None = None
     email: str | None = None
-    roles: list[Literal["user", "admin"]] | None = None
+    roles: list[Literal["user", "tenant-admin", "platform-admin"]] | None = None
     status: Literal["active", "invited", "blocked"] | None = None
 
 
@@ -79,7 +79,7 @@ class UserResponse(BaseModel):
     id: str
     name: str
     email: str
-    roles: list[Literal["user", "admin"]]
+    roles: list[Literal["user", "tenant-admin", "platform-admin"]]
     status: Literal["active", "invited", "blocked"]
 
 
@@ -95,7 +95,9 @@ class SessionResponse(BaseModel):
     user_id: str
     email: str
     name: str
-    roles: list[Literal["user", "admin"]]
+    tenant_id: str
+    tenant_slug: str
+    roles: list[Literal["user", "tenant-admin", "platform-admin"]]
     token_expires_at: datetime
 
 

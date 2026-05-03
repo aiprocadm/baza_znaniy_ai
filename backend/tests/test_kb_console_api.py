@@ -12,6 +12,9 @@ from backend.app.db.utils import init_db
 from backend.app.main import create_app
 
 ADMIN_AUTH_HEADERS = {"Authorization": "Bearer kb_admin_token"}
+TENANT_ADMIN_HEADERS = {"Authorization": "Bearer kb_tenant_admin_token"}
+TENANT_USER_HEADERS = {"Authorization": "Bearer kb_tenant_user_token"}
+TENANT_B_ADMIN_HEADERS = {"Authorization": "Bearer kb_tenant_admin_b_token"}
 
 
 def test_console_endpoints_cover_main_flows() -> None:
@@ -23,13 +26,14 @@ def test_console_endpoints_cover_main_flows() -> None:
     assert status_response.status_code == 200
     assert "services" in status_response.json()
 
-    search_response = client.post("/api/v1/search", json={"query": "onboarding", "top_k": 5})
+    search_response = client.post("/api/v1/search", json={"query": "onboarding", "top_k": 5}, headers=TENANT_ADMIN_HEADERS)
     assert search_response.status_code == 200
     assert "results" in search_response.json()
 
     upload_response = client.post(
         "/api/v1/upload",
         files={"file": ("guide.md", b"hello kb", "text/markdown")},
+        headers=TENANT_ADMIN_HEADERS,
     )
     assert upload_response.status_code == 200
     assert upload_response.json()["name"] == "guide.md"
@@ -76,7 +80,7 @@ def test_admin_and_auth_endpoints() -> None:
     assert settings_response.status_code == 200
     assert settings_response.json()["ingestion_parallelism"] == 6
 
-    session_response = client.get("/api/v1/auth/session")
+    session_response = client.get("/api/v1/auth/session", headers=ADMIN_AUTH_HEADERS)
     assert session_response.status_code == 200
 
     login_response = client.post(
@@ -148,6 +152,7 @@ def test_upload_rejects_invalid_files() -> None:
     empty_upload = client.post(
         "/api/v1/upload",
         files={"file": ("empty.md", b"", "text/markdown")},
+        headers=TENANT_ADMIN_HEADERS,
     )
     assert empty_upload.status_code == 400
     assert empty_upload.json()["detail"] == "Uploaded file is empty"
@@ -155,6 +160,7 @@ def test_upload_rejects_invalid_files() -> None:
     unsupported_upload = client.post(
         "/api/v1/upload",
         files={"file": ("archive.zip", b"123", "application/zip")},
+        headers=TENANT_ADMIN_HEADERS,
     )
     assert unsupported_upload.status_code == 415
     assert "Unsupported media type" in unsupported_upload.json()["detail"]
@@ -162,6 +168,7 @@ def test_upload_rejects_invalid_files() -> None:
     large_upload = client.post(
         "/api/v1/upload",
         files={"file": ("big.txt", b"a" * (MAX_UPLOAD_SIZE_BYTES + 1), "text/plain")},
+        headers=TENANT_ADMIN_HEADERS,
     )
     assert large_upload.status_code == 413
     assert "File is too large" in large_upload.json()["detail"]
@@ -187,7 +194,7 @@ class _ChunkedUploadFile:
 def test_upload_file_stops_early_when_size_limit_exceeded(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[tuple[str, int, str]] = []
 
-    def _add_file(*, name: str, size: int, mime_type: str):  # type: ignore[no-untyped-def]
+    def _add_file(*, tenant_slug: str, name: str, size: int, mime_type: str):  # type: ignore[no-untyped-def]
         calls.append((name, size, mime_type))
         return {"id": "x", "name": name, "size": size, "mime_type": mime_type}
 
@@ -195,7 +202,7 @@ def test_upload_file_stops_early_when_size_limit_exceeded(monkeypatch: pytest.Mo
     upload = _ChunkedUploadFile(chunks=[b"a" * MAX_UPLOAD_SIZE_BYTES, b"b"])
 
     with pytest.raises(HTTPException) as exc_info:
-        asyncio.run(upload_file(file=upload))  # type: ignore[arg-type]
+        asyncio.run(upload_file(file=upload, tenant_ctx=("t_alpha", "alpha")))  # type: ignore[arg-type]
 
     assert exc_info.value.status_code == 413
     assert calls == []
@@ -205,14 +212,44 @@ def test_upload_file_stops_early_when_size_limit_exceeded(monkeypatch: pytest.Mo
 def test_upload_file_accepts_small_chunked_file(monkeypatch: pytest.MonkeyPatch) -> None:
     captured: dict[str, object] = {}
 
-    def _add_file(*, name: str, size: int, mime_type: str):  # type: ignore[no-untyped-def]
+    def _add_file(*, tenant_slug: str, name: str, size: int, mime_type: str):  # type: ignore[no-untyped-def]
         captured.update({"name": name, "size": size, "mime_type": mime_type})
         return {"id": "ok", "name": name, "size": size, "mime_type": mime_type}
 
     monkeypatch.setattr("backend.app.api.routes.knowledge_base.runtime_store.add_file", _add_file)
     upload = _ChunkedUploadFile(chunks=[b"hello", b" ", b"kb"])
 
-    result = asyncio.run(upload_file(file=upload))  # type: ignore[arg-type]
+    result = asyncio.run(upload_file(file=upload, tenant_ctx=("t_alpha", "alpha")))  # type: ignore[arg-type]
 
     assert result["size"] == 8
     assert captured == {"name": "chunked.txt", "size": 8, "mime_type": "text/plain"}
+
+
+def test_tenant_user_cannot_access_admin_endpoints() -> None:
+    init_db()
+    app = create_app()
+    client = TestClient(app)
+
+    response = client.get("/api/v1/admin/users", headers=TENANT_USER_HEADERS)
+    assert response.status_code == 403
+
+
+def test_cross_tenant_search_isolated() -> None:
+    init_db()
+    app = create_app()
+    client = TestClient(app)
+
+    upload_response = client.post(
+        "/api/v1/upload",
+        files={"file": ("alpha.md", b"alpha-only-secret", "text/markdown")},
+        headers=TENANT_ADMIN_HEADERS,
+    )
+    assert upload_response.status_code == 200
+
+    own_search = client.post("/api/v1/search", json={"query": "alpha-only-secret", "top_k": 3}, headers=TENANT_ADMIN_HEADERS)
+    assert own_search.status_code == 200
+    assert own_search.json()["total"] >= 1
+
+    other_search = client.post("/api/v1/search", json={"query": "alpha-only-secret", "top_k": 3}, headers=TENANT_B_ADMIN_HEADERS)
+    assert other_search.status_code == 200
+    assert other_search.json()["total"] == 0

@@ -36,7 +36,7 @@ class KBRuntimeStore:
     settings: SystemSettings = field(default_factory=lambda: SystemSettings(qdrant_url="http://localhost:6333", llm_model="meta-llama/Meta-Llama-3-8B-Instruct", ingestion_parallelism=4, allow_guest_access=False))
 
     def __post_init__(self) -> None:
-        admin = UserResponse(id="u_admin", name="KB Administrator", email="admin@kb.ai", roles=["admin"], status="active")
+        admin = UserResponse(id="u_admin", name="KB Administrator", email="admin@kb.ai", roles=["platform-admin"], status="active")
         self.users[admin.id] = admin
 
     def get_status(self) -> SystemStatusResponse:
@@ -61,14 +61,14 @@ class KBRuntimeStore:
         provider = os.getenv("LLM_PROVIDER", "stub")
         return ServiceHealth(name="llm", status="healthy" if provider else "degraded", latency_ms=0)
 
-    def add_file(self, *, name: str, size: int, mime_type: str, content: bytes | None = None) -> FileMeta:
+    def add_file(self, *, tenant_slug: str, name: str, size: int, mime_type: str, content: bytes | None = None) -> FileMeta:
         now = datetime.now(timezone.utc)
         file_id = f"f_{uuid4().hex[:10]}"
         with session_scope() as session:
             session.add(IngestionJob(id=file_id, name=name, size=size, mime_type=mime_type, status="indexed", created_at=now))
             session.add(IngestionEvent(id=f"a_{uuid4().hex[:10]}", type="upload", title=f"Uploaded {name}", description="Document uploaded and queued for indexing.", created_at=now))
         if content is not None:
-            search_service.index_document(file_id=file_id, file_name=name, text=content.decode("utf-8", errors="ignore"))
+            search_service.index_document(file_id=file_id, file_name=name, text=content.decode("utf-8", errors="ignore"), owner=tenant_slug)
         return FileMeta(id=file_id, name=name, size=size, mime_type=mime_type, status="indexed", created_at=now)
 
     def list_files(self) -> list[FileMeta]:
@@ -84,8 +84,8 @@ class KBRuntimeStore:
             return [ActivityItem(id="a_bootstrap", type="ingest", title="System initialized", description="Knowledge base runtime is ready.", created_at=now)]
         return [ActivityItem(id=row.id, type=row.type, title=row.title, description=row.description, created_at=row.created_at) for row in rows]
 
-    def search(self, query: SearchRequest) -> SearchResponse:
-        response = search_service.search(query)
+    def search(self, tenant_slug: str, query: SearchRequest) -> SearchResponse:
+        response = search_service.search(query, tenant_slug=tenant_slug)
         with session_scope() as session:
             session.add(IngestionEvent(id=f"a_{uuid4().hex[:10]}", type="search", title="Search executed", description=f"Query '{query.query}' returned {len(response.results)} results.", created_at=datetime.now(timezone.utc)))
         return response
@@ -104,7 +104,7 @@ class KBRuntimeStore:
     def list_api_keys(self) -> list[ApiKey]:
         now = datetime.now(timezone.utc); return [ApiKey(id="k_default", name="Default Integration", prefix="kb_live", created_at=now - timedelta(days=3))]
     def get_session(self) -> SessionResponse:
-        return SessionResponse(user_id="u_admin", email="admin@kb.ai", name="KB Administrator", roles=["admin"], token_expires_at=datetime.now(timezone.utc) + timedelta(hours=8))
+        return SessionResponse(user_id="u_admin", email="admin@kb.ai", name="KB Administrator", tenant_id="t_platform", tenant_slug="platform", roles=["platform-admin"], token_expires_at=datetime.now(timezone.utc) + timedelta(hours=8))
 
 
 runtime_store = KBRuntimeStore()

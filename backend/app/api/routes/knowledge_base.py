@@ -7,7 +7,7 @@ from uuid import uuid4
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 
 from backend.app.api.constants import ALLOWED_UPLOAD_MIME_TYPES, MAX_UPLOAD_SIZE_BYTES
-from backend.app.api.deps import authenticate_credentials, require_admin
+from backend.app.api.deps import authenticate_credentials, get_tenant_context, require_platform_admin, require_tenant_admin
 from backend.app.schemas.knowledge_base import (
     ActivityItem,
     ApiKey,
@@ -34,8 +34,9 @@ def get_status() -> SystemStatusResponse:
 
 
 @router.post("/search", response_model=SearchResponse)
-def search_documents(payload: SearchRequest) -> SearchResponse:
-    return runtime_store.search(payload)
+def search_documents(payload: SearchRequest, tenant_ctx: tuple[str, str] = Depends(get_tenant_context)) -> SearchResponse:
+    _, tenant_slug = tenant_ctx
+    return runtime_store.search(tenant_slug, payload)
 
 
 @router.get("/activities", response_model=list[ActivityItem])
@@ -49,7 +50,7 @@ def list_files() -> list[FileMeta]:
 
 
 @router.post("/upload", response_model=FileMeta)
-async def upload_file(file: UploadFile = File(...)) -> FileMeta:
+async def upload_file(file: UploadFile = File(...), tenant_ctx: tuple[str, str] = Depends(get_tenant_context)) -> FileMeta:
     mime_type = file.content_type or "application/octet-stream"
     filename = Path(file.filename or "untitled").name
     chunk_size = 1024 * 1024
@@ -77,20 +78,21 @@ async def upload_file(file: UploadFile = File(...)) -> FileMeta:
     if total_size == 0:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Uploaded file is empty")
 
-    return runtime_store.add_file(name=filename, size=total_size, mime_type=mime_type, content=b"".join(chunks))
+    _, tenant_slug = tenant_ctx
+    return runtime_store.add_file(tenant_slug=tenant_slug, name=filename, size=total_size, mime_type=mime_type, content=b"".join(chunks))
 
 
-@router.get("/admin/users", response_model=list[UserResponse], dependencies=[Depends(require_admin)])
+@router.get("/admin/users", response_model=list[UserResponse], dependencies=[Depends(require_tenant_admin)])
 def get_users() -> list[UserResponse]:
     return runtime_store.list_users()
 
 
-@router.post("/admin/users", response_model=UserResponse, status_code=status.HTTP_201_CREATED, dependencies=[Depends(require_admin)])
+@router.post("/admin/users", response_model=UserResponse, status_code=status.HTTP_201_CREATED, dependencies=[Depends(require_tenant_admin)])
 def create_user(payload: UserPayload) -> UserResponse:
     return runtime_store.create_user(payload)
 
 
-@router.patch("/admin/users/{user_id}", response_model=UserResponse, dependencies=[Depends(require_admin)])
+@router.patch("/admin/users/{user_id}", response_model=UserResponse, dependencies=[Depends(require_tenant_admin)])
 def patch_user(user_id: str, payload: UserUpdatePayload) -> UserResponse:
     user = runtime_store.update_user(user_id, payload)
     if user is None:
@@ -98,35 +100,36 @@ def patch_user(user_id: str, payload: UserUpdatePayload) -> UserResponse:
     return user
 
 
-@router.delete("/admin/users/{user_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(require_admin)])
+@router.delete("/admin/users/{user_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(require_tenant_admin)])
 def remove_user(user_id: str) -> None:
     if not runtime_store.delete_user(user_id):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
 
-@router.get("/admin/api-keys", response_model=list[ApiKey], dependencies=[Depends(require_admin)])
+@router.get("/admin/api-keys", response_model=list[ApiKey], dependencies=[Depends(require_tenant_admin)])
 def get_api_keys() -> list[ApiKey]:
     return runtime_store.list_api_keys()
 
 
-@router.post("/admin/api-keys/{key_id}/rotate", dependencies=[Depends(require_admin)])
+@router.post("/admin/api-keys/{key_id}/rotate", dependencies=[Depends(require_tenant_admin)])
 def rotate_api_key(key_id: str) -> dict[str, str]:
     return {"secret": f"{key_id}_{uuid4().hex}"}
 
 
-@router.get("/admin/settings", response_model=SystemSettings, dependencies=[Depends(require_admin)])
+@router.get("/admin/settings", response_model=SystemSettings, dependencies=[Depends(require_platform_admin)])
 def get_settings() -> SystemSettings:
     return runtime_store.settings
 
 
-@router.put("/admin/settings", response_model=SystemSettings, dependencies=[Depends(require_admin)])
+@router.put("/admin/settings", response_model=SystemSettings, dependencies=[Depends(require_platform_admin)])
 def put_settings(payload: SystemSettings) -> SystemSettings:
     runtime_store.settings = payload
     return runtime_store.settings
 
 
 @router.get("/auth/session", response_model=SessionResponse)
-def get_session() -> SessionResponse:
+def get_session(identity=Depends(get_tenant_context)) -> SessionResponse:
+    _tenant_id, _tenant_slug = identity
     return runtime_store.get_session()
 
 
