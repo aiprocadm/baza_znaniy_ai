@@ -51,3 +51,26 @@
 2. Добавить WebSocket/SSE для стриминга токенов ответа в `ChatPanel`.
 3. Включить гибридный retriever (dense + keyword) и quality-metrics на offline eval.
 4. Ввести feature flags для безопасного rollout экспериментальных LLM/LoRA.
+
+## ER-диаграмма (целевая модель данных)
+
+```mermaid
+erDiagram
+  tenants ||--o{ users : has
+  tenants ||--o{ documents : owns
+  users ||--o{ documents : owner
+  documents ||--o{ document_versions : versions
+  document_versions ||--o{ chunks : split_into
+  tenants ||--o{ chunks : contains
+  tenants ||--o{ subscriptions : billed_by
+  subscriptions ||--o{ billing_events : emits
+  tenants ||--o{ billing_events : charged
+```
+
+## Mapping endpoint ↔ table
+
+- `POST /api/v1/documents/generate` → `tenants` (проверка активного tenant), асинхронная генерация версий в `document_versions`.
+- `POST /api/v1/packs/run` → `documents` (проверка существования исходных документов), постановка batch-задачи.
+- Контур ingestion/retrieval работает с `documents`, `document_versions`, `chunks`.
+- Админский контур пользователей опирается на `users` и `tenants`.
+- Подписки и биллинг хранятся в `subscriptions` и `billing_events`.

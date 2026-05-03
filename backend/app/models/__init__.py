@@ -1,14 +1,19 @@
-from backend.app.models.document import Document, DocumentVersion
-from backend.app.models.pack import Pack, PackItem
-from backend.app.models.template import Template
-from backend.app.models.ingestion import IngestionEvent, IngestionJob
+from backend.app.models.document import (
+    BillingEvent,
+    Chunk,
+    Document,
+    DocumentVersion,
+    Subscription,
+    Tenant,
+    User,
+)
 
 __all__ = [
+    "Tenant",
+    "User",
     "Document",
     "DocumentVersion",
-    "Pack",
-    "PackItem",
-    "Template",
-    "IngestionJob",
-    "IngestionEvent",
+    "Chunk",
+    "Subscription",
+    "BillingEvent",
 ]
