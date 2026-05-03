@@ -3,7 +3,7 @@ from __future__ import annotations
 from fastapi import FastAPI
 
 from backend.app.api.error_handlers import install_error_handlers
-from backend.app.api.middleware import JSONBodyLimitMiddleware, TraceIdMiddleware
+from backend.app.api.middleware import JSONBodyLimitMiddleware, TraceIdMiddleware, UsageAndQuotaMiddleware
 from backend.app.api.v1.router import api_router
 from backend.app.core.config import get_settings
 
@@ -16,6 +16,7 @@ def create_api_app() -> FastAPI:
 
     app.add_middleware(TraceIdMiddleware)
     app.add_middleware(JSONBodyLimitMiddleware, max_body_size=settings.json_max_bytes)
+    app.add_middleware(UsageAndQuotaMiddleware)
 
     install_error_handlers(app)
 
