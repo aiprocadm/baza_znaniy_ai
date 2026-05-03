@@ -61,10 +61,12 @@ async def upload_file(file: UploadFile = File(...)) -> FileMeta:
             detail=f"Unsupported media type: {mime_type}",
         )
 
+    chunks: list[bytes] = []
     while True:
         chunk = await file.read(chunk_size)
         if not chunk:
             break
+        chunks.append(chunk)
         total_size += len(chunk)
         if total_size > MAX_UPLOAD_SIZE_BYTES:
             raise HTTPException(
@@ -75,7 +77,7 @@ async def upload_file(file: UploadFile = File(...)) -> FileMeta:
     if total_size == 0:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Uploaded file is empty")
 
-    return runtime_store.add_file(name=filename, size=total_size, mime_type=mime_type)
+    return runtime_store.add_file(name=filename, size=total_size, mime_type=mime_type, content=b"".join(chunks))
 
 
 @router.get("/admin/users", response_model=list[UserResponse], dependencies=[Depends(require_admin)])
