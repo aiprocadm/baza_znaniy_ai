@@ -164,6 +164,10 @@ def handle_chat(
             Citation(
                 file=item.get("file"),
                 page=item.get("page"),
+                article=item.get("article"),
+                clause=item.get("clause"),
+                revision=item.get("revision"),
+                revision_date=item.get("revision_date"),
                 score=float(item.get("score", 0.0)),
             )
             for item in citations_raw

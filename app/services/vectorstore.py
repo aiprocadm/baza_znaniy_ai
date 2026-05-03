@@ -123,6 +123,11 @@ def _search_fallback(
     *,
     owner: str | None = None,
     tags: list[str] | None = None,
+    act_type: str | None = None,
+    issuer: str | None = None,
+    reg_number: str | None = None,
+    is_active: bool | None = None,
+    revision_mode: str = "current",
 ) -> List[dict[str, object]]:
     """Very small substring-based search over the fallback index."""
 
@@ -151,12 +156,29 @@ def _search_fallback(
             if not normalized_tags.issubset(chunk_tag_set):
                 continue
 
+        meta = chunk.get("meta") if isinstance(chunk.get("meta"), dict) else {}
+        if act_type and str(meta.get("act_type", "")).strip().lower() != act_type.strip().lower():
+            continue
+        if issuer and issuer.strip().lower() not in str(meta.get("issuer", "")).strip().lower():
+            continue
+        if reg_number and reg_number.strip().lower() != str(meta.get("reg_number", "")).strip().lower():
+            continue
+        if is_active is not None and bool(meta.get("is_active", True)) is not is_active:
+            continue
+        if revision_mode == "current" and meta.get("is_active") is False:
+            continue
+        if revision_mode == "historical" and meta.get("is_active") is True:
+            continue
+
         text = str(chunk.get("text", ""))
         haystack = text.lower()
         if not haystack:
             continue
         if needle in haystack:
             score = haystack.count(needle) / (len(text) or 1)
+            if bool(meta.get("is_active", True)):
+                score += 0.2
+            score += min(0.2, float(bool(reg_number and meta.get("reg_number"))))
             hits.append((score, chunk))
     hits.sort(key=lambda item: item[0], reverse=True)
     return [chunk for _score, chunk in hits[:top_k]]
@@ -168,6 +190,11 @@ def search(
     *,
     owner: str | None = None,
     tags: list[str] | None = None,
+    act_type: str | None = None,
+    issuer: str | None = None,
+    reg_number: str | None = None,
+    is_active: bool | None = None,
+    revision_mode: str = "current",
 ) -> List[dict[str, object]]:
     """Run a similarity search returning at most *top_k* hits."""
 
@@ -182,7 +209,7 @@ def search(
         record_search_operation("vector", "error", duration, 0)
         LOGGER.exception("Falling back to in-memory search", exc_info=exc)
         fallback_start = time.perf_counter()
-        fallback_hits = _search_fallback(query, top_k, owner=owner, tags=tags)
+        fallback_hits = _search_fallback(query, top_k, owner=owner, tags=tags, act_type=act_type, issuer=issuer, reg_number=reg_number, is_active=is_active, revision_mode=revision_mode)
         record_search_operation(
             "fallback",
             "success",

@@ -7,6 +7,7 @@ import hashlib
 import math
 import logging
 import os
+import re
 from asyncio import QueueEmpty, QueueFull
 from dataclasses import dataclass
 from datetime import timedelta
@@ -70,6 +71,39 @@ def _load_scheduler_artifacts():
     return scheduler_cls, cron_cls, interval_cls
 
 
+
+
+def _extract_npa_fields(content: str, metadata: dict[str, Any] | None = None) -> dict[str, Any]:
+    metadata = metadata or {}
+    text = content or ""
+
+    def _pick(patterns: list[str], fallback_key: str | None = None) -> str | None:
+        if fallback_key and metadata.get(fallback_key):
+            return str(metadata[fallback_key]).strip()
+        for pattern in patterns:
+            m = re.search(pattern, text, flags=re.IGNORECASE | re.MULTILINE)
+            if m:
+                return m.group(1).strip()
+        return None
+
+    act_type = _pick([r"(?:тип\s*акта|вид\s*нпа)\s*[:\-]\s*([^\n]+)", r"\b(федеральный закон|постановление|приказ|указ)\b"], "act_type")
+    issuer = _pick([r"(?:орган\s*принятия|издатель|issuer)\s*[:\-]\s*([^\n]+)"], "issuer")
+    reg_number = _pick([r"(?:№|номер|reg(?:istration)?\s*number)\s*[:\-]?\s*([A-Za-zА-Яа-я0-9\-\/]+)"], "reg_number")
+    adoption_date = _pick([r"(?:дата\s*принятия|adoption\s*date)\s*[:\-]\s*([0-9]{2}\.[0-9]{2}\.[0-9]{4})"], "adoption_date")
+    effective_date = _pick([r"(?:дата\s*вступления\s*в\s*силу|effective\s*date)\s*[:\-]\s*([0-9]{2}\.[0-9]{2}\.[0-9]{4})"], "effective_date")
+    revision = _pick([r"(?:редакция|revision)\s*[:\-]\s*([^\n]+)"], "revision")
+    is_active_raw = metadata.get("is_active")
+    is_active = True if is_active_raw is None else str(is_active_raw).strip().lower() in {"1","true","yes","да"}
+
+    return {
+        "act_type": act_type,
+        "issuer": issuer,
+        "reg_number": reg_number,
+        "adoption_date": adoption_date,
+        "effective_date": effective_date,
+        "revision": revision,
+        "is_active": is_active,
+    }
 logger = logging.getLogger(__name__)
 
 
@@ -994,7 +1028,29 @@ class IngestWorker:
             pages = list(iter_document_pages(job.path, handle))
 
         chunk_payloads: list[dict[str, object]] = []
+        full_text = "\n".join(text for _page, text in pages)
         with Session(self.service.engine) as session:
+            document = session.get(DocumentRecord, job.document_id) if job.document_id is not None else None
+            attrs: dict[str, Any] = {}
+            if document is not None:
+                attrs = _extract_npa_fields(full_text, metadata=document.meta or {})
+                document.content = full_text
+                document.act_type = attrs.get("act_type")
+                document.issuer = attrs.get("issuer")
+                document.reg_number = attrs.get("reg_number")
+                document.revision = attrs.get("revision")
+                document.is_active = bool(attrs.get("is_active", True))
+                for field_name in ("adoption_date", "effective_date"):
+                    raw = attrs.get(field_name)
+                    parsed = None
+                    if isinstance(raw, str) and raw:
+                        try:
+                            parsed = datetime.strptime(raw, "%d.%m.%Y")
+                        except ValueError:
+                            parsed = None
+                    setattr(document, field_name, parsed)
+                session.add(document)
+                session.commit()
             batch_index = 0
             chunk_counter = 0
             for page_number, text in pages:
@@ -1048,6 +1104,7 @@ class IngestWorker:
                             "document_sha": job.sha256,
                             "page": page.number,
                             "chunk": offset,
+                            **attrs,
                         },
                     )
                     session.add(chunk)
