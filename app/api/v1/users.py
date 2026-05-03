@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlmodel import Session, select
 
 from app.core.auth import require_admin_user
+from app.core.audit import log_security_event
 from app.core.datetime_utils import utc_now
 from app.core.deps import get_ingest_session
 from app.models.tenant import TenantRecord
@@ -64,6 +65,8 @@ def create_user(
     session.add(record)
     session.commit()
     session.refresh(record)
+    if str(record.role) != UserRole.MEMBER.value:
+        log_security_event("role_change", user_id=record.id, new_role=str(record.role))
 
     return UserResponse(
         id=record.id or 0,
@@ -76,4 +79,3 @@ def create_user(
         updated_at=record.updated_at,
         last_login_at=record.last_login_at,
     )
-

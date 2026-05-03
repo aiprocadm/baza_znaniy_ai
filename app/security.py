@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+import os
 from typing import Any, Dict, Tuple
 
 from jose import JWTError, jwt
@@ -80,6 +81,10 @@ def create_access_token(
     expire_delta = expires_delta or timedelta(minutes=default_expiry_minutes)
     expire = datetime.now(timezone.utc) + expire_delta
     to_encode["exp"] = _coerce_exp_to_numeric(expire)
+    issuer = os.getenv("JWT_ISSUER", "baza-znaniy-ai")
+    audience = os.getenv("JWT_AUDIENCE", "baza-znaniy-clients")
+    to_encode.setdefault("iss", issuer)
+    to_encode.setdefault("aud", audience)
     return jwt.encode(to_encode, secret, algorithm=algorithm)
 
 
@@ -95,4 +100,3 @@ def decode_token(token: str) -> Dict[str, Any]:
         return payload
     except JWTError as exc:
         raise InvalidTokenError("Could not validate credentials") from exc
-

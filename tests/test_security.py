@@ -104,7 +104,7 @@ def test_create_access_token_allows_none_payload(security):
 
     payload = security.decode_token(token)
 
-    assert set(payload.keys()) == {"exp"}
+    assert set(payload.keys()) == {"exp", "iss", "aud"}
     assert isinstance(payload["exp"], (int, float))
     assert payload["exp"] > datetime.now(timezone.utc).timestamp()
 
@@ -124,4 +124,3 @@ def test_decode_token_normalizes_datetime_exp(security):
     assert isinstance(payload["exp"], (int, float))
     decoded_exp = datetime.fromtimestamp(payload["exp"], tz=timezone.utc)
     assert abs((decoded_exp - expire_at).total_seconds()) <= 1
-
