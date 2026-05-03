@@ -28,9 +28,9 @@ class SearchService:
             }
         ])
 
-    def search(self, payload: SearchRequest) -> SearchResponse:
+    def search(self, payload: SearchRequest, *, tenant_slug: str) -> SearchResponse:
         self._store.ensure_ready()
-        hits: list[dict[str, Any]] = self._store.search(payload.query, max(payload.top_k, get_rerank_top_k()), owner=payload.owner, tags=payload.tags)
+        hits: list[dict[str, Any]] = self._store.search(payload.query, max(payload.top_k, get_rerank_top_k()), owner=tenant_slug, tags=payload.tags)
         rerank_enabled = is_rerank_enabled(default=False)
         reranker = get_reranker() if rerank_enabled else None
         ordered = apply_rerank(payload.query, hits, payload.top_k, rerank_enabled, reranker)
