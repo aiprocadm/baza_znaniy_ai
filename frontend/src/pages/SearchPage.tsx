@@ -2,11 +2,10 @@ import { useEffect, useMemo, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { searchDocuments, type SearchResult } from '../api';
+import { searchDocuments, type SearchHitDto } from '../api';
 import { DataTable, type Column } from '../components/data/DataTable';
 import { useNotifications } from '../context/NotificationContext';
 import { useDebounce } from '../hooks/useDebounce';
-import { formatDateTime } from '../utils/format';
 
 /**
  * SearchPage provides advanced filtering and ranking preview.
@@ -31,7 +30,7 @@ export const SearchPage = () => {
     defaultValues: { query: '', top_k: 10 }
   });
   const { push } = useNotifications();
-  const [results, setResults] = useState<SearchResult[]>([]);
+  const [results, setResults] = useState<SearchHitDto[]>([]);
   const [loading, setLoading] = useState(false);
 
   const query = watch('query');
@@ -41,23 +40,23 @@ export const SearchPage = () => {
 
   const debouncedQuery = useDebounce(query, 400);
 
-  const columns: Column<SearchResult>[] = useMemo(
+  const columns: Column<SearchHitDto>[] = useMemo(
     () => [
-      { key: 'title', header: 'Title' },
+      { key: 'file', header: 'File' },
       {
-        key: 'snippet',
-        header: 'Snippet',
-        render: (row) => <span className="text-xs text-slate-500">{row.snippet}</span>
+        key: 'page',
+        header: 'Page',
+        render: (row) => row.page ?? '-'
+      },
+      {
+        key: 'text',
+        header: 'Text',
+        render: (row) => <span className="text-xs text-slate-500">{row.text}</span>
       },
       {
         key: 'score',
         header: 'Score',
         render: (row) => row.score.toFixed(2)
-      },
-      {
-        key: 'updated_at',
-        header: 'Updated',
-        render: (row) => formatDateTime(row.updated_at)
       }
     ],
     []
@@ -75,7 +74,7 @@ export const SearchPage = () => {
       owner: owner || undefined,
       tags: tags ? tags.split(',').map((tag) => tag.trim()) : undefined
     })
-      .then((response) => setResults(response.data.results))
+      .then((response) => setResults(response.data.hits))
       .catch((error) => push({ title: 'Search failed', description: error.message, type: 'error' }))
       .finally(() => setLoading(false));
   }, [debouncedQuery, topK, owner, tags, push]);
@@ -89,7 +88,7 @@ export const SearchPage = () => {
         owner: values.owner || undefined,
         tags: values.tags ? values.tags.split(',').map((tag) => tag.trim()) : undefined
       });
-      setResults(response.data.results);
+      setResults(response.data.hits);
     } catch (error) {
       push({ title: 'Search failed', description: (error as Error).message, type: 'error' });
     } finally {

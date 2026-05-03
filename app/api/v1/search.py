@@ -17,11 +17,21 @@ def search_endpoint(
     _: UserRecord = Depends(get_current_active_user),
     query: str = Query(..., min_length=1),
     top_k: int = Query(5, ge=1, le=50),
+    owner: str | None = Query(None, min_length=1),
+    tags: list[str] | None = Query(default=None),
     tenant: str = Depends(ensure_tenant_access),
 ) -> SearchResponse:
     """Perform a similarity search without invoking the LLM."""
 
-    hits = search(query, top_k=top_k)
+    _ = tenant  # used via dependency to enforce tenant access
+    normalized_tags = [tag.strip() for tag in (tags or []) if tag and tag.strip()]
+    normalized_owner = owner.strip() if owner else None
+    hits = search(
+        query,
+        top_k=top_k,
+        owner=normalized_owner or None,
+        tags=normalized_tags or None,
+    )
     models = [
         SearchHit(
             file=item.get("file"),

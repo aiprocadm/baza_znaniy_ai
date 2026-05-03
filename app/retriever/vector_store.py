@@ -17,7 +17,14 @@ class VectorStore(Protocol):
     def upsert(self, chunks: Iterable[dict[str, object]]) -> None:  # pragma: no cover - protocol definition
         """Persist or update a batch of document chunks."""
 
-    def search(self, query: str, top_k: int) -> list[dict[str, object]]:  # pragma: no cover - protocol definition
+    def search(
+        self,
+        query: str,
+        top_k: int,
+        *,
+        owner: str | None = None,
+        tags: list[str] | None = None,
+    ) -> list[dict[str, object]]:  # pragma: no cover - protocol definition
         """Return the top matching chunks for the supplied query."""
 
 

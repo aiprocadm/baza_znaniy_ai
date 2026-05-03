@@ -149,6 +149,8 @@ class QdrantVectorStore:
                 ("file", qmodels.PayloadSchemaType.KEYWORD),
                 ("page", qmodels.PayloadSchemaType.INTEGER),
                 ("sha256", qmodels.PayloadSchemaType.KEYWORD),
+                ("owner", qmodels.PayloadSchemaType.KEYWORD),
+                ("tags", qmodels.PayloadSchemaType.KEYWORD),
             ):
                 client.create_payload_index(
                     collection_name=collection,
@@ -188,6 +190,8 @@ class QdrantVectorStore:
                     "file": chunk.get("file"),
                     "page": int(chunk.get("page") or 0),
                     "sha256": chunk.get("sha256"),
+                    "owner": chunk.get("owner"),
+                    "tags": chunk.get("tags") if isinstance(chunk.get("tags"), list) else [],
                     "text": chunk.get("text") or chunk.get("content"),
                 }
                 points.append(
@@ -211,7 +215,14 @@ class QdrantVectorStore:
 
         _flush()
 
-    def search(self, query: str, top_k: int) -> list[dict[str, object]]:
+    def search(
+        self,
+        query: str,
+        top_k: int,
+        *,
+        owner: str | None = None,
+        tags: list[str] | None = None,
+    ) -> list[dict[str, object]]:
         if top_k <= 0:
             return []
 
@@ -221,11 +232,30 @@ class QdrantVectorStore:
             return []
 
         client = self._client_instance()
+        conditions: list[qmodels.FieldCondition] = []
+        if owner and owner.strip():
+            conditions.append(
+                qmodels.FieldCondition(
+                    key="owner",
+                    match=qmodels.MatchValue(value=owner.strip()),
+                )
+            )
+        normalized_tags = [tag.strip() for tag in (tags or []) if tag and tag.strip()]
+        for tag in normalized_tags:
+            conditions.append(
+                qmodels.FieldCondition(
+                    key="tags",
+                    match=qmodels.MatchValue(value=tag),
+                )
+            )
+        query_filter = qmodels.Filter(must=conditions) if conditions else None
+
         results = client.search(
             collection_name=self.settings.qdrant_collection,
             query_vector=query_vector[0].tolist(),
             limit=top_k,
             with_payload=True,
+            query_filter=query_filter,
         )
 
         hits: list[dict[str, object]] = []

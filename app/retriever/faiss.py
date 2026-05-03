@@ -190,6 +190,8 @@ class FaissVectorStore:
                 "file": chunk.get("file"),
                 "page": chunk.get("page"),
                 "sha256": chunk.get("sha256"),
+                "owner": chunk.get("owner"),
+                "tags": chunk.get("tags") if isinstance(chunk.get("tags"), list) else [],
                 "text": chunk.get("text") or chunk.get("content"),
             }
             self._payloads[identifier] = payload
@@ -200,7 +202,14 @@ class FaissVectorStore:
         self._persist_payloads()
         self._rebuild_index()
 
-    def search(self, query: str, top_k: int) -> list[dict[str, object]]:
+    def search(
+        self,
+        query: str,
+        top_k: int,
+        *,
+        owner: str | None = None,
+        tags: list[str] | None = None,
+    ) -> list[dict[str, object]]:
         if top_k <= 0:
             return []
 
@@ -215,16 +224,34 @@ class FaissVectorStore:
         if not len(query_vector):
             return []
 
-        scores, indices = self._index.search(query_vector, top_k)
+        candidate_limit = max(top_k, top_k * 5)
+        scores, indices = self._index.search(query_vector, candidate_limit)
+        normalized_owner = (owner or "").strip().lower()
+        normalized_tags = {tag.strip().lower() for tag in (tags or []) if tag and tag.strip()}
         hits: list[dict[str, object]] = []
         for score, idx in zip(scores[0], indices[0]):
             if idx < 0 or idx >= len(self._ordered_ids):
                 continue
             identifier = self._ordered_ids[idx]
             payload = dict(self._payloads.get(identifier, {}))
+            if normalized_owner:
+                payload_owner = str(payload.get("owner", "")).strip().lower()
+                if payload_owner != normalized_owner:
+                    continue
+            if normalized_tags:
+                payload_tags = payload.get("tags")
+                if not isinstance(payload_tags, list):
+                    continue
+                payload_tag_set = {
+                    str(tag).strip().lower() for tag in payload_tags if str(tag).strip()
+                }
+                if not normalized_tags.issubset(payload_tag_set):
+                    continue
             payload.setdefault("id", identifier)
             payload["score"] = float(score)
             hits.append(payload)
+            if len(hits) >= top_k:
+                break
         return hits
 
 

@@ -4,9 +4,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
 
-from fastapi import APIRouter, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 
 from backend.app.api.constants import ALLOWED_UPLOAD_MIME_TYPES, MAX_UPLOAD_SIZE_BYTES
+from backend.app.api.deps import authenticate_credentials, require_admin
 from backend.app.schemas.knowledge_base import (
     ActivityItem,
     ApiKey,
@@ -49,37 +50,47 @@ def list_files() -> list[FileMeta]:
 
 @router.post("/upload", response_model=FileMeta)
 async def upload_file(file: UploadFile = File(...)) -> FileMeta:
-    content = await file.read()
     mime_type = file.content_type or "application/octet-stream"
     filename = Path(file.filename or "untitled").name
+    chunk_size = 1024 * 1024
+    total_size = 0
 
-    if not content:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Uploaded file is empty")
-    if len(content) > MAX_UPLOAD_SIZE_BYTES:
-        raise HTTPException(
-            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-            detail=f"File is too large. Max size is {MAX_UPLOAD_SIZE_BYTES} bytes",
-        )
     if mime_type not in ALLOWED_UPLOAD_MIME_TYPES:
         raise HTTPException(
             status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
             detail=f"Unsupported media type: {mime_type}",
         )
 
-    return runtime_store.add_file(name=filename, size=len(content), mime_type=mime_type)
+    chunks: list[bytes] = []
+    while True:
+        chunk = await file.read(chunk_size)
+        if not chunk:
+            break
+        chunks.append(chunk)
+        total_size += len(chunk)
+        if total_size > MAX_UPLOAD_SIZE_BYTES:
+            raise HTTPException(
+                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                detail=f"File is too large. Max size is {MAX_UPLOAD_SIZE_BYTES} bytes",
+            )
+
+    if total_size == 0:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Uploaded file is empty")
+
+    return runtime_store.add_file(name=filename, size=total_size, mime_type=mime_type, content=b"".join(chunks))
 
 
-@router.get("/admin/users", response_model=list[UserResponse])
+@router.get("/admin/users", response_model=list[UserResponse], dependencies=[Depends(require_admin)])
 def get_users() -> list[UserResponse]:
     return runtime_store.list_users()
 
 
-@router.post("/admin/users", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/admin/users", response_model=UserResponse, status_code=status.HTTP_201_CREATED, dependencies=[Depends(require_admin)])
 def create_user(payload: UserPayload) -> UserResponse:
     return runtime_store.create_user(payload)
 
 
-@router.patch("/admin/users/{user_id}", response_model=UserResponse)
+@router.patch("/admin/users/{user_id}", response_model=UserResponse, dependencies=[Depends(require_admin)])
 def patch_user(user_id: str, payload: UserUpdatePayload) -> UserResponse:
     user = runtime_store.update_user(user_id, payload)
     if user is None:
@@ -87,28 +98,28 @@ def patch_user(user_id: str, payload: UserUpdatePayload) -> UserResponse:
     return user
 
 
-@router.delete("/admin/users/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/admin/users/{user_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(require_admin)])
 def remove_user(user_id: str) -> None:
     if not runtime_store.delete_user(user_id):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
 
-@router.get("/admin/api-keys", response_model=list[ApiKey])
+@router.get("/admin/api-keys", response_model=list[ApiKey], dependencies=[Depends(require_admin)])
 def get_api_keys() -> list[ApiKey]:
     return runtime_store.list_api_keys()
 
 
-@router.post("/admin/api-keys/{key_id}/rotate")
+@router.post("/admin/api-keys/{key_id}/rotate", dependencies=[Depends(require_admin)])
 def rotate_api_key(key_id: str) -> dict[str, str]:
     return {"secret": f"{key_id}_{uuid4().hex}"}
 
 
-@router.get("/admin/settings", response_model=SystemSettings)
+@router.get("/admin/settings", response_model=SystemSettings, dependencies=[Depends(require_admin)])
 def get_settings() -> SystemSettings:
     return runtime_store.settings
 
 
-@router.put("/admin/settings", response_model=SystemSettings)
+@router.put("/admin/settings", response_model=SystemSettings, dependencies=[Depends(require_admin)])
 def put_settings(payload: SystemSettings) -> SystemSettings:
     runtime_store.settings = payload
     return runtime_store.settings
@@ -121,8 +132,12 @@ def get_session() -> SessionResponse:
 
 @router.post("/auth/login", response_model=SessionResponse)
 def login(payload: LoginPayload) -> SessionResponse:
+    identity = authenticate_credentials(payload.email, payload.password)
+    if identity is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
+
     session = runtime_store.get_session()
-    if payload.email.strip().lower() != session.email.lower():
+    if session.user_id != identity.user_id:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
     return session
 
