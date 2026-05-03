@@ -12,6 +12,11 @@ def test_search_endpoint_passes_owner_and_tags_filters(monkeypatch) -> None:
         *,
         owner: str | None = None,
         tags: list[str] | None = None,
+        act_type: str | None = None,
+        issuer: str | None = None,
+        reg_number: str | None = None,
+        is_active: bool | None = None,
+        revision_mode: str = "current",
     ) -> list[dict[str, object]]:
         captured["query"] = query
         captured["top_k"] = top_k
@@ -46,6 +51,11 @@ def test_search_endpoint_normalizes_empty_filters(monkeypatch) -> None:
         *,
         owner: str | None = None,
         tags: list[str] | None = None,
+        act_type: str | None = None,
+        issuer: str | None = None,
+        reg_number: str | None = None,
+        is_active: bool | None = None,
+        revision_mode: str = "current",
     ) -> list[dict[str, object]]:
         captured["owner"] = owner
         captured["tags"] = tags

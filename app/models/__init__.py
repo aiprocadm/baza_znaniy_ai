@@ -101,6 +101,10 @@ class Citation(BaseModel):
 
     file: Optional[str] = None
     page: Optional[int] = None
+    article: Optional[str] = None
+    clause: Optional[str] = None
+    revision: Optional[str] = None
+    revision_date: Optional[datetime] = None
     score: float
 
 

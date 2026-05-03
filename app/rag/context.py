@@ -80,7 +80,13 @@ def select_citations(
         if key in seen:
             continue
         seen.add(key)
-        unique.append(hit)
+        enriched = dict(hit)
+        meta = enriched.get("meta") if isinstance(enriched.get("meta"), dict) else {}
+        enriched.setdefault("article", meta.get("article"))
+        enriched.setdefault("clause", meta.get("clause"))
+        enriched.setdefault("revision", meta.get("revision"))
+        enriched.setdefault("revision_date", meta.get("effective_date") or meta.get("adoption_date"))
+        unique.append(enriched)
         if len(unique) >= maximum:
             break
 
