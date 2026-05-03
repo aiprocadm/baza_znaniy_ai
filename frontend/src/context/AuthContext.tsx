@@ -1,11 +1,28 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import { apiClient } from '../api/client';
+import {
+  clearStoredSession,
+  getStoredSession,
+  getStoredTokens,
+  registerUnauthorizedHandler,
+  setStoredSession
+} from './authStorage';
 import { fetchAuthSession, type AuthSession, type Role, type TokenResponse } from '../api';
 
 /**
  * AuthContext encapsulates token management and role-based access control.
  */
+export type Role = 'user' | 'admin';
+
+export type Session = {
+  user_id: string;
+  email: string;
+  name: string;
+  roles: Role[];
+  token_expires_at: string;
+  access_token?: string;
+  refresh_token?: string;
 export type { Role };
 
 type StoredTokens = TokenResponse & {
@@ -112,6 +129,16 @@ const resolveUserSession = async (accessToken: string): Promise<AuthSession | nu
 };
 
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
+  const [session, setSession] = useState<Session | null>(() => getStoredSession<Session>());
+
+  useEffect(() => {
+    if (!session) {
+      clearStoredSession();
+      return;
+    }
+
+    setStoredSession(session);
+  }, [session]);
   const [authState, setAuthState] = useState<StoredAuthState | null>(getStoredAuthState);
 
   useEffect(() => {
@@ -132,6 +159,12 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(authState));
   }, [authState]);
 
+  useEffect(() => {
+    return registerUnauthorizedHandler(() => {
+      setSession(null);
+    });
+  }, []);
+
   const login = useCallback(async (email: string, password: string) => {
     const response = await apiClient.post<TokenResponse>('/auth/login', { email, password });
     const tokens = buildTokens(response.data);
@@ -140,6 +173,16 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   }, []);
 
   const logout = useCallback(() => {
+    const { refreshToken } = getStoredTokens();
+
+    clearStoredSession();
+    setSession(null);
+
+    if (!refreshToken) {
+      return;
+    }
+
+    void apiClient.post('/auth/logout', { refresh_token: refreshToken }).catch(() => undefined);
     setAuthState(null);
   }, []);
 
