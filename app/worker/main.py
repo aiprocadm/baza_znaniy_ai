@@ -10,6 +10,7 @@ from datetime import timezone
 
 from app.core.config import get_settings
 from app.ingest import IngestService, IngestWorker
+from app.observability.logging import bind_log_context, configure_structured_logging
 from app.observability.metadata_guard import schedule_sqlmodel_metadata_guard
 
 try:  # pragma: no cover - optional dependency resolution
@@ -25,6 +26,7 @@ _shutdown_event = asyncio.Event()
 def _handle_signal(signum: int) -> None:
     """Trigger a graceful shutdown when receiving *signum*."""
 
+    bind_log_context(task_id="worker-signal")
     logger.info("Received signal %s; shutting down ingest worker", signum)
     _shutdown_event.set()
 
@@ -118,7 +120,8 @@ async def _run_worker() -> None:
 async def amain() -> None:
     """Async entrypoint for the standalone worker process."""
 
-    logging.basicConfig(level=logging.INFO)
+    configure_structured_logging(level=logging.INFO)
+    bind_log_context(task_id="ingest-worker")
     _install_signal_handlers()
     try:
         await _run_worker()
