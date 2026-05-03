@@ -185,6 +185,10 @@ def decode_refresh_token(token: str, *, registry: TokenRegistry, allow_revoked: 
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="INVALID_REFRESH_TOKEN") from exc
     if payload.get("type") != "refresh":
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="INVALID_REFRESH_TOKEN")
+    issuer = os.getenv("JWT_ISSUER", "baza-znaniy-ai")
+    audience = os.getenv("JWT_AUDIENCE", "baza-znaniy-clients")
+    if payload.get("iss") != issuer or payload.get("aud") != audience:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="INVALID_REFRESH_TOKEN")
     token_id = payload.get("jti")
     if token_id and registry.is_revoked(token_id) and not allow_revoked:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="REFRESH_TOKEN_REVOKED")
@@ -217,6 +221,10 @@ def get_current_user(
     except InvalidTokenError as exc:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="INVALID_ACCESS_TOKEN") from exc
     if payload.get("type") != "access":
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="INVALID_ACCESS_TOKEN")
+    issuer = os.getenv("JWT_ISSUER", "baza-znaniy-ai")
+    audience = os.getenv("JWT_AUDIENCE", "baza-znaniy-clients")
+    if payload.get("iss") != issuer or payload.get("aud") != audience:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="INVALID_ACCESS_TOKEN")
     user_id = payload.get("sub")
     if user_id is None:
@@ -323,4 +331,3 @@ __all__ = [
     "require_admin_user",
     "_extract_bearer_token",
 ]
-

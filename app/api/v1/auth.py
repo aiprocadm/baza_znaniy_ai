@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+from collections import defaultdict
+from datetime import timedelta
+
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field, field_validator
 from sqlmodel import Session, select
 
+from app.core.audit import log_security_event
 from app.core.datetime_utils import utc_now
 from app.core.email import EmailValidationError, normalise_email
 from app.core.auth import (
@@ -21,6 +25,27 @@ from app.models.user import UserRecord
 from app.security import InvalidTokenError, decode_token, verify_password
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+_LOGIN_ATTEMPTS: dict[str, list] = defaultdict(list)
+_MAX_ATTEMPTS = 5
+_WINDOW = timedelta(minutes=5)
+
+
+def _client_key(request: Request, email: str) -> str:
+    host = request.client.host if request and request.client else "unknown"
+    return f"{host}:{email}"
+
+
+def _check_rate_limit(request: Request, email: str) -> None:
+    now = utc_now()
+    key = _client_key(request, email)
+    attempts = [ts for ts in _LOGIN_ATTEMPTS[key] if now - ts < _WINDOW]
+    _LOGIN_ATTEMPTS[key] = attempts
+    if len(attempts) >= _MAX_ATTEMPTS:
+        raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, detail="TOO_MANY_LOGIN_ATTEMPTS")
+
+
+def _record_failed_attempt(request: Request, email: str) -> None:
+    _LOGIN_ATTEMPTS[_client_key(request, email)].append(utc_now())
 
 
 class LoginRequest(BaseModel):
@@ -62,14 +87,17 @@ def _make_token_response(tokens: TokenPair) -> TokenResponse:
 @router.post("/login", response_model=TokenResponse)
 def login(
     payload: LoginRequest,
+    request: Request,
     session: Session = Depends(get_ingest_session),
     registry=Depends(get_token_registry),
 ) -> TokenResponse:
     """Authenticate the user and return JWT tokens."""
-
+    _check_rate_limit(request, payload.email)
     statement = select(UserRecord).where(UserRecord.email == payload.email)
     user = session.exec(statement).first()
     if user is None or not verify_password(payload.password, user.hashed_password):
+        _record_failed_attempt(request, payload.email)
+        log_security_event("login_fail", email=payload.email)
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="INVALID_CREDENTIALS")
     if not user.is_active:
         raise HTTPException(status.HTTP_403_FORBIDDEN, detail="USER_INACTIVE")
@@ -84,6 +112,7 @@ def login(
     session.commit()
     session.refresh(user)
 
+    log_security_event("login_success", user_id=user.id, tenant=user.tenant_slug)
     tokens = issue_tokens(user, registry=registry)
     return _make_token_response(tokens)
 
@@ -114,6 +143,7 @@ def refresh_token(
         raise HTTPException(status.HTTP_403_FORBIDDEN, detail="TENANT_DISABLED")
 
     registry.revoke(refresh_payload.get("jti"))
+    log_security_event("refresh_rotate", user_id=user.id, revoked_jti=refresh_payload.get("jti"))
     tokens = issue_tokens(user, registry=registry)
     return _make_token_response(tokens)
 
@@ -131,6 +161,7 @@ def logout(
     )
     registry.revoke(refresh_payload.get("jti"))
     registry.mark_inactive(refresh_payload.get("sub"))
+    log_security_event("logout", user_id=refresh_payload.get("sub"), revoked_jti=refresh_payload.get("jti"))
 
     token = _extract_bearer_token(request)
 
@@ -144,4 +175,3 @@ def logout(
             registry.mark_inactive(access_payload.get("sub"))
 
     return {"ok": True}
-

@@ -55,6 +55,16 @@ def auth_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Tes
         tenant = TenantRecord(slug="default", name="Default", is_active=True)
         session.add(tenant)
         session.commit()
+        member = UserRecord(
+            email="member@example.com",
+            full_name="Member",
+            tenant_slug="default",
+            role=UserRole.MEMBER,
+            is_active=True,
+            hashed_password=hash_password("member-secret"),
+        )
+        session.add(member)
+        session.commit()
 
         user = UserRecord(
             email="admin@example.com",
@@ -177,3 +187,39 @@ def test_login_refresh_and_logout_flow(auth_client: TestClient) -> None:
 
     tenants_unauth = auth_client.get("/api/v1/tenants")
     assert tenants_unauth.status_code == 401
+
+
+def test_login_bruteforce_rate_limit(auth_client: TestClient) -> None:
+    for _ in range(5):
+        response = auth_client.post(
+            "/api/v1/auth/login",
+            json={"email": "admin@example.com", "password": "wrong"},
+        )
+        assert response.status_code == 401
+    limited = auth_client.post(
+        "/api/v1/auth/login",
+        json={"email": "admin@example.com", "password": "wrong"},
+    )
+    assert limited.status_code == 429
+
+
+def test_revoked_access_token_rejected(auth_client: TestClient) -> None:
+    login = auth_client.post("/api/v1/auth/login", json={"email": "admin@example.com", "password": "secret"})
+    token = login.json()["access_token"]
+    refresh = login.json()["refresh_token"]
+    auth_client.post("/api/v1/auth/logout", json={"refresh_token": refresh}, headers={"Authorization": f"Bearer {token}"})
+    response = auth_client.get("/api/v1/tenants", headers={"Authorization": f"Bearer {token}", "X-Tenant": "default"})
+    assert response.status_code == 401
+
+
+def test_privilege_escalation_blocked_for_member(auth_client: TestClient) -> None:
+    login = auth_client.post(
+        "/api/v1/auth/login",
+        json={"email": "member@example.com", "password": "member-secret"},
+    )
+    member_access = login.json()["access_token"]
+    response = auth_client.get(
+        "/api/v1/tenants",
+        headers={"Authorization": f"Bearer {member_access}", "X-Tenant": "default"},
+    )
+    assert response.status_code == 403
