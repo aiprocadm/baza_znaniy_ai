@@ -6,7 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from backend.app.api.deps import get_db
-from backend.app.models import Pack, Template
+from backend.app.models import Document
 from backend.app.schemas.packs import PackRunAcceptedResponse, PackRunRequest
 from backend.app.tasks import generate_document_task
 
@@ -17,33 +17,16 @@ router = APIRouter(prefix="/packs", tags=["packs"])
 def run_pack(
     request: PackRunRequest, db: Session = Depends(get_db)
 ) -> PackRunAcceptedResponse:
-    pack = db.get(Pack, request.pack_id)
-    if pack is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pack not found")
-
-    items = list(pack.items)
-    if not items:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Pack has no items")
-
-    template_ids = {item.template_id for item in items}
-    existing_template_ids = set(
-        db.execute(select(Template.id).where(Template.id.in_(template_ids))).scalars().all()
-    )
-    missing_templates = sorted(template_ids - existing_template_ids)
-    if missing_templates:
-        missing = ", ".join(missing_templates)
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Templates not found: {missing}",
-        )
+    documents = db.execute(select(Document).order_by(Document.id.asc()).limit(1)).scalars().all()
+    if not documents:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No source documents found")
 
     signatures = [
         generate_document_task.s(
-            template_id=item.template_id,
-            context=item.context or {},
-            document_name=item.document_name,
+            template_id=request.pack_id,
+            context={},
+            document_name=f"pack-{request.pack_id}",
         )
-        for item in items
     ]
 
     task_group = group(signatures, app=generate_document_task.app)
