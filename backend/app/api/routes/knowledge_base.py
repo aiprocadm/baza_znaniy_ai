@@ -5,9 +5,11 @@ from pathlib import Path
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 from backend.app.api.constants import ALLOWED_UPLOAD_MIME_TYPES, MAX_UPLOAD_SIZE_BYTES
-from backend.app.api.deps import authenticate_credentials, get_tenant_context, require_platform_admin, require_tenant_admin
+from backend.app.api.deps import authenticate_credentials, get_db, get_tenant_context, require_platform_admin, require_tenant_admin
 from backend.app.schemas.knowledge_base import (
     ActivityItem,
     ApiKey,
@@ -23,6 +25,7 @@ from backend.app.schemas.knowledge_base import (
     UserResponse,
     UserUpdatePayload,
 )
+from backend.app.models import BillingEvent, Plan, Subscription, UsageCounter
 from backend.app.services.kb_runtime import runtime_store
 
 router = APIRouter(tags=["knowledge-base"])
@@ -148,6 +151,45 @@ def login(payload: LoginPayload) -> SessionResponse:
 @router.post("/auth/refresh", response_model=RefreshResponse)
 def refresh_token() -> RefreshResponse:
     return RefreshResponse(token=f"kb_refresh_{int(datetime.now(timezone.utc).timestamp())}")
+
+
+@router.get("/admin/usage", dependencies=[Depends(require_tenant_admin)])
+def get_usage(db: Session = Depends(get_db)) -> list[dict]:
+    rows = db.execute(select(UsageCounter).order_by(UsageCounter.updated_at.desc()).limit(200)).scalars().all()
+    return [
+        {
+            "tenant_id": r.tenant_id,
+            "period_start": r.period_start.isoformat(),
+            "period_end": r.period_end.isoformat(),
+            "storage_bytes": r.storage_bytes,
+            "documents_count": r.documents_count,
+            "search_requests": r.search_requests,
+            "llm_requests": r.llm_requests,
+        }
+        for r in rows
+    ]
+
+
+@router.get("/admin/plan", dependencies=[Depends(require_tenant_admin)])
+def get_current_plan(db: Session = Depends(get_db)) -> dict:
+    subscription = db.execute(select(Subscription).where(Subscription.status == "active").order_by(Subscription.id.desc()).limit(1)).scalars().first()
+    if subscription is None:
+        return {"subscription": None}
+    plan = db.execute(select(Plan).where(Plan.code == subscription.plan_code)).scalars().first()
+    usage_events = db.execute(select(BillingEvent).where(BillingEvent.tenant_id == subscription.tenant_id).order_by(BillingEvent.created_at.desc()).limit(10)).scalars().all()
+    return {
+        "subscription": {"tenant_id": subscription.tenant_id, "plan_code": subscription.plan_code, "status": subscription.status},
+        "plan": None if plan is None else {
+            "name": plan.name,
+            "max_storage_bytes": plan.max_storage_bytes,
+            "max_documents": plan.max_documents,
+            "max_search_requests": plan.max_search_requests,
+            "max_llm_requests": plan.max_llm_requests,
+        },
+        "recent_events": [
+            {"type": e.event_type, "payload": e.payload, "created_at": e.created_at.isoformat()} for e in usage_events
+        ],
+    }
 
 
 __all__ = ["router"]
