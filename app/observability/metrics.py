@@ -91,6 +91,35 @@ CHAT_CITATIONS_TOTAL = Counter(
     labelnames=("status",),
 )
 
+API_REQUESTS_TOTAL = Counter(
+    "kb_api_requests_total",
+    "Total API request count.",
+    labelnames=("method", "route", "status"),
+)
+API_REQUEST_DURATION_SECONDS = Histogram(
+    "kb_api_request_duration_seconds",
+    "API request latency in seconds.",
+    labelnames=("method", "route", "status"),
+)
+API_REQUESTS_IN_FLIGHT = Gauge(
+    "kb_api_requests_in_flight",
+    "Current number of API requests in progress.",
+)
+INGEST_QUEUE_LAG = Gauge(
+    "kb_ingest_queue_lag",
+    "Current ingestion queue lag in items.",
+)
+INGEST_THROUGHPUT_DOCS_TOTAL = Counter(
+    "kb_ingestion_throughput_docs_total",
+    "Number of documents successfully ingested.",
+    labelnames=("status",),
+)
+LLM_TOKEN_USAGE_TOTAL = Counter(
+    "kb_llm_token_usage_total",
+    "LLM token usage split by direction.",
+    labelnames=("direction", "provider"),
+)
+
 SQLMODEL_METADATA_HEALTH = Gauge(
     "kb_sqlmodel_metadata_health",
     "Health status of SQLModel metadata (1=healthy, 0=invalid).",
@@ -185,6 +214,27 @@ def record_chat_completion(
         CHAT_CONTEXT_HITS_TOTAL.labels(status=status_label).inc(hits)
     if citations > 0:
         CHAT_CITATIONS_TOTAL.labels(status=status_label).inc(citations)
+
+
+def record_api_request(method: str, route: str, status: str, duration: float) -> None:
+    API_REQUESTS_TOTAL.labels(method=method, route=route, status=status).inc()
+    API_REQUEST_DURATION_SECONDS.labels(method=method, route=route, status=status).observe(
+        max(duration, 0.0)
+    )
+
+
+def record_queue_lag(lag: int) -> None:
+    INGEST_QUEUE_LAG.set(max(0, lag))
+
+
+def record_ingestion_throughput(status: str, documents: int = 1) -> None:
+    if documents > 0:
+        INGEST_THROUGHPUT_DOCS_TOTAL.labels(status=_normalise(status, _DEFAULT_STATUS)).inc(documents)
+
+
+def record_token_usage(direction: str, provider: str, tokens: int) -> None:
+    if tokens > 0:
+        LLM_TOKEN_USAGE_TOTAL.labels(direction=direction, provider=provider).inc(tokens)
 
 
 def record_sqlmodel_metadata_state(

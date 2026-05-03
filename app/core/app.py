@@ -7,6 +7,7 @@ import uuid
 from contextlib import asynccontextmanager
 from datetime import timezone
 from importlib import import_module
+from time import perf_counter
 from types import SimpleNamespace
 from typing import Sequence
 
@@ -89,6 +90,8 @@ from app.observability.metadata_guard import (
     check_sqlmodel_metadata,
     schedule_sqlmodel_metadata_guard,
 )
+from app.observability.logging import bind_log_context, configure_structured_logging
+from app.observability.metrics import API_REQUESTS_IN_FLIGHT, record_api_request
 from app.retriever import CrossEncoderReranker, get_reranker, get_vector_store
 from app.services.files import FileStore, IngestQueue
 from app.services import vectorstore as vectorstore_service
@@ -103,9 +106,29 @@ class RequestIDMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request, call_next):  # type: ignore[override]
         request_id = request.headers.get("X-Request-ID") or uuid.uuid4().hex
         request.state.request_id = request_id
-        response = await call_next(request)
-        response.headers.setdefault("X-Request-ID", request_id)
-        return response
+        tenant_id = request.headers.get("X-Tenant-ID", "-")
+        user_id = request.headers.get("X-User-ID", "-")
+        bind_log_context(request_id=request_id, tenant_id=tenant_id, user_id=user_id)
+        API_REQUESTS_IN_FLIGHT.inc()
+        started = perf_counter()
+        status = "success"
+        try:
+            response = await call_next(request)
+            if getattr(response, "status_code", 500) >= 500:
+                status = "error"
+            response.headers.setdefault("X-Request-ID", request_id)
+            return response
+        except Exception:
+            status = "error"
+            raise
+        finally:
+            record_api_request(
+                method=getattr(request, "method", "UNKNOWN"),
+                route=getattr(getattr(request, "url", None), "path", "unknown"),
+                status=status,
+                duration=max(0.0, perf_counter() - started),
+            )
+            API_REQUESTS_IN_FLIGHT.dec()
 
 
 def _prepare_cors_origins(origins: Sequence[str] | None) -> list[str]:
@@ -167,6 +190,7 @@ def create_app(provider: LLMProvider | None = None) -> FastAPI:
     """Build and configure the FastAPI application instance."""
 
     settings = get_settings()
+    configure_structured_logging()
 
     def setting(name: str, default):
         return getattr(settings, name, default)

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from time import perf_counter
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 
 from app.core.config import get_version_info
 from app.retriever.vector_store import get_vector_store
@@ -12,11 +12,38 @@ from app.retriever.vector_store import get_vector_store
 router = APIRouter(prefix="/ops", tags=["ops"])
 
 
-@router.get("/health")
-def health() -> dict[str, object]:
-    """Lightweight health indicator returning service metadata."""
+@router.get("/health/liveness")
+def liveness() -> dict[str, object]:
+    return {"status": "alive", "version": get_version_info()}
 
-    return {"status": "ok", "version": get_version_info()}
+
+@router.get("/health/readiness")
+def readiness(request: Request) -> dict[str, object]:
+    degraded: list[str] = []
+    scheduler = getattr(request.app.state, "scheduler", None)
+    if scheduler is None:
+        degraded.append("scheduler_unavailable")
+    ingest_worker = getattr(request.app.state, "ingest_worker", None)
+    if ingest_worker is None:
+        degraded.append("ingest_worker_disabled")
+    return {
+        "status": "degraded" if degraded else "ready",
+        "degraded": degraded,
+        "version": get_version_info(),
+    }
+
+
+@router.get("/health/dependencies")
+def dependencies() -> dict[str, object]:
+    """Dependency checks with degradation semantics."""
+    checks: dict[str, str] = {"vector_store": "ok"}
+    status = "ok"
+    try:
+        get_vector_store().ensure_ready()
+    except Exception:
+        checks["vector_store"] = "degraded"
+        status = "degraded"
+    return {"status": status, "checks": checks, "version": get_version_info()}
 
 
 @router.post("/warmup")
