@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from sqlmodel import Session
 
 from app.core.auth import ensure_tenant_access, get_current_active_user
@@ -17,6 +17,8 @@ router = APIRouter(tags=["documents"])
 @router.post("/documents/{document_id}/reindex", response_model=JobInfo, status_code=status.HTTP_202_ACCEPTED)
 def reindex_document(
     document_id: int,
+    dry_run: bool = Query(default=False, description="Preflight reindex without alias switch"),
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
     _: UserRecord = Depends(get_current_active_user),
     session: Session = Depends(get_ingest_session),
     tenant: str = Depends(ensure_tenant_access),
@@ -26,14 +28,25 @@ def reindex_document(
         raise HTTPException(status_code=404, detail="DOCUMENT_NOT_FOUND")
 
     service = ReindexService(QdrantVectorStore())
-    result = service.reindex_document(document_id=str(document_id))
+    result = service.reindex_document(
+        document_id=str(document_id),
+        idempotency_key=idempotency_key,
+        dry_run=dry_run,
+    )
     job = JobRecord(
         tenant_id=tenant,
         tenant_slug=tenant,
         job_type="reindex",
         status=result.status,
         resource_id=str(document_id),
-        payload={"copied": result.copied, "alias": result.alias, "temp_collection": result.temp_collection},
+        payload={
+            "copied": result.copied,
+            "alias": result.alias,
+            "temp_collection": result.temp_collection,
+            "source_collection": result.source_collection,
+            "idempotency_key": idempotency_key,
+            "dry_run": result.dry_run,
+        },
     )
     session.add(job)
     session.commit()

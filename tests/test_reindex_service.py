@@ -44,3 +44,26 @@ def test_reindex_rolls_back_temp_collection_on_mid_failure() -> None:
 
     assert len(store.deleted) == 1
     assert store.switched == []
+
+
+def test_reindex_rolls_back_when_validation_fails_after_backfill() -> None:
+    class _ValidationStore(_Store):
+        def __init__(self) -> None:
+            super().__init__()
+            self.imported = 0
+
+        def import_payloads_to_collection(self, collection_name: str, payloads):
+            self.imported += len(list(payloads))
+
+        def validate_collection_not_empty(self, collection_name: str) -> None:
+            raise ValueError("validation failed")
+
+    store = _ValidationStore()
+    service = ReindexService(store)  # type: ignore[arg-type]
+
+    with pytest.raises(ValueError, match="validation failed"):
+        service.reindex_document(document_id="42")
+
+    assert store.imported == 1
+    assert len(store.deleted) == 1
+    assert store.switched == []
