@@ -16,10 +16,12 @@ services:
     command: >-
       bash -lc "python -m scripts.download_model --manifest ./models/model_manifest.json
       --target default --output ${LLM_MODEL_PATH:-./models/model.gguf} --allow-missing-hash --max-retries 5
-      && exec uvicorn app.api.main:app --host 0.0.0.0 --port 8000"
+      && exec uvicorn ${BACKEND_ENTRYPOINT:-app.api.main:app} --host 0.0.0.0 --port 8000"
     env_file:
       - .env
     environment:
+      BACKEND_ENTRYPOINT: "app.api.main:app"
+      BACKEND_LEGACY_ENTRYPOINT: "backend.app.main:app"
       INGEST_AUTOSTART_WORKER: "false"
       INGEST_USE_LOCAL_QUEUE: "false"
       QDRANT_URL: "http://qdrant:6333"

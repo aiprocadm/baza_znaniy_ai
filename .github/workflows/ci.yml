@@ -20,6 +20,7 @@ jobs:
       app_changed: ${{ steps.filter.outputs.app }}
       frontend_changed: ${{ steps.filter.outputs.frontend }}
       legacy_changed: ${{ steps.filter.outputs.legacy }}
+      docs_changed: ${{ steps.filter.outputs.docs }}
     steps:
       - uses: actions/checkout@v4
       - uses: dorny/paths-filter@v3
@@ -38,6 +39,11 @@ jobs:
               - 'frontend/**'
             legacy:
               - 'backend/**'
+            docs:
+              - 'README.md'
+              - 'Dockerfile'
+              - 'docker-compose.yml'
+              - '.github/workflows/ci.yml'
 
   legacy-path-guard:
     name: Guard legacy path changes
@@ -77,11 +83,41 @@ jobs:
           echo "ERROR: backend/** is legacy/experimental. Add label 'legacy-path-approved' or flag [legacy-ok] in PR title/body."
           exit 1
 
+
+  openapi-primary-guard:
+    name: Guard OpenAPI primary publication
+    runs-on: ubuntu-latest
+    needs: [path-classifier, legacy-path-guard]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify a single primary OpenAPI source
+        run: |
+          set -euo pipefail
+          PRIMARY_OPENAPI="app/api/main.py"
+          LEGACY_OPENAPI="backend/app/main.py"
+
+          if [ "$PRIMARY_OPENAPI" = "$LEGACY_OPENAPI" ]; then
+            echo "ERROR: primary and legacy OpenAPI paths must differ"
+            exit 1
+          fi
+
+          if rg -n "(primary|основн).*OpenAPI.*backend/app/main.py" README.md; then
+            echo "ERROR: README marks legacy OpenAPI as primary"
+            exit 1
+          fi
+
+          if ! rg -n "Source-of-truth backend entrypoint: `app/api/main.py`" README.md; then
+            echo "ERROR: README must explicitly pin app/api/main.py as source-of-truth"
+            exit 1
+          fi
+
+          echo "OpenAPI publication guard passed"
+
   python-ci:
     name: Lint & test (Python, active runtime path)
     runs-on: ubuntu-latest
     if: github.event_name != 'pull_request' || needs.path-classifier.outputs.app_changed == 'true'
-    needs: [path-classifier, legacy-path-guard]
+    needs: [path-classifier, legacy-path-guard, openapi-primary-guard]
     timeout-minutes: 25
     steps:
       - name: Checkout repository
@@ -155,13 +191,11 @@ jobs:
           path: cov_html
           if-no-files-found: warn
 
-      - name: Run schemathesis contract tests
-        run: pytest backend/tests/test_contract_schemathesis.py -q
 
   docker-lint-build:
     runs-on: ubuntu-latest
     if: github.event_name != 'pull_request' || needs.path-classifier.outputs.app_changed == 'true' || needs.path-classifier.outputs.legacy_changed == 'true'
-    needs: [path-classifier, legacy-path-guard]
+    needs: [path-classifier, legacy-path-guard, openapi-primary-guard]
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
@@ -178,7 +212,7 @@ jobs:
     name: Frontend lint & test (primary UI path)
     runs-on: ubuntu-latest
     if: github.event_name != 'pull_request' || needs.path-classifier.outputs.frontend_changed == 'true'
-    needs: [path-classifier, legacy-path-guard]
+    needs: [path-classifier, legacy-path-guard, openapi-primary-guard]
     defaults:
       run:
         working-directory: frontend
@@ -202,7 +236,7 @@ jobs:
   shell-lint:
     runs-on: ubuntu-latest
     if: ${{ github.event_name != 'pull_request' || needs.path-classifier.outputs.app_changed == 'true' || needs.path-classifier.outputs.frontend_changed == 'true' || needs.path-classifier.outputs.legacy_changed == 'true' }}
-    needs: [path-classifier, legacy-path-guard]
+    needs: [path-classifier, legacy-path-guard, openapi-primary-guard]
     steps:
       - uses: actions/checkout@v4
       - name: ShellCheck
@@ -212,7 +246,7 @@ jobs:
     name: Smoke tests (warnings as errors, optional)
     runs-on: ubuntu-latest
     if: github.event_name != 'pull_request' || needs.path-classifier.outputs.app_changed == 'true'
-    needs: [path-classifier, legacy-path-guard]
+    needs: [path-classifier, legacy-path-guard, openapi-primary-guard]
     timeout-minutes: 15
     steps:
       - name: Checkout repository
@@ -245,3 +279,30 @@ jobs:
             -W error::ResourceWarning \
             tests/test_api_v1_upload.py \
             tests/test_routes_upload_file.py
+
+
+  legacy-compatibility-tests:
+    name: Compatibility tests (legacy backend/app/* path)
+    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request' || needs.path-classifier.outputs.legacy_changed == 'true'
+    needs: [path-classifier, legacy-path-guard, openapi-primary-guard]
+    timeout-minutes: 20
+    env:
+      KB_LEGACY_COMPAT_MODE: "1"
+      LEGACY_BACKEND_ENTRYPOINT: backend.app.main:app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+          cache-dependency-path: |
+            requirements*.txt
+            pyproject.toml
+      - run: python -m pip install --upgrade pip
+      - run: python -m pip install --index-url https://download.pytorch.org/whl/cpu torch==2.4.1
+      - run: |
+          python -m pip install -r requirements-runtime.txt -r requirements-llm.txt -r requirements-dev.txt
+          python -m pip install -e .
+      - name: Run legacy compatibility contract suite
+        run: pytest backend/tests/test_contract_schemathesis.py backend/tests/test_health.py -q
