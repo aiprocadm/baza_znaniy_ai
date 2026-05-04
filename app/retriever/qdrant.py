@@ -40,6 +40,7 @@ except Exception:  # pragma: no cover - lightweight fallback used in tests
 
 from app.core.config import Settings, get_settings
 from app.retriever.embedding_protocol import EmbedderProtocol
+from app.retriever.vector_store import SearchFilters
 
 __all__ = ["QdrantVectorStore"]
 
@@ -239,14 +240,7 @@ class QdrantVectorStore:
         query: str,
         top_k: int,
         *,
-        owner: str | None = None,
-        tags: list[str] | None = None,
-        act_type: str | None = None,
-        issuer: str | None = None,
-        reg_number: str | None = None,
-        is_active: bool | None = None,
-        revision_mode: str = "current",
-        tenant_id: str | None = None,
+        filters: SearchFilters,
     ) -> list[dict[str, object]]:
         if top_k <= 0:
             return []
@@ -256,42 +250,39 @@ class QdrantVectorStore:
         if not len(query_vector):
             return []
 
-        if not tenant_id or not tenant_id.strip():
-            raise ValueError("tenant_id is required for tenant-scoped search")
 
         client = self._client_instance()
         conditions: list[qmodels.FieldCondition] = [
             qmodels.FieldCondition(
                 key="tenant_id",
-                match=qmodels.MatchValue(value=tenant_id.strip()),
+                match=qmodels.MatchValue(value=filters.tenant_id),
             )
         ]
-        if owner and owner.strip():
+        if filters.owner:
             conditions.append(
                 qmodels.FieldCondition(
                     key="owner",
-                    match=qmodels.MatchValue(value=owner.strip()),
+                    match=qmodels.MatchValue(value=filters.owner),
                 )
             )
-        normalized_tags = [tag.strip() for tag in (tags or []) if tag and tag.strip()]
-        for tag in normalized_tags:
+        for tag in filters.tags:
             conditions.append(
                 qmodels.FieldCondition(
                     key="tags",
                     match=qmodels.MatchValue(value=tag),
                 )
             )
-        if act_type:
-            conditions.append(qmodels.FieldCondition(key="act_type", match=qmodels.MatchValue(value=act_type.strip())))
-        if issuer and issuer.strip():
-            conditions.append(qmodels.FieldCondition(key="issuer", match=qmodels.MatchText(text=issuer.strip())))
-        if reg_number:
-            conditions.append(qmodels.FieldCondition(key="reg_number", match=qmodels.MatchValue(value=reg_number.strip())))
-        if is_active is not None:
-            conditions.append(qmodels.FieldCondition(key="is_active", match=qmodels.MatchValue(value=is_active)))
-        if revision_mode == "current":
+        if filters.act_type:
+            conditions.append(qmodels.FieldCondition(key="act_type", match=qmodels.MatchValue(value=filters.act_type)))
+        if filters.issuer:
+            conditions.append(qmodels.FieldCondition(key="issuer", match=qmodels.MatchText(text=filters.issuer)))
+        if filters.reg_number:
+            conditions.append(qmodels.FieldCondition(key="reg_number", match=qmodels.MatchValue(value=filters.reg_number)))
+        if filters.is_active is not None:
+            conditions.append(qmodels.FieldCondition(key="is_active", match=qmodels.MatchValue(value=filters.is_active)))
+        if filters.revision_mode == "current":
             conditions.append(qmodels.FieldCondition(key="is_active", match=qmodels.MatchValue(value=True)))
-        elif revision_mode == "historical":
+        elif filters.revision_mode == "historical":
             conditions.append(qmodels.FieldCondition(key="is_active", match=qmodels.MatchValue(value=False)))
         query_filter = qmodels.Filter(must=conditions) if conditions else None
 

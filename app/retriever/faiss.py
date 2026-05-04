@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 from collections import OrderedDict
 from pathlib import Path
@@ -41,9 +42,11 @@ except Exception:  # pragma: no cover - lightweight fallback used in tests
 
 from app.core.config import Settings, get_settings
 from app.retriever.embedding_protocol import EmbedderProtocol
+from app.retriever.vector_store import SearchFilters
 
 EmbedderFactory = Callable[[str], EmbedderProtocol]
 _default_embedder_factory: EmbedderFactory = cast(EmbedderFactory, SentenceTransformer)
+LOGGER = logging.getLogger(__name__)
 
 
 class FaissVectorStore:
@@ -193,6 +196,8 @@ class FaissVectorStore:
                 "owner": chunk.get("owner"),
                 "tags": chunk.get("tags") if isinstance(chunk.get("tags"), list) else [],
                 "text": chunk.get("text") or chunk.get("content"),
+                "tenant_id": chunk.get("tenant_id") or chunk.get("owner"),
+                "meta": chunk.get("meta") if isinstance(chunk.get("meta"), dict) else {},
             }
             self._payloads[identifier] = payload
             updated_ids.append(identifier)
@@ -207,13 +212,7 @@ class FaissVectorStore:
         query: str,
         top_k: int,
         *,
-        owner: str | None = None,
-        tags: list[str] | None = None,
-        act_type: str | None = None,
-        issuer: str | None = None,
-        reg_number: str | None = None,
-        is_active: bool | None = None,
-        revision_mode: str = "current",
+        filters: SearchFilters,
     ) -> list[dict[str, object]]:
         if top_k <= 0:
             return []
@@ -229,16 +228,21 @@ class FaissVectorStore:
         if not len(query_vector):
             return []
 
-        candidate_limit = max(top_k, top_k * 5)
+        LOGGER.warning("FAISS backend uses post-filtering; filters are applied after ANN candidate retrieval")
+        candidate_limit = max(top_k, top_k * 20)
         scores, indices = self._index.search(query_vector, candidate_limit)
-        normalized_owner = (owner or "").strip().lower()
-        normalized_tags = {tag.strip().lower() for tag in (tags or []) if tag and tag.strip()}
+        normalized_owner = (filters.owner or "").strip().lower()
+        normalized_tags = {tag.lower() for tag in filters.tags}
+        normalized_tenant = filters.tenant_id.lower()
         hits: list[dict[str, object]] = []
         for score, idx in zip(scores[0], indices[0]):
             if idx < 0 or idx >= len(self._ordered_ids):
                 continue
             identifier = self._ordered_ids[idx]
             payload = dict(self._payloads.get(identifier, {}))
+            payload_tenant = str(payload.get("tenant_id") or payload.get("owner") or "").strip().lower()
+            if payload_tenant != normalized_tenant:
+                continue
             if normalized_owner:
                 payload_owner = str(payload.get("owner", "")).strip().lower()
                 if payload_owner != normalized_owner:
@@ -253,17 +257,17 @@ class FaissVectorStore:
                 if not normalized_tags.issubset(payload_tag_set):
                     continue
             meta = payload.get("meta") if isinstance(payload.get("meta"), dict) else {}
-            if act_type and str(meta.get("act_type", "")).strip().lower() != act_type.strip().lower():
+            if filters.act_type and str(meta.get("act_type", "")).strip().lower() != filters.act_type.lower():
                 continue
-            if issuer and issuer.strip().lower() not in str(meta.get("issuer", "")).strip().lower():
+            if filters.issuer and filters.issuer.lower() not in str(meta.get("issuer", "")).strip().lower():
                 continue
-            if reg_number and reg_number.strip().lower() != str(meta.get("reg_number", "")).strip().lower():
+            if filters.reg_number and filters.reg_number.lower() != str(meta.get("reg_number", "")).strip().lower():
                 continue
-            if is_active is not None and bool(meta.get("is_active", True)) is not is_active:
+            if filters.is_active is not None and bool(meta.get("is_active", True)) is not filters.is_active:
                 continue
-            if revision_mode == "current" and meta.get("is_active") is False:
+            if filters.revision_mode == "current" and meta.get("is_active") is False:
                 continue
-            if revision_mode == "historical" and meta.get("is_active") is True:
+            if filters.revision_mode == "historical" and meta.get("is_active") is True:
                 continue
             payload.setdefault("id", identifier)
             payload["score"] = float(score)

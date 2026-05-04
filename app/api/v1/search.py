@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, Query
 from app.core.auth import ensure_tenant_access, get_current_active_user
 from app.models.user import UserRecord
 from app.models import SearchHit, SearchResponse
+from app.retriever.vector_store import SearchFilters
 from app.services.vectorstore import search
 
 RevisionMode = str
@@ -33,19 +34,27 @@ def search_endpoint(
     effective_tenant = tenant.strip() if isinstance(tenant, str) else ""
     if not effective_tenant:
         raise ValueError("tenant context is required")
-    normalized_tags = [tag.strip() for tag in (tags or []) if tag and tag.strip()]
-    normalized_owner = owner.strip() if owner else None
-    hits = search(
-        query,
-        top_k=top_k,
-        owner=normalized_owner or None,
-        tags=normalized_tags or None,
+    filters = SearchFilters.from_input(
+        tenant_id=effective_tenant,
+        owner=owner,
+        tags=tags,
         act_type=act_type,
         issuer=issuer,
         reg_number=reg_number,
         is_active=is_active,
         revision_mode=revision_mode,
-        tenant_id=effective_tenant,
+    )
+    hits = search(
+        query,
+        top_k=top_k,
+        owner=filters.owner,
+        tags=list(filters.tags) or None,
+        act_type=filters.act_type,
+        issuer=filters.issuer,
+        reg_number=filters.reg_number,
+        is_active=filters.is_active,
+        revision_mode=filters.revision_mode,
+        tenant_id=filters.tenant_id,
     )
     models = [
         SearchHit(
