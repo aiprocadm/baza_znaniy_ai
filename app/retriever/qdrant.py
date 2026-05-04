@@ -151,6 +151,17 @@ class QdrantVectorStore:
                 ("sha256", qmodels.PayloadSchemaType.KEYWORD),
                 ("owner", qmodels.PayloadSchemaType.KEYWORD),
                 ("tags", qmodels.PayloadSchemaType.KEYWORD),
+                ("tenant_id", qmodels.PayloadSchemaType.KEYWORD),
+                ("act_type", qmodels.PayloadSchemaType.KEYWORD),
+                ("issuer", qmodels.PayloadSchemaType.KEYWORD),
+                ("reg_number", qmodels.PayloadSchemaType.KEYWORD),
+                ("is_active", qmodels.PayloadSchemaType.BOOL),
+                ("revision", qmodels.PayloadSchemaType.KEYWORD),
+                ("meta.act_type", qmodels.PayloadSchemaType.KEYWORD),
+                ("meta.issuer", qmodels.PayloadSchemaType.KEYWORD),
+                ("meta.reg_number", qmodels.PayloadSchemaType.KEYWORD),
+                ("meta.is_active", qmodels.PayloadSchemaType.BOOL),
+                ("meta.revision", qmodels.PayloadSchemaType.KEYWORD),
             ):
                 client.create_payload_index(
                     collection_name=collection,
@@ -186,14 +197,21 @@ class QdrantVectorStore:
             points: list[qmodels.PointStruct] = []
             for embedding, (identifier, chunk) in zip(embeddings, pending.items()):
                 vector = embedding.tolist() if hasattr(embedding, "tolist") else list(embedding)
+                meta = chunk.get("meta") if isinstance(chunk.get("meta"), dict) else {}
                 payload = {
                     "file": chunk.get("file"),
                     "page": int(chunk.get("page") or 0),
                     "sha256": chunk.get("sha256"),
                     "owner": chunk.get("owner"),
+                    "tenant_id": chunk.get("tenant_id") or chunk.get("owner"),
                     "tags": chunk.get("tags") if isinstance(chunk.get("tags"), list) else [],
                     "text": chunk.get("text") or chunk.get("content"),
-                    "meta": chunk.get("meta") if isinstance(chunk.get("meta"), dict) else {},
+                    "meta": meta,
+                    "act_type": meta.get("act_type"),
+                    "issuer": meta.get("issuer"),
+                    "reg_number": meta.get("reg_number"),
+                    "is_active": meta.get("is_active"),
+                    "revision": meta.get("revision"),
                 }
                 points.append(
                     qmodels.PointStruct(
@@ -255,15 +273,17 @@ class QdrantVectorStore:
                 )
             )
         if act_type:
-            conditions.append(qmodels.FieldCondition(key="meta.act_type", match=qmodels.MatchValue(value=act_type.strip())))
+            conditions.append(qmodels.FieldCondition(key="act_type", match=qmodels.MatchValue(value=act_type.strip())))
+        if issuer and issuer.strip():
+            conditions.append(qmodels.FieldCondition(key="issuer", match=qmodels.MatchText(text=issuer.strip())))
         if reg_number:
-            conditions.append(qmodels.FieldCondition(key="meta.reg_number", match=qmodels.MatchValue(value=reg_number.strip())))
+            conditions.append(qmodels.FieldCondition(key="reg_number", match=qmodels.MatchValue(value=reg_number.strip())))
         if is_active is not None:
-            conditions.append(qmodels.FieldCondition(key="meta.is_active", match=qmodels.MatchValue(value=is_active)))
+            conditions.append(qmodels.FieldCondition(key="is_active", match=qmodels.MatchValue(value=is_active)))
         if revision_mode == "current":
-            conditions.append(qmodels.FieldCondition(key="meta.is_active", match=qmodels.MatchValue(value=True)))
+            conditions.append(qmodels.FieldCondition(key="is_active", match=qmodels.MatchValue(value=True)))
         elif revision_mode == "historical":
-            conditions.append(qmodels.FieldCondition(key="meta.is_active", match=qmodels.MatchValue(value=False)))
+            conditions.append(qmodels.FieldCondition(key="is_active", match=qmodels.MatchValue(value=False)))
         query_filter = qmodels.Filter(must=conditions) if conditions else None
 
         results = client.search(
@@ -278,10 +298,6 @@ class QdrantVectorStore:
         for record in results:
             payload = getattr(record, "payload", {}) or {}
             payload = dict(payload)
-            if issuer:
-                meta = payload.get("meta") if isinstance(payload.get("meta"), dict) else {}
-                if issuer.strip().lower() not in str(meta.get("issuer", "")).strip().lower():
-                    continue
             payload.setdefault("id", getattr(record, "id", None))
             payload["score"] = float(getattr(record, "score", 0.0))
             hits.append(payload)

@@ -40,6 +40,7 @@ if "qdrant_client" not in sys.modules:
     class PayloadSchemaType:
         KEYWORD = "keyword"
         INTEGER = "integer"
+        BOOL = "bool"
 
     class PointStruct:
         def __init__(self, id: str, vector: Sequence[float], payload: dict[str, object]):
@@ -293,3 +294,61 @@ def test_faiss_search_returns_payload(tmp_path: Path, monkeypatch: pytest.Monkey
     assert hits[0]["sha256"] in {"a", "b"}
     assert "score" in hits[0]
 
+
+def test_qdrant_search_builds_filter_parity(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    settings = _make_settings(tmp_path, backend="qdrant")
+
+    class _FieldCondition:
+        def __init__(self, key: str, match: object):
+            self.key = key
+            self.match = match
+
+    class _MatchValue:
+        def __init__(self, value: object):
+            self.value = value
+
+    class _MatchText:
+        def __init__(self, text: str):
+            self.text = text
+
+    class _Filter:
+        def __init__(self, must: list[object]):
+            self.must = must
+
+    monkeypatch.setattr(qmodule.qmodels, "FieldCondition", _FieldCondition)
+    monkeypatch.setattr(qmodule.qmodels, "MatchValue", _MatchValue)
+    monkeypatch.setattr(qmodule.qmodels, "MatchText", _MatchText)
+    monkeypatch.setattr(qmodule.qmodels, "Filter", _Filter)
+
+    client = _StubClient()
+    store = QdrantVectorStore(
+        settings=settings,
+        embedder_factory=lambda _: _StubEmbedder("stub"),
+        client_factory=lambda **_: client,
+    )
+
+    store.search(
+        "query",
+        3,
+        owner="tenant-a",
+        tags=["a", "b"],
+        act_type="law",
+        issuer="минюст",
+        reg_number="123",
+        is_active=False,
+        revision_mode="historical",
+    )
+
+    sent_filter = client.search_queries[-1]["query_filter"]
+    keys = [condition.key for condition in sent_filter.must]
+    assert keys == [
+        "owner",
+        "tags",
+        "tags",
+        "act_type",
+        "issuer",
+        "reg_number",
+        "is_active",
+        "is_active",
+    ]
+    assert isinstance(sent_filter.must[4].match, _MatchText)

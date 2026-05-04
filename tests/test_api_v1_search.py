@@ -71,3 +71,60 @@ def test_search_endpoint_normalizes_empty_filters(monkeypatch) -> None:
     )
     assert response.hits == []
     assert captured == {"owner": None, "tags": None}
+
+
+def test_search_endpoint_passes_all_npa_filters(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    def _fake_search(
+        query: str,
+        top_k: int = 10,
+        *,
+        owner: str | None = None,
+        tags: list[str] | None = None,
+        act_type: str | None = None,
+        issuer: str | None = None,
+        reg_number: str | None = None,
+        is_active: bool | None = None,
+        revision_mode: str = "current",
+    ) -> list[dict[str, object]]:
+        captured.update(
+            {
+                "query": query,
+                "top_k": top_k,
+                "owner": owner,
+                "tags": tags,
+                "act_type": act_type,
+                "issuer": issuer,
+                "reg_number": reg_number,
+                "is_active": is_active,
+                "revision_mode": revision_mode,
+            }
+        )
+        return []
+
+    monkeypatch.setattr(search_api, "search", _fake_search)
+
+    search_api.search_endpoint(
+        query="law 123",
+        top_k=7,
+        owner="alice@kb.ai",
+        tags=["prod"],
+        act_type="law",
+        issuer="Минюст",
+        reg_number="123-ФЗ",
+        is_active=False,
+        revision_mode="historical",
+        tenant="test-tenant",
+    )
+    assert captured == {
+        "query": "law 123",
+        "top_k": 7,
+        "owner": "alice@kb.ai",
+        "tags": ["prod"],
+        "act_type": "law",
+        "issuer": "Минюст",
+        "reg_number": "123-ФЗ",
+        "is_active": False,
+        "revision_mode": "historical",
+    }
