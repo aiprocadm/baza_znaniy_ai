@@ -98,12 +98,23 @@ from app.ingest.ocr import OCRError, OCRConfig, iter_pdf_pages_with_ocr
 from app.ingest.html import html_to_plain_text, html_to_text_sections
 
 try:  # pragma: no cover - metrics are optional during lightweight testing
-    from app.observability.metrics import record_document_parse, record_document_ocr_pages
+    from app.observability.metrics import (
+        record_docling_fallback,
+        record_docling_parse,
+        record_document_parse,
+        record_document_ocr_pages,
+    )
 except ModuleNotFoundError:  # pragma: no cover - executed when metrics deps missing
     def record_document_parse(*args, **kwargs):  # type: ignore[override]
         return None
 
     def record_document_ocr_pages(*args, **kwargs):  # type: ignore[override]
+        return None
+
+    def record_docling_parse(*args, **kwargs):  # type: ignore[override]
+        return None
+
+    def record_docling_fallback(*args, **kwargs):  # type: ignore[override]
         return None
 
 
@@ -834,17 +845,32 @@ def parse_document(filename: str, data: Union[bytes, bytearray, BinaryIO]) -> Pa
     raw_bytes = _read_stream_to_bytes(stream)
 
     backend = _resolve_parser_backend()
+    LOGGER.info("Document parser backend selected", extra={"backend_selected": backend, "mime": mime, "tenant": os.getenv("TENANT", "unknown"), "document_id": os.getenv("DOCUMENT_ID", "unknown"), "document_name": name})
     parser_backend_used = "legacy"
     fallback_reason = None
     pages: list[tuple[int, str]] = []
 
     if backend in {"docling", "auto"} and mime in DoclingParserAdapter.SUPPORTED_MIME:
+        docling_started = time.perf_counter()
         try:
             pages = DoclingParserAdapter().parse(name, bytes(raw_bytes))
             parser_backend_used = "docling"
+            record_docling_parse("success", time.perf_counter() - docling_started)
         except Exception as exc:
             fallback_reason = str(exc)
-            LOGGER.warning("Docling parse failed for %s: %s. Fallback to legacy.", name, exc)
+            record_docling_parse("error", time.perf_counter() - docling_started)
+            record_docling_fallback(fallback_reason)
+            LOGGER.warning(
+                "Docling parse failed, fallback to legacy",
+                extra={
+                    "backend_selected": backend,
+                    "fallback_reason": fallback_reason,
+                    "mime": mime,
+                    "tenant": os.getenv("TENANT", "unknown"),
+                    "document_id": os.getenv("DOCUMENT_ID", "unknown"),
+                    "document_name": name,
+                },
+            )
 
     if not pages:
         def _buffer() -> BinaryIO:
