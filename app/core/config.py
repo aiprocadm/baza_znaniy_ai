@@ -659,6 +659,27 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("DOCLING_MAX_PAGES"),
         description="Maximum number of pages to parse via Docling.",
     )
+
+
+    @field_validator("document_parser_backend", mode="before")
+    @classmethod
+    def _validate_document_parser_backend(cls, value: object) -> str:
+        backend = str(value or "legacy").strip().lower()
+        return backend if backend in {"legacy", "docling", "auto"} else "legacy"
+
+    @field_validator("docling_timeout", mode="before")
+    @classmethod
+    def _validate_docling_timeout(cls, value: object) -> float:
+        candidate = float(value or 60.0)
+        return candidate if candidate > 0 else 60.0
+
+    @field_validator("docling_max_pages", mode="before")
+    @classmethod
+    def _validate_docling_max_pages(cls, value: object | None) -> int | None:
+        if value in (None, "", 0, "0"):
+            return None
+        candidate = int(value)
+        return candidate if candidate > 0 else None
     html2text_bodywidth: int = Field(
         default=0,
         validation_alias=AliasChoices("HTML2TEXT_BODYWIDTH"),

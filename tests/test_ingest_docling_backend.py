@@ -20,7 +20,7 @@ def test_docling_backend_invalid_value_falls_back(monkeypatch):
     assert chunking._resolve_parser_backend() == "legacy"
 
 
-def test_parse_document_auto_success_docling(monkeypatch):
+def test_parse_document_auto_docling(monkeypatch):
     from app.ingest import chunking
 
     monkeypatch.setenv("DOCUMENT_PARSER_BACKEND", "auto")
@@ -41,7 +41,7 @@ def test_parse_document_auto_success_docling(monkeypatch):
     assert result.pages == [(1, "docling parsed")]
 
 
-def test_parse_document_auto_fallback_to_legacy(monkeypatch):
+def test_parse_document_auto_legacy_fallback(monkeypatch):
     from app.ingest import chunking
 
     monkeypatch.setattr(chunking, "_resolve_parser_backend", lambda explicit_backend=None: "auto")
@@ -58,4 +58,24 @@ def test_parse_document_auto_fallback_to_legacy(monkeypatch):
     result = chunking.parse_document("sample.pdf", b"pdf")
     assert result.parser_backend_used == "legacy"
     assert "boom" in (result.fallback_reason or "")
+    assert result.pages == [(1, "legacy text")]
+
+
+def test_parse_document_docling_hard_fail_with_fallback(monkeypatch):
+    from app.ingest import chunking
+
+    monkeypatch.setattr(chunking, "_resolve_parser_backend", lambda explicit_backend=None: "docling")
+
+    class FakeAdapter:
+        SUPPORTED_MIME = chunking.DoclingParserAdapter.SUPPORTED_MIME
+
+        def parse(self, filename, raw_bytes):
+            raise RuntimeError("docling unavailable")
+
+    monkeypatch.setattr(chunking, "DoclingParserAdapter", FakeAdapter)
+    monkeypatch.setattr(chunking, "_iter_pdf_pages", lambda data: iter([(1, "legacy text")]))
+
+    result = chunking.parse_document("sample.pdf", b"pdf")
+    assert result.parser_backend_used == "legacy"
+    assert "docling unavailable" in (result.fallback_reason or "")
     assert result.pages == [(1, "legacy text")]
