@@ -445,6 +445,17 @@ class Settings(BaseSettings):
         ),
     )
 
+
+    auth_provider: str = Field(
+        default="local-jwt",
+        validation_alias=AliasChoices("AUTH_PROVIDER"),
+    )
+    keycloak_server_url: str | None = Field(default=None, validation_alias=AliasChoices("KEYCLOAK_SERVER_URL"))
+    keycloak_realm: str | None = Field(default=None, validation_alias=AliasChoices("KEYCLOAK_REALM"))
+    keycloak_client_id: str | None = Field(default=None, validation_alias=AliasChoices("KEYCLOAK_CLIENT_ID"))
+    supabase_url: str | None = Field(default=None, validation_alias=AliasChoices("SUPABASE_URL"))
+    supabase_jwt_secret: str | None = Field(default=None, validation_alias=AliasChoices("SUPABASE_JWT_SECRET"))
+
     # Core paths ---------------------------------------------------------
     data_dir: Path = Field(
         default=Path("./var/data"),

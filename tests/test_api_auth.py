@@ -239,3 +239,33 @@ def test_member_cannot_search_other_tenant(auth_client: TestClient) -> None:
     )
     assert response.status_code == 403
     assert response.json()["detail"] == "TENANT_ACCESS_DENIED"
+
+
+def test_member_denied_admin_jobs(auth_client: TestClient) -> None:
+    login = auth_client.post(
+        "/api/v1/auth/login",
+        json={"email": "member@example.com", "password": "member-secret"},
+    )
+    member_access = login.json()["access_token"]
+
+    response = auth_client.get(
+        "/api/v1/admin/jobs",
+        headers={"Authorization": f"Bearer {member_access}", "X-Tenant": "default"},
+    )
+    assert response.status_code == 403
+    assert response.json()["detail"] == "INSUFFICIENT_ROLE"
+
+
+def test_admin_can_access_admin_jobs(auth_client: TestClient) -> None:
+    login = auth_client.post(
+        "/api/v1/auth/login",
+        json={"email": "admin@example.com", "password": "secret"},
+    )
+    access_token = login.json()["access_token"]
+
+    response = auth_client.get(
+        "/api/v1/admin/jobs",
+        headers={"Authorization": f"Bearer {access_token}", "X-Tenant": "default"},
+    )
+    assert response.status_code == 200
+    assert "jobs" in response.json()
