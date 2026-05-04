@@ -27,3 +27,11 @@ Every incident log search should include:
 - `tenant_id`
 - `user_id`
 - `task_id`
+
+
+## 4) Reindex incident rollback
+1. Confirm the active alias still points to the last known-good collection (for example `kb_prod -> kb_vNN`).
+2. If alias switch happened before failure detection, switch alias back to previous collection immediately.
+3. Delete the temporary reindex collection (`*_tmp_*`) only after alias rollback is validated.
+4. Re-run `GET /api/v1/ingest/jobs/{job_id}` and verify the failed job error details were captured for RCA.
+5. Re-run reindex only after fixing root cause and validating on a canary tenant/document.

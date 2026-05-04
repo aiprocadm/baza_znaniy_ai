@@ -312,6 +312,108 @@ class QdrantVectorStore:
             hits.append(payload)
         return hits
 
+
+    def resolve_collection_name(self, alias_name: str) -> str:
+        client = self._client_instance()
+        try:
+            aliases = client.get_aliases()
+            for item in getattr(aliases, "aliases", []) or []:
+                if getattr(item, "alias_name", None) == alias_name:
+                    return str(getattr(item, "collection_name"))
+        except Exception:
+            pass
+        return alias_name
+
+    def create_alias(self, alias_name: str, collection_name: str) -> None:
+        client = self._client_instance()
+        client.update_collection_aliases(
+            change_aliases_operations=[
+                qmodels.CreateAliasOperation(
+                    create_alias=qmodels.CreateAlias(
+                        collection_name=collection_name,
+                        alias_name=alias_name,
+                    )
+                )
+            ]
+        )
+
+    def switch_alias(self, alias_name: str, collection_name: str) -> None:
+        client = self._client_instance()
+        client.update_collection_aliases(
+            change_aliases_operations=[
+                qmodels.CreateAliasOperation(
+                    create_alias=qmodels.CreateAlias(
+                        collection_name=collection_name,
+                        alias_name=alias_name,
+                    )
+                )
+            ]
+        )
+
+    def delete_alias(self, alias_name: str) -> None:
+        client = self._client_instance()
+        client.update_collection_aliases(
+            change_aliases_operations=[
+                qmodels.DeleteAliasOperation(
+                    delete_alias=qmodels.DeleteAlias(alias_name=alias_name)
+                )
+            ]
+        )
+
+    def create_collection_like(self, target_collection: str, source_collection: str) -> None:
+        client = self._client_instance()
+        info = client.get_collection(source_collection)
+        vectors = info.config.params.vectors
+        client.recreate_collection(collection_name=target_collection, vectors_config=vectors)
+
+    def export_payloads_from_collection(self, collection_name: str, batch_size: int = 256):
+        client = self._client_instance()
+        offset = None
+        while True:
+            records, offset = client.scroll(collection_name=collection_name, limit=batch_size, offset=offset, with_payload=True, with_vectors=True)
+            if not records:
+                break
+            for record in records:
+                payload = getattr(record, "payload", {}) or {}
+                if getattr(record, "id", None) is not None:
+                    payload.setdefault("id", record.id)
+                if getattr(record, "vector", None) is not None:
+                    payload.setdefault("vector", record.vector)
+                yield payload
+            if not offset:
+                break
+
+    def import_payloads_to_collection(self, collection_name: str, payloads: Iterable[dict[str, object]]) -> None:
+        client = self._client_instance()
+        batch: list[qmodels.PointStruct] = []
+        for payload in payloads:
+            vector = payload.get("vector")
+            text = payload.get("text")
+            if vector is None or text is None:
+                continue
+            vector_list = list(vector.tolist()) if hasattr(vector, "tolist") else list(vector)
+            if not vector_list:
+                continue
+            batch.append(qmodels.PointStruct(id=str(payload.get("id") or payload.get("sha256") or ""), vector=vector_list, payload=dict(payload)))
+            if len(batch) >= 512:
+                client.upsert(collection_name=collection_name, points=list(batch))
+                batch.clear()
+        if batch:
+            client.upsert(collection_name=collection_name, points=list(batch))
+
+    def validate_collection_not_empty(self, collection_name: str) -> None:
+        client = self._client_instance()
+        records, _ = client.scroll(collection_name=collection_name, limit=1, with_payload=False, with_vectors=False)
+        if not records:
+            raise ValueError("Temporary collection is empty after reindex")
+
+    def delete_collection_safe(self, collection_name: str) -> None:
+        client = self._client_instance()
+        try:
+            client.delete_collection(collection_name=collection_name)
+        except Exception:
+            pass
+
     # ------------------------------------------------------------------
     # Backwards compatibility helpers
     def ensure_collection(self) -> None:  # pragma: no cover - compatibility shim

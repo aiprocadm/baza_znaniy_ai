@@ -21,6 +21,7 @@ for _module_name in (
     "chat",
     "files",
     "delete",
+    "documents",
 ):
     try:
         module = importlib.import_module(f"{__name__}.{_module_name}")
