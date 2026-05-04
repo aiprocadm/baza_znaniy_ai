@@ -40,18 +40,18 @@ DOCUMENT_OCR_PAGES_TOTAL = Counter(
 
 
 DOCLING_PARSE_TOTAL = Counter(
-    "kb_docling_parse_total",
+    "docling_parse_total",
     "Total number of Docling parse attempts.",
     labelnames=("status",),
 )
 DOCLING_FALLBACK_TOTAL = Counter(
-    "kb_docling_fallback_total",
-    "Total number of Docling fallback events.",
+    "docling_fallback_total",
+    "Total number of Docling fallbacks to legacy parser.",
     labelnames=("reason",),
 )
 DOCLING_PARSE_SECONDS = Histogram(
-    "kb_docling_parse_seconds",
-    "Time spent on Docling parsing attempts.",
+    "docling_parse_seconds",
+    "Duration of Docling parsing in seconds.",
     labelnames=("status",),
 )
 
@@ -177,6 +177,7 @@ def record_document_ocr_pages(pages: int, status: str, extension: str | None) ->
 
 
 
+
 def record_docling_parse(status: str, duration: float) -> None:
     status_label = _normalise(status, _DEFAULT_STATUS)
     DOCLING_PARSE_TOTAL.labels(status=status_label).inc()
@@ -186,7 +187,6 @@ def record_docling_parse(status: str, duration: float) -> None:
 def record_docling_fallback(reason: str | None) -> None:
     reason_label = _normalise(reason, "unknown")
     DOCLING_FALLBACK_TOTAL.labels(reason=reason_label).inc()
-
 
 def record_index_operation(
     status: str,

@@ -851,26 +851,16 @@ def parse_document(filename: str, data: Union[bytes, bytearray, BinaryIO]) -> Pa
     pages: list[tuple[int, str]] = []
 
     if backend in {"docling", "auto"} and mime in DoclingParserAdapter.SUPPORTED_MIME:
-        docling_started = time.perf_counter()
+        docling_start = time.perf_counter()
         try:
             pages = DoclingParserAdapter().parse(name, bytes(raw_bytes))
             parser_backend_used = "docling"
-            record_docling_parse("success", time.perf_counter() - docling_started)
+            record_docling_parse("success", time.perf_counter() - docling_start)
         except Exception as exc:
             fallback_reason = str(exc)
-            record_docling_parse("error", time.perf_counter() - docling_started)
+            record_docling_parse("error", time.perf_counter() - docling_start)
             record_docling_fallback(fallback_reason)
-            LOGGER.warning(
-                "Docling parse failed, fallback to legacy",
-                extra={
-                    "backend_selected": backend,
-                    "fallback_reason": fallback_reason,
-                    "mime": mime,
-                    "tenant": os.getenv("TENANT", "unknown"),
-                    "document_id": os.getenv("DOCUMENT_ID", "unknown"),
-                    "document_name": name,
-                },
-            )
+            LOGGER.warning("Docling parse failed for %s: %s. Fallback to legacy.", name, exc)
 
     if not pages:
         def _buffer() -> BinaryIO:
@@ -893,6 +883,17 @@ def parse_document(filename: str, data: Union[bytes, bytearray, BinaryIO]) -> Pa
 
     metadata = {"document": {"file": name, "mime_type": mime}, "pages": [{"page": p, "text_length": len(t)} for p,t in pages], "chunks": []}
     ocr_used = ext == "pdf" and parser_backend_used == "legacy"
+    LOGGER.info(
+        "document_parse_backend_selected",
+        extra={
+            "backend_selected": backend,
+            "parser_backend_used": parser_backend_used,
+            "fallback_reason": fallback_reason,
+            "mime": mime,
+            "tenant": os.getenv("TENANT_ID", "default"),
+            "document_id": _hash_chunk(name, 0, name)[:16],
+        },
+    )
     return ParseResult(pages, parser_backend_used, fallback_reason, ocr_used, metadata)
 
 
