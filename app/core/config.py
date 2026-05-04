@@ -644,6 +644,21 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("DOCLING_ENABLED"),
         description="Enable Docling parser integration path.",
     )
+    docling_timeout: float = Field(
+        default=60.0,
+        validation_alias=AliasChoices("DOCLING_TIMEOUT"),
+        description="Docling conversion timeout in seconds.",
+    )
+    docling_ocr_enabled: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("DOCLING_OCR_ENABLED"),
+        description="Enable OCR in Docling parser when supported.",
+    )
+    docling_max_pages: int | None = Field(
+        default=None,
+        validation_alias=AliasChoices("DOCLING_MAX_PAGES"),
+        description="Maximum number of pages to parse via Docling.",
+    )
     html2text_bodywidth: int = Field(
         default=0,
         validation_alias=AliasChoices("HTML2TEXT_BODYWIDTH"),

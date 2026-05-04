@@ -23,7 +23,7 @@ ensure_core_modules()
 
 from app.core.config import get_settings
 from app.core.datetime_utils import utc_now
-from app.ingest.chunking import _chunk, _get_tokenizer, _resolve_parser_backend, iter_document_pages
+from app.ingest.chunking import _chunk, _get_tokenizer, parse_document
 from app.models.entities import JobStatus
 from app.models.file import (
     ChunkRecord,
@@ -1018,7 +1018,6 @@ class IngestWorker:
             await self._handle_failure(job)
 
     async def _ingest_file(self, job: IngestJob) -> int:
-        parser_backend = _resolve_parser_backend()
         with Session(self.service.engine) as session:
             file_obj = session.get(FileRecord, job.file_id)
             if not file_obj:
@@ -1026,7 +1025,8 @@ class IngestWorker:
             filename = file_obj.filename
 
         with open(job.path, "rb") as handle:
-            pages = list(iter_document_pages(job.path, handle))
+            parse_result = parse_document(job.path, handle)
+            pages = list(parse_result.pages)
 
         chunk_payloads: list[dict[str, object]] = []
         full_text = "\n".join(text for _page, text in pages)
@@ -1073,7 +1073,9 @@ class IngestWorker:
                         "document_sha": job.sha256,
                         "page": page_number,
                         "file_id": job.file_id,
-                        "parser_backend": parser_backend,
+                        "parser_backend": parse_result.parser_backend_used,
+                        "fallback_reason": parse_result.fallback_reason,
+                        "ocr_used": parse_result.ocr_used,
                     },
                 )
                 session.add(page)
@@ -1106,7 +1108,9 @@ class IngestWorker:
                             "document_sha": job.sha256,
                             "page": page.number,
                             "chunk": offset,
-                            "parser_backend": parser_backend,
+                            "parser_backend": parse_result.parser_backend_used,
+                        "fallback_reason": parse_result.fallback_reason,
+                        "ocr_used": parse_result.ocr_used,
                             **attrs,
                         },
                     )
