@@ -193,6 +193,7 @@ class QdrantVectorStore:
                     "owner": chunk.get("owner"),
                     "tags": chunk.get("tags") if isinstance(chunk.get("tags"), list) else [],
                     "text": chunk.get("text") or chunk.get("content"),
+                    "meta": chunk.get("meta") if isinstance(chunk.get("meta"), dict) else {},
                 }
                 points.append(
                     qmodels.PointStruct(
@@ -222,6 +223,11 @@ class QdrantVectorStore:
         *,
         owner: str | None = None,
         tags: list[str] | None = None,
+        act_type: str | None = None,
+        issuer: str | None = None,
+        reg_number: str | None = None,
+        is_active: bool | None = None,
+        revision_mode: str = "current",
     ) -> list[dict[str, object]]:
         if top_k <= 0:
             return []
@@ -248,6 +254,16 @@ class QdrantVectorStore:
                     match=qmodels.MatchValue(value=tag),
                 )
             )
+        if act_type:
+            conditions.append(qmodels.FieldCondition(key="meta.act_type", match=qmodels.MatchValue(value=act_type.strip())))
+        if reg_number:
+            conditions.append(qmodels.FieldCondition(key="meta.reg_number", match=qmodels.MatchValue(value=reg_number.strip())))
+        if is_active is not None:
+            conditions.append(qmodels.FieldCondition(key="meta.is_active", match=qmodels.MatchValue(value=is_active)))
+        if revision_mode == "current":
+            conditions.append(qmodels.FieldCondition(key="meta.is_active", match=qmodels.MatchValue(value=True)))
+        elif revision_mode == "historical":
+            conditions.append(qmodels.FieldCondition(key="meta.is_active", match=qmodels.MatchValue(value=False)))
         query_filter = qmodels.Filter(must=conditions) if conditions else None
 
         results = client.search(
@@ -262,6 +278,10 @@ class QdrantVectorStore:
         for record in results:
             payload = getattr(record, "payload", {}) or {}
             payload = dict(payload)
+            if issuer:
+                meta = payload.get("meta") if isinstance(payload.get("meta"), dict) else {}
+                if issuer.strip().lower() not in str(meta.get("issuer", "")).strip().lower():
+                    continue
             payload.setdefault("id", getattr(record, "id", None))
             payload["score"] = float(getattr(record, "score", 0.0))
             hits.append(payload)

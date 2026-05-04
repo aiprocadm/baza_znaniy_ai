@@ -209,6 +209,11 @@ class FaissVectorStore:
         *,
         owner: str | None = None,
         tags: list[str] | None = None,
+        act_type: str | None = None,
+        issuer: str | None = None,
+        reg_number: str | None = None,
+        is_active: bool | None = None,
+        revision_mode: str = "current",
     ) -> list[dict[str, object]]:
         if top_k <= 0:
             return []
@@ -247,6 +252,19 @@ class FaissVectorStore:
                 }
                 if not normalized_tags.issubset(payload_tag_set):
                     continue
+            meta = payload.get("meta") if isinstance(payload.get("meta"), dict) else {}
+            if act_type and str(meta.get("act_type", "")).strip().lower() != act_type.strip().lower():
+                continue
+            if issuer and issuer.strip().lower() not in str(meta.get("issuer", "")).strip().lower():
+                continue
+            if reg_number and reg_number.strip().lower() != str(meta.get("reg_number", "")).strip().lower():
+                continue
+            if is_active is not None and bool(meta.get("is_active", True)) is not is_active:
+                continue
+            if revision_mode == "current" and meta.get("is_active") is False:
+                continue
+            if revision_mode == "historical" and meta.get("is_active") is True:
+                continue
             payload.setdefault("id", identifier)
             payload["score"] = float(score)
             hits.append(payload)

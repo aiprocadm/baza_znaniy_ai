@@ -24,6 +24,11 @@ class VectorStore(Protocol):
         *,
         owner: str | None = None,
         tags: list[str] | None = None,
+        act_type: str | None = None,
+        issuer: str | None = None,
+        reg_number: str | None = None,
+        is_active: bool | None = None,
+        revision_mode: str = "current",
     ) -> list[dict[str, object]]:  # pragma: no cover - protocol definition
         """Return the top matching chunks for the supplied query."""
 

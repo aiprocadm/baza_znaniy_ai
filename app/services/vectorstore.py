@@ -203,7 +203,17 @@ def search(
     try:
         store = _resolve_vector_store()
         store.ensure_ready()
-        hits = store.search(query, top_k=top_k, owner=owner, tags=tags)
+        hits = store.search(
+            query,
+            top_k=top_k,
+            owner=owner,
+            tags=tags,
+            act_type=act_type,
+            issuer=issuer,
+            reg_number=reg_number,
+            is_active=is_active,
+            revision_mode=revision_mode,
+        )
     except _VECTOR_ERRORS as exc:  # pragma: no cover - fallback path used in tests
         duration = time.perf_counter() - start
         record_search_operation("vector", "error", duration, 0)
