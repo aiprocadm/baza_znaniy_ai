@@ -9,7 +9,9 @@ import os
 import re
 import time
 from functools import lru_cache
+from dataclasses import dataclass
 from typing import (
+    Any,
     BinaryIO,
     Callable,
     Iterator,
@@ -106,6 +108,54 @@ except ModuleNotFoundError:  # pragma: no cover - executed when metrics deps mis
 
 
 LOGGER = logging.getLogger(__name__)
+
+
+@dataclass
+class ParseResult:
+    pages: list[tuple[int, str]]
+    parser_backend_used: str
+    fallback_reason: str | None
+    ocr_used: bool
+    metadata: dict[str, Any]
+
+
+class DoclingParserAdapter:
+    SUPPORTED_MIME = {
+        "application/pdf",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "text/plain",
+        "text/markdown",
+    }
+
+    def parse(self, filename: str, raw_bytes: bytes) -> list[tuple[int, str]]:
+        try:
+            from docling.document_converter import DocumentConverter  # type: ignore
+        except Exception as exc:  # pragma: no cover
+            raise RuntimeError(f"Docling import failed: {exc}") from exc
+
+        settings = get_settings()
+        timeout = float(getattr(settings, "docling_timeout", 60.0))
+        max_pages = getattr(settings, "docling_max_pages", None)
+        ocr_enabled = bool(getattr(settings, "docling_ocr_enabled", False))
+
+        try:
+            converter = DocumentConverter()
+            result = converter.convert(source=io.BytesIO(raw_bytes), timeout=timeout)
+            markdown = result.document.export_to_markdown()
+        except Exception as exc:
+            raise RuntimeError(f"Docling conversion failed: {exc}") from exc
+
+        lines = [line.strip() for line in str(markdown).splitlines() if line.strip()]
+        if max_pages and isinstance(max_pages, int) and max_pages > 0:
+            lines = lines[:max_pages]
+        if not lines:
+            return []
+        text = _clean("\n".join(lines))
+        return [(1, text)]
+
+
 
 
 class _Tokenizer(Protocol):
@@ -772,36 +822,56 @@ def _hash_chunk(file: str, page: int, text: str) -> str:
     return hashlib.sha256(payload).hexdigest()
 
 
-def iter_document_pages(
-    filename: str, data: Union[bytes, bytearray, BinaryIO]
-) -> Iterator[tuple[int, str]]:
+def parse_document(filename: str, data: Union[bytes, bytearray, BinaryIO]) -> ParseResult:
     name = (filename or "").strip()
     if not name or "." not in name:
-        return iter(())
+        return ParseResult([], "legacy", None, False, {"document": {}, "pages": [], "chunks": []})
 
     ext = name.rsplit(".", 1)[-1].lower()
+    mime_by_ext = {"pdf": "application/pdf", "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation", "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "txt": "text/plain", "md": "text/markdown", "markdown": "text/markdown"}
+    mime = mime_by_ext.get(ext, "application/octet-stream")
     stream = _ensure_binary_stream(data)
     raw_bytes = _read_stream_to_bytes(stream)
 
-    if ext == "pdf":
-        return _iter_pdf_pages(bytes(raw_bytes))
+    backend = _resolve_parser_backend()
+    parser_backend_used = "legacy"
+    fallback_reason = None
+    pages: list[tuple[int, str]] = []
 
-    def _buffer() -> BinaryIO:
-        return io.BytesIO(raw_bytes)
+    if backend in {"docling", "auto"} and mime in DoclingParserAdapter.SUPPORTED_MIME:
+        try:
+            pages = DoclingParserAdapter().parse(name, bytes(raw_bytes))
+            parser_backend_used = "docling"
+        except Exception as exc:
+            fallback_reason = str(exc)
+            LOGGER.warning("Docling parse failed for %s: %s. Fallback to legacy.", name, exc)
 
-    if ext == "docx":
-        return _iter_docx_text(_buffer())
-    if ext == "txt":
-        return _iter_txt_text(_buffer())
-    if ext in {"md", "markdown"}:
-        return _iter_markdown_text(_buffer())
-    if ext in {"html", "htm"}:
-        return _iter_html_text(_buffer())
-    if ext == "pptx":
-        return _iter_pptx_text(_buffer())
-    if ext == "xlsx":
-        return _iter_xlsx_text(_buffer())
-    return iter(())
+    if not pages:
+        def _buffer() -> BinaryIO:
+            return io.BytesIO(raw_bytes)
+        if ext == "pdf":
+            pages = list(_iter_pdf_pages(bytes(raw_bytes)))
+        elif ext == "docx":
+            pages = list(_iter_docx_text(_buffer()))
+        elif ext == "txt":
+            pages = list(_iter_txt_text(_buffer()))
+        elif ext in {"md", "markdown"}:
+            pages = list(_iter_markdown_text(_buffer()))
+        elif ext in {"html", "htm"}:
+            pages = list(_iter_html_text(_buffer()))
+        elif ext == "pptx":
+            pages = list(_iter_pptx_text(_buffer()))
+        elif ext == "xlsx":
+            pages = list(_iter_xlsx_text(_buffer()))
+        parser_backend_used = "legacy" if parser_backend_used != "docling" else parser_backend_used
+
+    metadata = {"document": {"file": name, "mime_type": mime}, "pages": [{"page": p, "text_length": len(t)} for p,t in pages], "chunks": []}
+    ocr_used = ext == "pdf" and parser_backend_used == "legacy"
+    return ParseResult(pages, parser_backend_used, fallback_reason, ocr_used, metadata)
+
+
+def iter_document_pages(filename: str, data: Union[bytes, bytearray, BinaryIO]) -> Iterator[tuple[int, str]]:
+    return iter(parse_document(filename, data).pages)
 
 
 def parse_and_chunk(filename: str, data: Union[bytes, bytearray, BinaryIO]) -> List[dict[str, object]]:
@@ -819,7 +889,8 @@ def parse_and_chunk(filename: str, data: Union[bytes, bytearray, BinaryIO]) -> L
         overlap = _normalise_overlap(chunk_size, int(os.getenv("RAG_OVERLAP", "140")))
         tokenizer = _get_tokenizer()
 
-        for page_number, page_text in iter_document_pages(name, data):
+        parse_result = parse_document(name, data)
+        for page_number, page_text in parse_result.pages:
             if not page_text:
                 continue
             for piece in _chunk(page_text, chunk=chunk_size, overlap=overlap, encoder=tokenizer):
@@ -830,6 +901,16 @@ def parse_and_chunk(filename: str, data: Union[bytes, bytearray, BinaryIO]) -> L
                         "page": page_number,
                         "sha256": sha,
                         "text": piece,
+                        "meta": {
+                            "document": parse_result.metadata.get("document", {}),
+                            "page": {"number": page_number},
+                            "chunk": {"sha256": sha},
+                            "provenance": {
+                                "parser_backend_used": parse_result.parser_backend_used,
+                                "fallback_reason": parse_result.fallback_reason,
+                                "ocr_used": parse_result.ocr_used,
+                            },
+                        },
                     }
                 )
         return chunks
@@ -846,5 +927,6 @@ __all__ = [
     "_clean",
     "_get_tokenizer",
     "iter_document_pages",
+    "parse_document",
     "parse_and_chunk",
 ]
