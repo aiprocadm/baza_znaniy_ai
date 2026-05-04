@@ -634,6 +634,16 @@ class Settings(BaseSettings):
         return candidate if candidate > 0 else None
 
     # HTML conversion --------------------------------------------------
+    document_parser_backend: str = Field(
+        default="legacy",
+        validation_alias=AliasChoices("DOCUMENT_PARSER_BACKEND"),
+        description="Document parser backend: legacy|docling|auto.",
+    )
+    docling_enabled: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("DOCLING_ENABLED"),
+        description="Enable Docling parser integration path.",
+    )
     html2text_bodywidth: int = Field(
         default=0,
         validation_alias=AliasChoices("HTML2TEXT_BODYWIDTH"),

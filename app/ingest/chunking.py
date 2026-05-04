@@ -131,6 +131,32 @@ _TOKENIZER: Optional[_Tokenizer] = None
 _OCR_AVAILABLE = pytesseract is not None and Image is not None
 
 
+def _resolve_parser_backend(explicit_backend: str | None = None) -> str:
+    """Resolve parser backend with safe fallback to legacy."""
+
+    settings = get_settings()
+    raw = (explicit_backend or getattr(settings, "document_parser_backend", "legacy") or "legacy")
+    backend = str(raw).strip().lower()
+    if backend not in {"legacy", "docling", "auto"}:
+        LOGGER.warning("Unknown parser backend %s; falling back to legacy", backend)
+        return "legacy"
+    if backend == "legacy":
+        return backend
+
+    docling_enabled = bool(getattr(settings, "docling_enabled", False))
+    if not docling_enabled and backend == "docling":
+        LOGGER.warning("Docling backend requested but disabled; falling back to legacy")
+        return "legacy"
+
+    try:
+        import docling  # type: ignore # noqa: F401
+        return "docling"
+    except Exception as exc:
+        if backend == "docling":
+            LOGGER.warning("Docling backend requested but unavailable (%s); using legacy", exc)
+        return "legacy"
+
+
 @lru_cache(maxsize=1)
 def _ocr_config() -> OCRConfig:
     settings = get_settings()

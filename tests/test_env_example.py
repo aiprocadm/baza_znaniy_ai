@@ -39,6 +39,8 @@ EXPECTED_DEFAULTS = {
     "LLM_MAX_TOKENS": "1024",
     "LORA_ADAPTER_PATH": "",
     "LORA_SCALING": "1.0",
+    "DOCUMENT_PARSER_BACKEND": "legacy",
+    "DOCLING_ENABLED": "false",
 }
 
 EXPECTED_EXTENSION_SET = {"pdf", "docx", "pptx", "xlsx", "txt", "md"}
