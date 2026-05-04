@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from datetime import timedelta
-from typing import Any, Iterable
+from typing import Any, Iterable, Protocol
 from uuid import uuid4
 
 from fastapi import Depends, HTTPException, Request, status
@@ -21,6 +21,68 @@ from app.security import InvalidTokenError, create_access_token, decode_token
 
 
 bearer_scheme = HTTPBearer(auto_error=False)
+
+
+@dataclass
+class IdentityClaims:
+    """Normalized identity claims extracted from an incoming access token."""
+
+    subject: str
+    tenant: str
+    roles: tuple[str, ...]
+    token_id: str | None = None
+
+
+class IdentityProvider(Protocol):
+    """Interface for pluggable identity providers."""
+
+    def verify_token(self, token: str) -> dict[str, Any]:
+        ...
+
+    def extract_tenant(self, claims: dict[str, Any]) -> str:
+        ...
+
+    def extract_roles(self, claims: dict[str, Any]) -> tuple[str, ...]:
+        ...
+
+
+class LocalJwtProvider:
+    """Identity provider backed by local JWT validation logic."""
+
+    def verify_token(self, token: str) -> dict[str, Any]:
+        try:
+            payload = decode_token(token)
+        except InvalidTokenError as exc:
+            raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="INVALID_ACCESS_TOKEN") from exc
+        if payload.get("type") != "access":
+            raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="INVALID_ACCESS_TOKEN")
+        issuer = os.getenv("JWT_ISSUER", "baza-znaniy-ai")
+        audience = os.getenv("JWT_AUDIENCE", "baza-znaniy-clients")
+        if payload.get("iss") != issuer or payload.get("aud") != audience:
+            raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="INVALID_ACCESS_TOKEN")
+        return payload
+
+    def extract_tenant(self, claims: dict[str, Any]) -> str:
+        return str(claims.get("tenant") or "").strip()
+
+    def extract_roles(self, claims: dict[str, Any]) -> tuple[str, ...]:
+        role = claims.get("role")
+        if role is None:
+            return ()
+        if isinstance(role, str):
+            return (role,)
+        if isinstance(role, Iterable):
+            return tuple(str(item) for item in role if item)
+        return (str(role),)
+
+
+class KeycloakOidcProvider(LocalJwtProvider):
+    """Placeholder provider for Keycloak OIDC integration."""
+
+
+class SupabaseAuthProvider(LocalJwtProvider):
+    """Placeholder provider for Supabase Auth integration."""
+
 
 
 _AUTH_DISABLED_ENV_KEYS = (
@@ -216,16 +278,8 @@ def get_current_user(
     token = _extract_bearer_token(request)
     if not token:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="NOT_AUTHENTICATED")
-    try:
-        payload = decode_token(token)
-    except InvalidTokenError as exc:
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="INVALID_ACCESS_TOKEN") from exc
-    if payload.get("type") != "access":
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="INVALID_ACCESS_TOKEN")
-    issuer = os.getenv("JWT_ISSUER", "baza-znaniy-ai")
-    audience = os.getenv("JWT_AUDIENCE", "baza-znaniy-clients")
-    if payload.get("iss") != issuer or payload.get("aud") != audience:
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="INVALID_ACCESS_TOKEN")
+    provider = get_identity_provider()
+    payload = provider.verify_token(token)
     user_id = payload.get("sub")
     if user_id is None:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="INVALID_ACCESS_TOKEN")
@@ -261,6 +315,62 @@ def get_current_active_user(user: UserRecord = Depends(get_current_user)) -> Use
     return user
 
 
+def get_identity_provider() -> IdentityProvider:
+    settings = get_settings()
+    provider_name = str(getattr(settings, "auth_provider", "local-jwt")).strip().lower()
+    if provider_name == "keycloak":
+        return KeycloakOidcProvider()
+    if provider_name == "supabase":
+        return SupabaseAuthProvider()
+    return LocalJwtProvider()
+
+
+def _resolve_role(role_name: str) -> UserRole | None:
+    normalized = str(role_name).strip().lower()
+    if not normalized:
+        return None
+    for role in UserRole:
+        if normalized in {role.value.lower(), role.name.lower()}:
+            return role
+    return None
+
+
+def authorize_tenant_and_roles(
+    tenant: str = Depends(get_tenant),
+    user: UserRecord = Depends(get_current_active_user),
+    request: Request = None,
+) -> str:
+    """Centralized tenant/role access guard used by API dependencies."""
+
+    requested_tenant = (tenant or "").strip()
+    if not requested_tenant:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="TENANT_REQUIRED")
+
+    provider = get_identity_provider()
+    roles_from_token: tuple[str, ...] = ()
+    token = _extract_bearer_token(request)
+    if token:
+        try:
+            claims = provider.verify_token(token)
+            if provider.extract_tenant(claims) and provider.extract_tenant(claims) != user.tenant_slug:
+                raise HTTPException(status.HTTP_403_FORBIDDEN, detail="TENANT_ACCESS_DENIED")
+            roles_from_token = provider.extract_roles(claims)
+        except HTTPException:
+            raise
+
+    effective_role = user.role
+    if roles_from_token:
+        mapped = _resolve_role(roles_from_token[0])
+        if mapped is not None:
+            effective_role = mapped
+
+    if effective_role == UserRole.ADMIN:
+        return requested_tenant
+    if requested_tenant != user.tenant_slug:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, detail="TENANT_ACCESS_DENIED")
+    return requested_tenant
+
+
 def require_roles(*roles: Iterable[UserRole]):
     """Factory producing a dependency that enforces at least one matching role."""
 
@@ -287,16 +397,9 @@ def require_roles(*roles: Iterable[UserRole]):
     return _checker
 
 
-def ensure_tenant_access(
-    tenant: str = Depends(get_tenant),
-    user: UserRecord = Depends(get_current_active_user),
-) -> str:
-    """Validate that the authenticated user can operate on the requested tenant."""
+def ensure_tenant_access(tenant: str = Depends(authorize_tenant_and_roles)) -> str:
+    """Backwards-compatible alias for tenant checks."""
 
-    if user.role == UserRole.ADMIN:
-        return tenant
-    if tenant != user.tenant_slug:
-        raise HTTPException(status.HTTP_403_FORBIDDEN, detail="TENANT_ACCESS_DENIED")
     return tenant
 
 

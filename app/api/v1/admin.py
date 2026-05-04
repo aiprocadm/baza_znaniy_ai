@@ -7,6 +7,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, Query
 from sqlmodel import Session, select
 
+from app.core.auth import ensure_tenant_access, require_admin_user
 from app.core.deps import get_ingest_session
 from app.models import JobInfo, JobsResponse
 from app.models.file import JobRecord
@@ -21,6 +22,8 @@ def list_jobs(
     tenant_slug: Optional[str] = Query(None, alias="tenant"),
     job_type: Optional[str] = Query(None),
     status: Optional[str] = Query(None),
+    _: str = Depends(ensure_tenant_access),
+    __= Depends(require_admin_user),
 ) -> JobsResponse:
     """Return information about queued and historical jobs."""
 
