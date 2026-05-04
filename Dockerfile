@@ -57,4 +57,6 @@ RUN if [ "${DOWNLOAD_MODEL}" = "1" ]; then \
 
 EXPOSE 8000
 
+ENV BACKEND_ENTRYPOINT=app.api.main:app
+
 CMD ["uvicorn", "app.api.main:app", "--host", "0.0.0.0", "--port", "8000"]
