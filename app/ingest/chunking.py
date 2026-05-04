@@ -845,6 +845,7 @@ def parse_document(filename: str, data: Union[bytes, bytearray, BinaryIO]) -> Pa
     raw_bytes = _read_stream_to_bytes(stream)
 
     backend = _resolve_parser_backend()
+    LOGGER.info("Document parser backend selected", extra={"backend_selected": backend, "mime": mime, "tenant": os.getenv("TENANT", "unknown"), "document_id": os.getenv("DOCUMENT_ID", "unknown"), "document_name": name})
     parser_backend_used = "legacy"
     fallback_reason = None
     pages: list[tuple[int, str]] = []
