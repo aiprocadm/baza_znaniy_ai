@@ -223,3 +223,19 @@ def test_privilege_escalation_blocked_for_member(auth_client: TestClient) -> Non
         headers={"Authorization": f"Bearer {member_access}", "X-Tenant": "default"},
     )
     assert response.status_code == 403
+
+
+def test_member_cannot_search_other_tenant(auth_client: TestClient) -> None:
+    login = auth_client.post(
+        "/api/v1/auth/login",
+        json={"email": "member@example.com", "password": "member-secret"},
+    )
+    member_access = login.json()["access_token"]
+
+    response = auth_client.get(
+        "/api/v1/search",
+        params={"query": "policy"},
+        headers={"Authorization": f"Bearer {member_access}", "X-Tenant": "other-tenant"},
+    )
+    assert response.status_code == 403
+    assert response.json()["detail"] == "TENANT_ACCESS_DENIED"

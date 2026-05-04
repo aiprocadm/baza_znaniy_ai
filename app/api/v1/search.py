@@ -16,7 +16,7 @@ router = APIRouter(tags=["search"])
 
 @router.get("/search", response_model=SearchResponse)
 def search_endpoint(
-    _: UserRecord = Depends(get_current_active_user),
+    user: UserRecord = Depends(get_current_active_user),
     query: str = Query(..., min_length=1),
     top_k: int = Query(5, ge=1, le=50),
     owner: str | None = Query(None, min_length=1),
@@ -30,7 +30,9 @@ def search_endpoint(
 ) -> SearchResponse:
     """Perform a similarity search without invoking the LLM."""
 
-    _ = tenant  # used via dependency to enforce tenant access
+    effective_tenant = tenant.strip() if isinstance(tenant, str) else ""
+    if not effective_tenant:
+        raise ValueError("tenant context is required")
     normalized_tags = [tag.strip() for tag in (tags or []) if tag and tag.strip()]
     normalized_owner = owner.strip() if owner else None
     hits = search(
@@ -43,6 +45,7 @@ def search_endpoint(
         reg_number=reg_number,
         is_active=is_active,
         revision_mode=revision_mode,
+        tenant_id=effective_tenant,
     )
     models = [
         SearchHit(

@@ -128,6 +128,7 @@ def _search_fallback(
     reg_number: str | None = None,
     is_active: bool | None = None,
     revision_mode: str = "current",
+    tenant_id: str | None = None,
 ) -> List[dict[str, object]]:
     """Very small substring-based search over the fallback index."""
 
@@ -139,9 +140,14 @@ def _search_fallback(
         snapshot = list(get_fallback_storage())
 
     normalized_tags = {tag.strip().lower() for tag in (tags or []) if tag and tag.strip()}
+    normalized_tenant = (tenant_id or "").strip().lower()
     normalized_owner = (owner or "").strip().lower()
 
     for chunk in snapshot:
+        if normalized_tenant:
+            chunk_tenant = str(chunk.get("tenant_id") or chunk.get("owner") or "").strip().lower()
+            if chunk_tenant != normalized_tenant:
+                continue
         if normalized_owner:
             chunk_owner = str(chunk.get("owner", "")).strip().lower()
             if chunk_owner != normalized_owner:
@@ -195,10 +201,14 @@ def search(
     reg_number: str | None = None,
     is_active: bool | None = None,
     revision_mode: str = "current",
+    tenant_id: str | None = None,
 ) -> List[dict[str, object]]:
     """Run a similarity search returning at most *top_k* hits."""
 
     start = time.perf_counter()
+
+    if not tenant_id or not tenant_id.strip():
+        raise ValueError("tenant_id is required for search")
 
     try:
         store = _resolve_vector_store()
@@ -213,13 +223,14 @@ def search(
             reg_number=reg_number,
             is_active=is_active,
             revision_mode=revision_mode,
+            tenant_id=tenant_id,
         )
     except _VECTOR_ERRORS as exc:  # pragma: no cover - fallback path used in tests
         duration = time.perf_counter() - start
         record_search_operation("vector", "error", duration, 0)
         LOGGER.exception("Falling back to in-memory search", exc_info=exc)
         fallback_start = time.perf_counter()
-        fallback_hits = _search_fallback(query, top_k, owner=owner, tags=tags, act_type=act_type, issuer=issuer, reg_number=reg_number, is_active=is_active, revision_mode=revision_mode)
+        fallback_hits = _search_fallback(query, top_k, owner=owner, tags=tags, act_type=act_type, issuer=issuer, reg_number=reg_number, is_active=is_active, revision_mode=revision_mode, tenant_id=tenant_id)
         record_search_operation(
             "fallback",
             "success",
