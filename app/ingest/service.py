@@ -1124,6 +1124,7 @@ class IngestWorker:
                             "tokens": chunk_tokens,
                             "meta": chunk.meta or {},
                             "owner": job.tenant_id,
+                            "tenant_id": job.tenant_id,
                         }
                     )
                     chunk_counter += 1

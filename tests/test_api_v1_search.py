@@ -17,11 +17,13 @@ def test_search_endpoint_passes_owner_and_tags_filters(monkeypatch) -> None:
         reg_number: str | None = None,
         is_active: bool | None = None,
         revision_mode: str = "current",
+        tenant_id: str | None = None,
     ) -> list[dict[str, object]]:
         captured["query"] = query
         captured["top_k"] = top_k
         captured["owner"] = owner
         captured["tags"] = tags
+        captured["tenant_id"] = tenant_id
         return [{"file": "doc.md", "page": 1, "score": 0.9, "text": "result"}]
 
     monkeypatch.setattr(search_api, "search", _fake_search)
@@ -38,6 +40,7 @@ def test_search_endpoint_passes_owner_and_tags_filters(monkeypatch) -> None:
         "top_k": 3,
         "owner": "alice@kb.ai",
         "tags": ["prod", "runbook"],
+        "tenant_id": "test-tenant",
     }
     assert response.hits[0].file == "doc.md"
 
@@ -56,9 +59,11 @@ def test_search_endpoint_normalizes_empty_filters(monkeypatch) -> None:
         reg_number: str | None = None,
         is_active: bool | None = None,
         revision_mode: str = "current",
+        tenant_id: str | None = None,
     ) -> list[dict[str, object]]:
         captured["owner"] = owner
         captured["tags"] = tags
+        captured["tenant_id"] = tenant_id
         return []
 
     monkeypatch.setattr(search_api, "search", _fake_search)
@@ -70,7 +75,7 @@ def test_search_endpoint_normalizes_empty_filters(monkeypatch) -> None:
         tenant="test-tenant",
     )
     assert response.hits == []
-    assert captured == {"owner": None, "tags": None}
+    assert captured == {"owner": None, "tags": None, "tenant_id": "test-tenant"}
 
 
 def test_search_endpoint_passes_all_npa_filters(monkeypatch) -> None:
@@ -87,6 +92,7 @@ def test_search_endpoint_passes_all_npa_filters(monkeypatch) -> None:
         reg_number: str | None = None,
         is_active: bool | None = None,
         revision_mode: str = "current",
+        tenant_id: str | None = None,
     ) -> list[dict[str, object]]:
         captured.update(
             {
@@ -99,6 +105,7 @@ def test_search_endpoint_passes_all_npa_filters(monkeypatch) -> None:
                 "reg_number": reg_number,
                 "is_active": is_active,
                 "revision_mode": revision_mode,
+                "tenant_id": tenant_id,
             }
         )
         return []
@@ -127,4 +134,17 @@ def test_search_endpoint_passes_all_npa_filters(monkeypatch) -> None:
         "reg_number": "123-ФЗ",
         "is_active": False,
         "revision_mode": "historical",
+        "tenant_id": "test-tenant",
     }
+
+
+def test_search_endpoint_requires_tenant_context(monkeypatch) -> None:
+    def _fake_search(*args, **kwargs):
+        raise AssertionError("search should not be called")
+
+    monkeypatch.setattr(search_api, "search", _fake_search)
+
+    import pytest
+
+    with pytest.raises(ValueError, match="tenant context is required"):
+        search_api.search_endpoint(query="replication", tenant="   ")

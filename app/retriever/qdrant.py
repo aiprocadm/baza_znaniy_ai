@@ -246,6 +246,7 @@ class QdrantVectorStore:
         reg_number: str | None = None,
         is_active: bool | None = None,
         revision_mode: str = "current",
+        tenant_id: str | None = None,
     ) -> list[dict[str, object]]:
         if top_k <= 0:
             return []
@@ -255,8 +256,16 @@ class QdrantVectorStore:
         if not len(query_vector):
             return []
 
+        if not tenant_id or not tenant_id.strip():
+            raise ValueError("tenant_id is required for tenant-scoped search")
+
         client = self._client_instance()
-        conditions: list[qmodels.FieldCondition] = []
+        conditions: list[qmodels.FieldCondition] = [
+            qmodels.FieldCondition(
+                key="tenant_id",
+                match=qmodels.MatchValue(value=tenant_id.strip()),
+            )
+        ]
         if owner and owner.strip():
             conditions.append(
                 qmodels.FieldCondition(
