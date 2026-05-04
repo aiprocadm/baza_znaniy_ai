@@ -24,6 +24,11 @@ def test_search_endpoint_passes_owner_and_tags_filters(monkeypatch) -> None:
         captured["owner"] = owner
         captured["tags"] = tags
         captured["tenant_id"] = tenant_id
+        captured["act_type"] = act_type
+        captured["issuer"] = issuer
+        captured["reg_number"] = reg_number
+        captured["is_active"] = is_active
+        captured["revision_mode"] = revision_mode
         return [{"file": "doc.md", "page": 1, "score": 0.9, "text": "result"}]
 
     monkeypatch.setattr(search_api, "search", _fake_search)
@@ -41,6 +46,11 @@ def test_search_endpoint_passes_owner_and_tags_filters(monkeypatch) -> None:
         "owner": "alice@kb.ai",
         "tags": ["prod", "runbook"],
         "tenant_id": "test-tenant",
+        "act_type": None,
+        "issuer": None,
+        "reg_number": None,
+        "is_active": None,
+        "revision_mode": "current",
     }
     assert response.hits[0].file == "doc.md"
 
@@ -64,6 +74,11 @@ def test_search_endpoint_normalizes_empty_filters(monkeypatch) -> None:
         captured["owner"] = owner
         captured["tags"] = tags
         captured["tenant_id"] = tenant_id
+        captured["act_type"] = act_type
+        captured["issuer"] = issuer
+        captured["reg_number"] = reg_number
+        captured["is_active"] = is_active
+        captured["revision_mode"] = revision_mode
         return []
 
     monkeypatch.setattr(search_api, "search", _fake_search)
@@ -75,7 +90,7 @@ def test_search_endpoint_normalizes_empty_filters(monkeypatch) -> None:
         tenant="test-tenant",
     )
     assert response.hits == []
-    assert captured == {"owner": None, "tags": None, "tenant_id": "test-tenant"}
+    assert captured == {"owner": None, "tags": None, "tenant_id": "test-tenant", "act_type": None, "issuer": None, "reg_number": None, "is_active": None, "revision_mode": "current"}
 
 
 def test_search_endpoint_passes_all_npa_filters(monkeypatch) -> None:
@@ -136,6 +151,7 @@ def test_search_endpoint_passes_all_npa_filters(monkeypatch) -> None:
         "revision_mode": "historical",
         "tenant_id": "test-tenant",
     }
+
 
 
 def test_search_endpoint_requires_tenant_context(monkeypatch) -> None:

@@ -327,21 +327,12 @@ def test_qdrant_search_builds_filter_parity(tmp_path: Path, monkeypatch: pytest.
         client_factory=lambda **_: client,
     )
 
-    store.search(
-        "query",
-        3,
-        owner="tenant-a",
-        tags=["a", "b"],
-        act_type="law",
-        issuer="минюст",
-        reg_number="123",
-        is_active=False,
-        revision_mode="historical",
-    )
+    store.search("query", 3, filters=vs.SearchFilters.from_input(tenant_id="tenant-a", owner="tenant-a", tags=["a", "b"], act_type="law", issuer="минюст", reg_number="123", is_active=False, revision_mode="historical"))
 
     sent_filter = client.search_queries[-1]["query_filter"]
     keys = [condition.key for condition in sent_filter.must]
     assert keys == [
+        "tenant_id",
         "owner",
         "tags",
         "tags",
@@ -352,3 +343,27 @@ def test_qdrant_search_builds_filter_parity(tmp_path: Path, monkeypatch: pytest.
         "is_active",
     ]
     assert isinstance(sent_filter.must[4].match, _MatchText)
+
+def test_qdrant_and_faiss_apply_same_filters(tmp_path: Path) -> None:
+    chunks = [
+        {"sha256": "1", "text": "alpha law", "file": "f", "page": 1, "owner": "tenant-a", "tenant_id": "tenant-a", "tags": ["prod"], "meta": {"act_type": "law", "issuer": "MinJust", "reg_number": "123", "is_active": True}},
+        {"sha256": "2", "text": "alpha law old", "file": "f", "page": 2, "owner": "tenant-a", "tenant_id": "tenant-a", "tags": ["prod"], "meta": {"act_type": "law", "issuer": "MinJust", "reg_number": "123", "is_active": False}},
+        {"sha256": "3", "text": "alpha other", "file": "f", "page": 3, "owner": "tenant-b", "tenant_id": "tenant-b", "tags": ["prod"], "meta": {"act_type": "law", "issuer": "MinJust", "reg_number": "123", "is_active": True}},
+    ]
+    filters = vs.SearchFilters.from_input(tenant_id="tenant-a", tags=["prod"], act_type="law", issuer="min", reg_number="123", revision_mode="current")
+
+    fsettings = _make_settings(tmp_path / "fa", backend="faiss")
+    fstore = FaissVectorStore(settings=fsettings, embedder_factory=lambda _: _StubEmbedder("stub"))
+    fstore.upsert(chunks)
+    fhits = fstore.search("alpha", top_k=5, filters=filters)
+
+    client = _StubClient()
+    qsettings = _make_settings(tmp_path / "qd", backend="qdrant")
+    qstore = QdrantVectorStore(settings=qsettings, embedder_factory=lambda _: _StubEmbedder("stub"), client_factory=lambda **_: client)
+    qstore.upsert(chunks)
+    qstore.search("alpha", top_k=5, filters=filters)
+
+    qfilter = client.search_queries[-1]["query_filter"]
+    must_keys = [c.key for c in qfilter.must]
+    assert "tenant_id" in must_keys and "tags" in must_keys and "reg_number" in must_keys
+    assert [h["sha256"] for h in fhits] == ["1"]

@@ -19,7 +19,7 @@ except Exception:  # pragma: no cover - fallback when qdrant-client not installe
     QdrantApiException = QdrantResponseHandlingException = QdrantUnexpectedResponse = None
 
 from app.core.config import get_settings
-from app.retriever.vector_store import get_vector_store
+from app.retriever.vector_store import SearchFilters, get_vector_store
 from app.observability.metrics import record_index_operation, record_search_operation
 
 LOGGER = logging.getLogger(__name__)
@@ -139,9 +139,19 @@ def _search_fallback(
     with _FALLBACK_LOCK:
         snapshot = list(get_fallback_storage())
 
-    normalized_tags = {tag.strip().lower() for tag in (tags or []) if tag and tag.strip()}
-    normalized_tenant = (tenant_id or "").strip().lower()
-    normalized_owner = (owner or "").strip().lower()
+    filters = SearchFilters.from_input(
+        tenant_id=tenant_id or "",
+        owner=owner,
+        tags=tags,
+        act_type=act_type,
+        issuer=issuer,
+        reg_number=reg_number,
+        is_active=is_active,
+        revision_mode=revision_mode,
+    )
+    normalized_tags = {tag.lower() for tag in filters.tags}
+    normalized_tenant = filters.tenant_id.lower()
+    normalized_owner = (filters.owner or "").lower()
 
     for chunk in snapshot:
         if normalized_tenant:
@@ -163,17 +173,17 @@ def _search_fallback(
                 continue
 
         meta = chunk.get("meta") if isinstance(chunk.get("meta"), dict) else {}
-        if act_type and str(meta.get("act_type", "")).strip().lower() != act_type.strip().lower():
+        if filters.act_type and str(meta.get("act_type", "")).strip().lower() != filters.act_type.lower():
             continue
-        if issuer and issuer.strip().lower() not in str(meta.get("issuer", "")).strip().lower():
+        if filters.issuer and filters.issuer.lower() not in str(meta.get("issuer", "")).strip().lower():
             continue
-        if reg_number and reg_number.strip().lower() != str(meta.get("reg_number", "")).strip().lower():
+        if filters.reg_number and filters.reg_number.lower() != str(meta.get("reg_number", "")).strip().lower():
             continue
-        if is_active is not None and bool(meta.get("is_active", True)) is not is_active:
+        if filters.is_active is not None and bool(meta.get("is_active", True)) is not filters.is_active:
             continue
-        if revision_mode == "current" and meta.get("is_active") is False:
+        if filters.revision_mode == "current" and meta.get("is_active") is False:
             continue
-        if revision_mode == "historical" and meta.get("is_active") is True:
+        if filters.revision_mode == "historical" and meta.get("is_active") is True:
             continue
 
         text = str(chunk.get("text", ""))
@@ -184,7 +194,7 @@ def _search_fallback(
             score = haystack.count(needle) / (len(text) or 1)
             if bool(meta.get("is_active", True)):
                 score += 0.2
-            score += min(0.2, float(bool(reg_number and meta.get("reg_number"))))
+            score += min(0.2, float(bool(filters.reg_number and meta.get("reg_number"))))
             hits.append((score, chunk))
     hits.sort(key=lambda item: item[0], reverse=True)
     return [chunk for _score, chunk in hits[:top_k]]
@@ -207,30 +217,27 @@ def search(
 
     start = time.perf_counter()
 
-    if not tenant_id or not tenant_id.strip():
-        raise ValueError("tenant_id is required for search")
+    filters = SearchFilters.from_input(
+        tenant_id=tenant_id or "",
+        owner=owner,
+        tags=tags,
+        act_type=act_type,
+        issuer=issuer,
+        reg_number=reg_number,
+        is_active=is_active,
+        revision_mode=revision_mode,
+    )
 
     try:
         store = _resolve_vector_store()
         store.ensure_ready()
-        hits = store.search(
-            query,
-            top_k=top_k,
-            owner=owner,
-            tags=tags,
-            act_type=act_type,
-            issuer=issuer,
-            reg_number=reg_number,
-            is_active=is_active,
-            revision_mode=revision_mode,
-            tenant_id=tenant_id,
-        )
+        hits = store.search(query, top_k=top_k, filters=filters)
     except _VECTOR_ERRORS as exc:  # pragma: no cover - fallback path used in tests
         duration = time.perf_counter() - start
         record_search_operation("vector", "error", duration, 0)
         LOGGER.exception("Falling back to in-memory search", exc_info=exc)
         fallback_start = time.perf_counter()
-        fallback_hits = _search_fallback(query, top_k, owner=owner, tags=tags, act_type=act_type, issuer=issuer, reg_number=reg_number, is_active=is_active, revision_mode=revision_mode, tenant_id=tenant_id)
+        fallback_hits = _search_fallback(query, top_k, owner=filters.owner, tags=list(filters.tags), act_type=filters.act_type, issuer=filters.issuer, reg_number=filters.reg_number, is_active=filters.is_active, revision_mode=filters.revision_mode, tenant_id=filters.tenant_id)
         record_search_operation(
             "fallback",
             "success",
