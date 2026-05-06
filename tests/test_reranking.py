@@ -221,3 +221,77 @@ def test_chat_skips_reranker_when_disabled(sample_hits: List[dict[str, Any]]) ->
     assert reranker.called is False
     expected_files = [item["file"] for item in sample_hits[: settings.rerank_limit]]
     assert [item.file for item in response.citations] == expected_files
+
+
+def test_chat_falls_back_to_legacy_when_langchain_disabled(sample_hits: List[dict[str, Any]]) -> None:
+    settings = Settings().model_copy(
+        update={
+            "langchain_enabled": False,
+            "retrieve_topk": 3,
+            "chat_min_citations": 1,
+            "chat_max_citations": 2,
+        }
+    )
+    request, _state = _build_request(settings, sample_hits, reranker=None)
+    payload = ChatRequest(user_id="u", message="legacy flow", conversation_id=None)
+
+    original_search = chat_module.search
+
+    def stub_search(query: str, top_k: int = 10) -> List[dict[str, Any]]:
+        assert query == "legacy flow"
+        assert top_k == settings.retrieve_topk
+        return list(sample_hits)
+
+    chat_module.search = stub_search
+    try:
+        response = chat_module.chat(payload, request=request)
+    finally:
+        chat_module.search = original_search
+
+    assert isinstance(response, ChatResponse)
+    assert response.conversation_id == "conversation-id"
+    assert response.citations
+
+
+def test_history_aware_rewrite_applied_when_enabled(sample_hits: List[dict[str, Any]]) -> None:
+    settings = Settings().model_copy(
+        update={
+            "langchain_enabled": True,
+            "langchain_use_history_aware": True,
+            "langchain_return_source_docs": True,
+        }
+    )
+
+    request, state = _build_request(settings, sample_hits, reranker=None)
+
+    def _history(_conversation_id: str, limit: int) -> list[tuple[str, str]]:
+        assert limit > 0
+        return [("user", "кто подписант?"), ("assistant", "уточните редакцию")]
+
+    state.chat_store.get_recent_messages = _history
+    payload = ChatRequest(user_id="u", message="а в новой версии?", conversation_id=None)
+
+    captured_question: dict[str, str] = {}
+
+    class ChainStub:
+        def __call__(self, *, payload: Any, context: dict[str, Any]) -> dict[str, Any]:
+            captured_question["question"] = context["question"]
+            return {
+                "answer": "LC ответ",
+                "sources": [{"file": "doc-lc.pdf", "page": 7, "score": 0.91}],
+            }
+
+    factory = __import__("app.langchain.factory", fromlist=["build_chat_chain"])
+    original_builder = factory.build_chat_chain
+    factory.build_chat_chain = lambda _settings: ChainStub()
+    original_search = chat_module.search
+    chat_module.search = lambda *_args, **_kwargs: []
+    try:
+        response = chat_module.chat(payload, request=request)
+    finally:
+        factory.build_chat_chain = original_builder
+        chat_module.search = original_search
+
+    assert "кто подписант?" in captured_question["question"]
+    assert response.answer.startswith("LC ответ")
+    assert response.citations and response.citations[0].file == "doc-lc.pdf"

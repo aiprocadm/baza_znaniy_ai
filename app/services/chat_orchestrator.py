@@ -5,7 +5,8 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass
-from typing import Callable, Iterable, List, Mapping
+from enum import StrEnum
+from typing import Any, Callable, Iterable, List, Mapping
 
 from fastapi import HTTPException, status
 
@@ -20,6 +21,55 @@ from app.services.vectorstore import search
 
 LOGGER = logging.getLogger(__name__)
 _SERVICE_UNAVAILABLE = getattr(status, "HTTP_503_SERVICE_UNAVAILABLE", 503)
+
+
+class ChatExecutionMode(StrEnum):
+    """Execution mode for chat request handling."""
+
+    LEGACY = "legacy"
+    LANGCHAIN = "langchain"
+
+
+def _resolve_execution_mode(runtime: ChatRuntime) -> ChatExecutionMode:
+    return ChatExecutionMode.LANGCHAIN if runtime.langchain_enabled else ChatExecutionMode.LEGACY
+
+
+def _map_langchain_result_to_chat_response(
+    result: Mapping[str, Any],
+    *,
+    conversation_id: str,
+    runtime: ChatRuntime,
+    latency_ms: float,
+    format_answer: Callable[[str, Iterable[Citation]], str],
+) -> ChatResponse:
+    answer_text = str(result.get("answer") or result.get("output") or "").strip()
+    source_items = []
+    if runtime.langchain_return_source_docs:
+        source_items = list(result.get("sources") or result.get("source_documents") or [])
+
+    citations = [
+        Citation(
+            file=item.get("file") or item.get("source"),
+            page=item.get("page"),
+            article=item.get("article"),
+            clause=item.get("clause"),
+            revision=item.get("revision"),
+            revision_date=item.get("revision_date"),
+            score=float(item.get("score", 0.0)),
+        )
+        for item in source_items
+        if isinstance(item, Mapping)
+    ]
+    formatted_answer = format_answer(answer_text, citations)
+    return ChatResponse(
+        answer=formatted_answer,
+        citations=citations,
+        conversation_id=conversation_id,
+        citations_insufficient=False,
+        latency_ms=latency_ms,
+        max_context_tokens=runtime.llm_ctx,
+        max_generation_tokens=runtime.llm_max_tokens,
+    )
 
 
 @dataclass(slots=True)
@@ -41,6 +91,10 @@ class ChatRuntime:
     llm_ctx: int | None
     llm_max_tokens: int | None
     generation_context: Mapping[str, object]
+    langchain_enabled: bool = False
+    langchain_use_history_aware: bool = False
+    langchain_return_source_docs: bool = False
+    settings: Any | None = None
 
 
 @dataclass(slots=True)
@@ -116,6 +170,35 @@ def handle_chat(
             except Exception:  # pragma: no cover - defensive logging path
                 LOGGER.exception("Failed to load memory context")
                 memory_text = ""
+
+        execution_mode = _resolve_execution_mode(runtime)
+        if execution_mode is ChatExecutionMode.LANGCHAIN:
+            from app.langchain.factory import build_chat_chain, rewrite_with_history
+
+            chain = build_chat_chain(runtime.settings)
+            rewritten_message = rewrite_with_history(payload.message, history_text) if runtime.langchain_use_history_aware else payload.message
+            lc_result = chain(
+                payload=payload,
+                context={
+                    "question": rewritten_message,
+                    "history": history_text,
+                    "summary": summary_text,
+                    "memory": memory_text,
+                    "conversation_id": conversation_id,
+                },
+            )
+            answer = str(lc_result.get("answer") or lc_result.get("output") or "").strip()
+            runtime.chat_store.record_exchange(conversation_id, payload.message, answer)
+            if runtime.chat_store.messages_since_summary(conversation_id) >= runtime.chat_summary_trigger:
+                runtime.summarizer.summarize(conversation_id)
+            latency_ms = (time.perf_counter() - start) * 1000
+            return _map_langchain_result_to_chat_response(
+                lc_result,
+                conversation_id=conversation_id,
+                runtime=runtime,
+                latency_ms=latency_ms,
+                format_answer=format_answer,
+            )
 
         hits = list(search(payload.message, top_k=runtime.retrieve_topk))
         if hits:
