@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Query
 
-from app.core.auth import ensure_tenant_access, get_current_active_user
+from app.core.auth import SubjectAttribution, ensure_tenant_access, get_current_active_user, get_subject_attribution
 from app.models.user import UserRecord
 from app.models import SearchHit, SearchResponse
 from app.retriever.vector_store import SearchFilters
@@ -28,6 +28,7 @@ def search_endpoint(
     is_active: bool | None = Query(None),
     revision_mode: str = Query("current", pattern="^(current|historical)$"),
     tenant: str = Depends(ensure_tenant_access),
+    subject: SubjectAttribution = Depends(get_subject_attribution),
 ) -> SearchResponse:
     """Perform a similarity search without invoking the LLM."""
 
@@ -65,4 +66,5 @@ def search_endpoint(
         )
         for item in hits
     ]
+    sink = getattr(user, "_app_usage_sink", None)
     return SearchResponse(query=query, hits=models)

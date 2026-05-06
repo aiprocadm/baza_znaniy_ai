@@ -3,7 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from sqlmodel import Session
 
-from app.core.auth import ensure_tenant_access, get_current_active_user
+from app.core.auth import SubjectAttribution, ensure_tenant_access, get_current_active_user, get_subject_attribution
 from app.core.deps import get_ingest_session
 from app.models import JobInfo
 from app.models.file import DocumentRecord, JobRecord
@@ -22,6 +22,7 @@ def reindex_document(
     _: UserRecord = Depends(get_current_active_user),
     session: Session = Depends(get_ingest_session),
     tenant: str = Depends(ensure_tenant_access),
+    subject: SubjectAttribution = Depends(get_subject_attribution),
 ) -> JobInfo:
     record = session.get(DocumentRecord, document_id)
     if record is None or record.tenant_id != tenant:
@@ -64,6 +65,7 @@ def get_ingest_job(
     _: UserRecord = Depends(get_current_active_user),
     session: Session = Depends(get_ingest_session),
     tenant: str = Depends(ensure_tenant_access),
+    subject: SubjectAttribution = Depends(get_subject_attribution),
 ) -> JobInfo:
     job = session.get(JobRecord, job_id)
     if job is None or job.tenant_id != tenant:
