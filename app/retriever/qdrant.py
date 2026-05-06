@@ -44,6 +44,14 @@ from app.retriever.vector_store import SearchFilters
 
 __all__ = ["QdrantVectorStore"]
 
+try:  # pragma: no cover - optional LangChain integration
+    from langchain_core.documents import Document
+except Exception:  # pragma: no cover - lightweight fallback for tests
+    class Document:  # type: ignore[override]
+        def __init__(self, page_content: str, metadata: dict[str, object] | None = None) -> None:
+            self.page_content = page_content
+            self.metadata = metadata or {}
+
 
 class QdrantVectorStore:
     """Wrapper around :mod:`qdrant_client` configured via :class:`Settings`."""
@@ -302,6 +310,20 @@ class QdrantVectorStore:
             payload["score"] = float(getattr(record, "score", 0.0))
             hits.append(payload)
         return hits
+
+    @staticmethod
+    def hits_to_documents(hits: Sequence[dict[str, object]]) -> list[Document]:
+        documents: list[Document] = []
+        for hit in hits:
+            payload = dict(hit)
+            page_content = str(payload.pop("text", payload.pop("content", "")))
+            documents.append(Document(page_content=page_content, metadata=payload))
+        return documents
+
+    def as_retriever_adapter(self, *, tenant_id: str, k: int = 10):
+        from app.langchain.retrievers import TenantFilteredQdrantRetriever
+
+        return TenantFilteredQdrantRetriever(store=self, tenant_id=tenant_id, k=k)
 
 
     def resolve_collection_name(self, alias_name: str) -> str:

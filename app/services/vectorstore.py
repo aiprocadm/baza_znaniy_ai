@@ -257,10 +257,42 @@ def clear_fallback() -> None:
         get_fallback_storage().clear()
 
 
+def reindex_alias_atomic(*, document_id: str, idempotency_key: str | None = None, dry_run: bool = False):
+    """Run alias-based reindex pipeline with atomic switch + rollback safety."""
+
+    store = _resolve_vector_store()
+    alias = store.settings.qdrant_collection
+    source_collection = store.resolve_collection_name(alias)
+    temp_collection = f"{alias}__tmp__{int(time.time() * 1000)}"
+    switched = False
+    copied = 0
+    store.create_collection_like(temp_collection, source_collection)
+    try:
+        payloads = [
+            payload
+            for payload in store.export_payloads_from_collection(source_collection)
+            if str(payload.get("document_id") or "") == str(document_id)
+        ]
+        copied = len(payloads)
+        store.import_payloads_to_collection(temp_collection, payloads)
+        store.validate_collection_not_empty(temp_collection)
+        if dry_run:
+            store.delete_collection_safe(temp_collection)
+            return {"status": "dry_run", "copied": copied, "alias": alias, "idempotency_key": idempotency_key}
+        store.switch_alias(alias, temp_collection)
+        switched = True
+        return {"status": "completed", "copied": copied, "alias": alias, "idempotency_key": idempotency_key}
+    except Exception:
+        if not switched:
+            store.delete_collection_safe(temp_collection)
+        raise
+
+
 __all__ = [
     "index_chunks",
     "search",
     "clear_fallback",
     "set_fallback_storage",
     "get_fallback_storage",
+    "reindex_alias_atomic",
 ]
