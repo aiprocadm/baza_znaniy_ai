@@ -433,6 +433,10 @@ class Settings(BaseSettings):
     )
     log_level: str = Field(default="INFO", validation_alias=AliasChoices("LOG_LEVEL"))
     rate_limit: str | None = Field(default=None, validation_alias=AliasChoices("RATE_LIMIT"))
+    rate_limit_backend: str = Field(
+        default="memory",
+        validation_alias=AliasChoices("RATE_LIMIT_BACKEND"),
+    )
     rate_burst: int = Field(default=0, validation_alias=AliasChoices("RATE_BURST"))
     auth_disabled: bool = Field(
         default_factory=_default_auth_disabled,
@@ -466,6 +470,7 @@ class Settings(BaseSettings):
         default="sqlite+aiosqlite:///./var/data/kb.sqlite",
         validation_alias=AliasChoices("DB_URL", "INGEST_DB_URL"),
     )
+    postgres_dsn: str | None = Field(default=None, validation_alias=AliasChoices("POSTGRES_DSN"))
     max_upload_mb: int = Field(
         default=40,
         validation_alias=AliasChoices("MAX_UPLOAD_MB", "UPLOAD_MAX_MB"),
@@ -828,6 +833,21 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("LLM_API_BACKOFF_SEC"),
     )
 
+    # LangChain integration ---------------------------------------------
+    langchain_enabled: bool = Field(default=False, validation_alias=AliasChoices("LANGCHAIN_ENABLED"))
+    langchain_mode: str = Field(default="legacy", validation_alias=AliasChoices("LANGCHAIN_MODE"))
+    langchain_use_history_aware: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("LANGCHAIN_USE_HISTORY_AWARE"),
+    )
+    langchain_return_source_docs: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("LANGCHAIN_RETURN_SOURCE_DOCS"),
+    )
+    langchain_tracing: bool = Field(default=False, validation_alias=AliasChoices("LANGCHAIN_TRACING"))
+    langchain_project: str = Field(default="kb-ai", validation_alias=AliasChoices("LANGCHAIN_PROJECT"))
+    redis_url: str | None = Field(default=None, validation_alias=AliasChoices("REDIS_URL"))
+
     llm_lora_adapter: str | None = Field(
         default=None,
         validation_alias=AliasChoices("LLM_LORA_ADAPTER", "LLM_ADAPTER", "OLLAMA_ADAPTER"),
@@ -876,6 +896,11 @@ class Settings(BaseSettings):
         default=30,
         validation_alias=AliasChoices("ACCESS_TOKEN_EXPIRE_MINUTES"),
     )
+    api_key_hash_salt: str = Field(default="kb-ai-salt", validation_alias=AliasChoices("API_KEY_HASH_SALT"))
+
+    # Billing ------------------------------------------------------------
+    billing_enabled: bool = Field(default=False, validation_alias=AliasChoices("BILLING_ENABLED"))
+    billing_provider: str = Field(default="none", validation_alias=AliasChoices("BILLING_PROVIDER"))
 
     # Validators ---------------------------------------------------------
     @field_validator("cors_allow_origins", mode="before")
@@ -899,6 +924,11 @@ class Settings(BaseSettings):
     @field_validator(
         "chat_memory_enabled",
         "rerank_enabled",
+        "langchain_enabled",
+        "langchain_use_history_aware",
+        "langchain_return_source_docs",
+        "langchain_tracing",
+        "billing_enabled",
         mode="before",
     )
     @classmethod
@@ -975,6 +1005,25 @@ class Settings(BaseSettings):
         if value in {None, "", Ellipsis}:
             return None
         return int(value)
+
+
+    @field_validator("langchain_mode", mode="before")
+    @classmethod
+    def _validate_langchain_mode(cls, value: object) -> str:
+        mode = str(value or "legacy").strip().lower()
+        return mode if mode in {"legacy", "lcel", "agent"} else "legacy"
+
+    @field_validator("rate_limit_backend", mode="before")
+    @classmethod
+    def _validate_rate_limit_backend(cls, value: object) -> str:
+        backend = str(value or "memory").strip().lower()
+        return backend if backend in {"memory", "redis"} else "memory"
+
+    @field_validator("billing_provider", mode="before")
+    @classmethod
+    def _validate_billing_provider(cls, value: object) -> str:
+        provider = str(value or "none").strip().lower()
+        return provider if provider else "none"
 
     # Computed helpers ---------------------------------------------------
     @computed_field

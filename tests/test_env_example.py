@@ -41,6 +41,18 @@ EXPECTED_DEFAULTS = {
     "LORA_SCALING": "1.0",
     "DOCUMENT_PARSER_BACKEND": "legacy",
     "DOCLING_ENABLED": "false",
+    "LANGCHAIN_ENABLED": "false",
+    "LANGCHAIN_MODE": "legacy",
+    "LANGCHAIN_USE_HISTORY_AWARE": "false",
+    "LANGCHAIN_RETURN_SOURCE_DOCS": "false",
+    "LANGCHAIN_TRACING": "false",
+    "LANGCHAIN_PROJECT": "kb-ai",
+    "REDIS_URL": "",
+    "RATE_LIMIT_BACKEND": "memory",
+    "API_KEY_HASH_SALT": "kb-ai-salt",
+    "BILLING_ENABLED": "false",
+    "BILLING_PROVIDER": "none",
+    "POSTGRES_DSN": "",
 }
 
 EXPECTED_EXTENSION_SET = {"pdf", "docx", "pptx", "xlsx", "txt", "md"}
