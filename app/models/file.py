@@ -364,6 +364,61 @@ class ChunkRecord(SQLModel, table=True):
     created_at: datetime = Field(default_factory=utc_now, nullable=False)
 
 
+class ApiKeyRecord(SQLModel, table=True):
+    __tablename__ = "api_keys"
+    id: Optional[int] = Field(default=None, primary_key=True)
+    tenant_id: str = Field(foreign_key="tenants.tenant_id", index=True)
+    key_hash: str = Field(index=True, unique=True)
+    label: Optional[str] = Field(default=None)
+    is_active: bool = Field(default=True, index=True)
+    created_at: datetime = Field(default_factory=utc_now, nullable=False)
+
+
+class UsageEventRecord(SQLModel, table=True):
+    __tablename__ = "usage_events"
+    id: Optional[int] = Field(default=None, primary_key=True)
+    tenant_id: str = Field(foreign_key="tenants.tenant_id", index=True)
+    subject_type: str = Field(index=True)
+    subject_id: str = Field(index=True)
+    event_type: str = Field(index=True)
+    idempotency_key: Optional[str] = Field(default=None, index=True)
+    payload: Optional[dict[str, Any]] = Field(default=None, sa_column=Column(JSON, nullable=True))
+    created_at: datetime = Field(default_factory=utc_now, nullable=False)
+
+
+class BillingEventRecord(SQLModel, table=True):
+    __tablename__ = "billing_events"
+    id: Optional[int] = Field(default=None, primary_key=True)
+    tenant_id: str = Field(foreign_key="tenants.tenant_id", index=True)
+    subject_type: str = Field(index=True)
+    subject_id: str = Field(index=True)
+    event_type: str = Field(index=True)
+    idempotency_key: Optional[str] = Field(default=None, index=True)
+    amount: float = Field(default=0.0)
+    currency: str = Field(default="USD")
+    payload: Optional[dict[str, Any]] = Field(default=None, sa_column=Column(JSON, nullable=True))
+    created_at: datetime = Field(default_factory=utc_now, nullable=False)
+
+
+class RagRunRecord(SQLModel, table=True):
+    __tablename__ = "rag_runs"
+    id: Optional[int] = Field(default=None, primary_key=True)
+    tenant_id: str = Field(foreign_key="tenants.tenant_id", index=True)
+    subject_type: str = Field(index=True)
+    subject_id: str = Field(index=True)
+    query: str = Field(default="")
+    created_at: datetime = Field(default_factory=utc_now, nullable=False)
+
+
+class RagRunSourceRecord(SQLModel, table=True):
+    __tablename__ = "rag_run_sources"
+    id: Optional[int] = Field(default=None, primary_key=True)
+    rag_run_id: int = Field(foreign_key="rag_runs.id", index=True)
+    source_file: Optional[str] = Field(default=None)
+    source_page: Optional[int] = Field(default=None)
+    score: Optional[float] = Field(default=None)
+
+
 install_stub_model_initializers([DocumentRecord, FileRecord, PageRecord, ChunkRecord])
 
 

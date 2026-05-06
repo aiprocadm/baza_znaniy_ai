@@ -32,7 +32,7 @@ from app.api.upload_policies import (
     evaluate_content_type,
 )
 from app.api.upload_utils import create_upload_file, validate_upload_request
-from app.core.auth import ensure_tenant_access, get_current_active_user
+from app.core.auth import SubjectAttribution, ensure_tenant_access, get_current_active_user, get_subject_attribution
 from app.core import deps as core_deps
 from app.models.user import UserRecord
 from app.models import UploadResponse
@@ -313,6 +313,8 @@ async def upload_file(
     files: Optional[List[UploadFile]] = File(None, alias="files"),
     request: Request = _DEFAULT_REQUEST,
     limits: UploadLimits = Depends(get_upload_limits),
+    idempotency_key: str | None = None,
+    subject: SubjectAttribution = Depends(get_subject_attribution),
     data_dir: Path = Depends(get_data_dir),
     _: UserRecord = Depends(get_current_active_user),
     tenant: str = Depends(ensure_tenant_access),

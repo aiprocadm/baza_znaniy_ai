@@ -14,7 +14,7 @@ try:  # FastAPI<0.115 exposes Depends via param_functions only
 except ModuleNotFoundError:  # pragma: no cover - compatibility shim
     from fastapi.param_functions import Depends as DependsMarker
 
-from app.core.auth import ensure_tenant_access, get_current_active_user
+from app.core.auth import SubjectAttribution, ensure_tenant_access, get_current_active_user, get_subject_attribution
 from app.core.config import get_settings
 from app.models import ChatRequest, ChatResponse, Citation
 from app.models.user import UserRecord
@@ -129,6 +129,7 @@ def chat(
     request: Request = None,
     user: UserRecord = Depends(get_current_active_user),
     tenant: str = Depends(ensure_tenant_access),
+    subject: SubjectAttribution = Depends(get_subject_attribution),
 ) -> ChatResponse:
     """Return an assistant answer generated via RAG pipeline."""
 
@@ -152,7 +153,12 @@ def chat(
         },
     )
 
-    return handle_chat(payload, runtime, context, format_answer=_format_answer)
+    response = handle_chat(payload, runtime, context, format_answer=_format_answer)
+    sink = getattr(app_state, "usage_sink", None)
+    if sink is not None:
+        from app.services.accounting import UsageEvent
+        sink.write(UsageEvent(tenant_id=subject.tenant, subject_type=subject.subject_type, subject_id=subject.subject_id, event_type="chat", payload={"message": payload.message}))
+    return response
 
 
 @router.websocket("/ws/chat")
@@ -168,6 +174,10 @@ async def chat_websocket(websocket: WebSocket) -> None:
     """
 
     await websocket.accept()
+    auth_header = websocket.headers.get("authorization")
+    if not auth_header:
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="AUTH_REQUIRED")
+        return
     last_pong = asyncio.get_running_loop().time()
 
     while True:

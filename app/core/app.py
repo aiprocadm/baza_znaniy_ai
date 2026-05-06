@@ -25,6 +25,13 @@ except ModuleNotFoundError:  # pragma: no cover - fallback for stubbed test envs
 
 from app.api.error_responses import register_error_handlers
 
+try:
+    from slowapi import Limiter
+    from slowapi.util import get_remote_address
+except Exception:
+    Limiter = None
+    get_remote_address = None
+
 try:  # pragma: no cover - optional dependency resolution
     from apscheduler.schedulers.asyncio import AsyncIOScheduler
     from apscheduler.schedulers.base import STATE_RUNNING
@@ -260,6 +267,12 @@ def create_app(provider: LLMProvider | None = None) -> FastAPI:
         expose_headers=["*"],
     )
     application.add_middleware(RequestIDMiddleware)
+    if Limiter is not None:
+        storage_uri = getattr(settings, "redis_url", None)
+        if storage_uri:
+            application.state.limiter = Limiter(key_func=get_remote_address, storage_uri=storage_uri)
+        else:
+            application.state.limiter = Limiter(key_func=get_remote_address)
 
     register_error_handlers(application)
 
