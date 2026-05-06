@@ -102,6 +102,10 @@ def _build_runtime(app_state: Any, payload: ChatRequest) -> ChatRuntime:
             "top_k": getattr(settings, "llm_top_k", 40),
             "max_tokens": getattr(settings, "llm_max_tokens", None) or 1024,
         },
+        langchain_enabled=getattr(settings, "langchain_enabled", False),
+        langchain_use_history_aware=getattr(settings, "langchain_use_history_aware", False),
+        langchain_return_source_docs=getattr(settings, "langchain_return_source_docs", False),
+        settings=settings,
     )
 
 
