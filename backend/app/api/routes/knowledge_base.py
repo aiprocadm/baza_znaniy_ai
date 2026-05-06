@@ -27,6 +27,7 @@ from backend.app.schemas.knowledge_base import (
 )
 from backend.app.models import BillingEvent, Plan, Subscription, UsageCounter
 from backend.app.services.kb_runtime import runtime_store
+from backend.app.services.rag_service import rag_service
 
 router = APIRouter(tags=["knowledge-base"])
 
@@ -39,9 +40,18 @@ def get_status() -> SystemStatusResponse:
 @router.post("/search", response_model=SearchResponse)
 def search_documents(payload: SearchRequest, tenant_ctx: tuple[str, str] = Depends(get_tenant_context)) -> SearchResponse:
     _, tenant_slug = tenant_ctx
-    return runtime_store.search(tenant_slug, payload)
+    return rag_service.compat_search(payload, tenant_slug=tenant_slug)
 
 
+
+
+@router.post("/chat")
+def chat_compat(payload: dict, tenant_ctx: tuple[str, str] = Depends(get_tenant_context)) -> dict:
+    _, tenant_slug = tenant_ctx
+    query = str(payload.get("query") or payload.get("message") or "").strip()
+    top_k = int(payload.get("top_k", 5))
+    response = rag_service.compat_chat(type("Compat", (), {"query": query, "top_k": top_k}), tenant_slug=tenant_slug)
+    return response
 @router.get("/activities", response_model=list[ActivityItem])
 def list_activities() -> list[ActivityItem]:
     return runtime_store.list_activities()
