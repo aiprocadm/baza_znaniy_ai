@@ -100,3 +100,13 @@ def test_atomic_alias_switch_pipeline(monkeypatch) -> None:  # noqa: ANN001
     assert result["status"] == "completed"
     assert store.switched[0] == "kb"
     assert store.created[1] == "kb__v1"
+
+
+def test_tenant_id_required() -> None:
+    store = _StoreStub()
+    try:
+        TenantFilteredQdrantRetriever(store=store, tenant_id="   ")
+    except ValueError as exc:
+        assert "tenant_id is required" in str(exc)
+    else:  # pragma: no cover
+        raise AssertionError("ValueError expected")

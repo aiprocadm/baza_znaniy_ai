@@ -135,3 +135,51 @@ def test_chunks_indexed_when_vector_backend_fails_are_used_in_chat(tmp_path, mon
 
     assert payload["citations"]
     assert any(citation.get("file") == "note.txt" for citation in payload["citations"])
+
+
+def test_chat_langchain_mode_returns_sources_and_uses_request_metadata(tmp_path, monkeypatch):
+    provider = DummyProvider()
+    request, settings = _prepare_app(tmp_path, provider)
+    settings.langchain_enabled = True
+    settings.langchain_return_source_docs = True
+    captured = {}
+
+    def _build_chat_chain(_settings, *, tenant_id: str, retrieve_topk: int):
+        captured["tenant_id"] = tenant_id
+        captured["retrieve_topk"] = retrieve_topk
+
+        def _chain(*, payload, context):
+            captured["request_metadata"] = context.get("request_metadata")
+            return {
+                "answer": "LC Ответ",
+                "context": [{"file": "lc_doc.txt", "page": 3, "score": 0.91}],
+            }
+
+        return _chain
+
+    monkeypatch.setattr("app.langchain.factory.build_chat_chain", _build_chat_chain)
+
+    payload = chat(
+        request,
+        ChatIn(user_id="alice", conversation_id=None, message="Привет"),
+    )
+
+    assert payload["answer"].startswith("LC Ответ")
+    assert payload["citations"]
+    assert payload["citations"][0]["file"] == "lc_doc.txt"
+    assert captured["tenant_id"] == "unresolved-tenant"
+    assert captured["request_metadata"]["tenant_id"] == "unresolved-tenant"
+
+
+def test_chat_legacy_mode_unchanged_when_langchain_disabled(tmp_path):
+    provider = DummyProvider()
+    request, settings = _prepare_app(tmp_path, provider)
+    settings.langchain_enabled = False
+
+    payload = chat(
+        request,
+        ChatIn(user_id="alice", conversation_id=None, message="Привет"),
+    )
+
+    assert payload["answer"].startswith("Ответ")
+    assert payload["citations"]
