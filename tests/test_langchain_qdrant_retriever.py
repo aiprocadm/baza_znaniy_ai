@@ -9,17 +9,23 @@ class _StoreStub:
         self.calls: list[dict[str, object]] = []
         self.settings = type("S", (), {"qdrant_collection": "kb"})()
 
-    def search(self, *, query: str, top_k: int, filters):  # noqa: ANN001
+    def as_retriever(self, *, query: str, top_k: int, filters):  # noqa: ANN001
         self.calls.append({"query": query, "top_k": top_k, "filters": filters})
-        return [{"text": "hello", "tenant_id": filters.tenant_id, "owner": filters.owner, "tags": list(filters.tags)}]
-
-    def hits_to_documents(self, hits):  # noqa: ANN001
-        docs = []
-        for hit in hits:
-            payload = dict(hit)
-            text = str(payload.pop("text", ""))
-            docs.append(type("Doc", (), {"page_content": text, "metadata": payload})())
-        return docs
+        doc = type("Doc", (), {})()
+        doc.page_content = "hello"
+        doc.metadata = {
+            "tenant_id": filters.tenant_id,
+            "owner": filters.owner,
+            "tags": list(filters.tags),
+            "source": "kb/doc1.pdf",
+            "file": "doc1.pdf",
+            "page": 7,
+            "article": "12",
+            "clause": "12.4",
+            "revision": "r-2",
+            "score": 0.91,
+        }
+        return [doc]
 
     # reindex API
     def resolve_collection_name(self, alias: str) -> str:
@@ -73,6 +79,28 @@ def test_tenant_isolation_guard_and_metadata_filters_preserved() -> None:
     assert filters.reg_number == "123"
     assert filters.is_active is True
     assert filters.revision_mode == "historical"
+
+
+def test_tenant_filter_forced_when_metadata_missing() -> None:
+    store = _StoreStub()
+    retriever = TenantFilteredQdrantRetriever(store=store, tenant_id="tenant-z", k=2)
+    retriever.invoke("q", metadata={})
+    filters = store.calls[-1]["filters"]
+    assert filters.tenant_id == "tenant-z"
+
+
+def test_citation_metadata_mapping_stable() -> None:
+    store = _StoreStub()
+    retriever = TenantFilteredQdrantRetriever(store=store, tenant_id="tenant-a")
+    docs = retriever.invoke("citation query")
+    metadata = docs[0].metadata
+    assert metadata["source"] == "kb/doc1.pdf"
+    assert metadata["file"] == "doc1.pdf"
+    assert metadata["page"] == 7
+    assert metadata["article"] == "12"
+    assert metadata["clause"] == "12.4"
+    assert metadata["revision"] == "r-2"
+    assert metadata["score"] == 0.91
 
 
 def test_query_path_does_not_force_reindex(monkeypatch) -> None:  # noqa: ANN001

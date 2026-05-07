@@ -42,9 +42,7 @@ class TenantFilteredQdrantRetriever:
             is_active=metadata.get("is_active"),  # type: ignore[arg-type]
             revision_mode=metadata.get("revision", "current"),  # type: ignore[arg-type]
         )
-        hits = self.store.search(query=query, top_k=int(kwargs.get("k", self.k)), filters=filters)
-        return self.store.hits_to_documents(hits)
+        return self.store.as_retriever(query=query, top_k=int(kwargs.get("k", self.k)), filters=filters)
 
     def invoke(self, query: str, **kwargs: object) -> list[Document]:
         return self.get_relevant_documents(query, **kwargs)
-
