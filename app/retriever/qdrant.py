@@ -260,39 +260,7 @@ class QdrantVectorStore:
 
 
         client = self._client_instance()
-        conditions: list[qmodels.FieldCondition] = [
-            qmodels.FieldCondition(
-                key="tenant_id",
-                match=qmodels.MatchValue(value=filters.tenant_id),
-            )
-        ]
-        if filters.owner:
-            conditions.append(
-                qmodels.FieldCondition(
-                    key="owner",
-                    match=qmodels.MatchValue(value=filters.owner),
-                )
-            )
-        for tag in filters.tags:
-            conditions.append(
-                qmodels.FieldCondition(
-                    key="tags",
-                    match=qmodels.MatchValue(value=tag),
-                )
-            )
-        if filters.act_type:
-            conditions.append(qmodels.FieldCondition(key="act_type", match=qmodels.MatchValue(value=filters.act_type)))
-        if filters.issuer:
-            conditions.append(qmodels.FieldCondition(key="issuer", match=qmodels.MatchText(text=filters.issuer)))
-        if filters.reg_number:
-            conditions.append(qmodels.FieldCondition(key="reg_number", match=qmodels.MatchValue(value=filters.reg_number)))
-        if filters.is_active is not None:
-            conditions.append(qmodels.FieldCondition(key="is_active", match=qmodels.MatchValue(value=filters.is_active)))
-        if filters.revision_mode == "current":
-            conditions.append(qmodels.FieldCondition(key="is_active", match=qmodels.MatchValue(value=True)))
-        elif filters.revision_mode == "historical":
-            conditions.append(qmodels.FieldCondition(key="is_active", match=qmodels.MatchValue(value=False)))
-        query_filter = qmodels.Filter(must=conditions) if conditions else None
+        query_filter = self._to_qdrant_filter(filters)
 
         results = client.search(
             collection_name=self.settings.qdrant_collection,
@@ -307,9 +275,48 @@ class QdrantVectorStore:
             payload = getattr(record, "payload", {}) or {}
             payload = dict(payload)
             payload.setdefault("id", getattr(record, "id", None))
+            payload.setdefault("file", payload.get("source"))
+            payload.setdefault("source", payload.get("file"))
+            payload.setdefault("article", None)
+            payload.setdefault("clause", None)
+            if isinstance(payload.get("meta"), dict):
+                payload.setdefault("revision", payload.get("meta", {}).get("revision"))
+            else:
+                payload.setdefault("revision", None)
             payload["score"] = float(getattr(record, "score", 0.0))
             hits.append(payload)
         return hits
+
+
+    @staticmethod
+    def _to_qdrant_filter(filters: SearchFilters) -> qmodels.Filter:
+        conditions: list[qmodels.FieldCondition] = [
+            qmodels.FieldCondition(
+                key="tenant_id",
+                match=qmodels.MatchValue(value=filters.tenant_id),
+            )
+        ]
+        if filters.owner:
+            conditions.append(qmodels.FieldCondition(key="owner", match=qmodels.MatchValue(value=filters.owner)))
+        for tag in filters.tags:
+            conditions.append(qmodels.FieldCondition(key="tags", match=qmodels.MatchValue(value=tag)))
+        if filters.act_type:
+            conditions.append(qmodels.FieldCondition(key="act_type", match=qmodels.MatchValue(value=filters.act_type)))
+        if filters.issuer:
+            conditions.append(qmodels.FieldCondition(key="issuer", match=qmodels.MatchText(text=filters.issuer)))
+        if filters.reg_number:
+            conditions.append(qmodels.FieldCondition(key="reg_number", match=qmodels.MatchValue(value=filters.reg_number)))
+        if filters.is_active is not None:
+            conditions.append(qmodels.FieldCondition(key="is_active", match=qmodels.MatchValue(value=filters.is_active)))
+        if filters.revision_mode == "current":
+            conditions.append(qmodels.FieldCondition(key="is_active", match=qmodels.MatchValue(value=True)))
+        elif filters.revision_mode == "historical":
+            conditions.append(qmodels.FieldCondition(key="is_active", match=qmodels.MatchValue(value=False)))
+        return qmodels.Filter(must=conditions)
+
+    def as_retriever(self, *, query: str, top_k: int, filters: SearchFilters) -> list[Document]:
+        hits = self.search(query=query, top_k=top_k, filters=filters)
+        return self.hits_to_documents(hits)
 
     @staticmethod
     def hits_to_documents(hits: Sequence[dict[str, object]]) -> list[Document]:
