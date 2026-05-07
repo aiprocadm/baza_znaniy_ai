@@ -45,7 +45,12 @@ def _map_langchain_result_to_chat_response(
     answer_text = str(result.get("answer") or result.get("output") or "").strip()
     source_items = []
     if runtime.langchain_return_source_docs:
-        source_items = list(result.get("sources") or result.get("source_documents") or [])
+        source_items = list(
+            result.get("sources")
+            or result.get("source_documents")
+            or result.get("context")
+            or []
+        )
 
     citations = [
         Citation(
@@ -175,7 +180,12 @@ def handle_chat(
         if execution_mode is ChatExecutionMode.LANGCHAIN:
             from app.langchain.factory import build_chat_chain, rewrite_with_history
 
-            chain = build_chat_chain(runtime.settings)
+            setattr(runtime.settings, "llm_provider", runtime.provider)
+            chain = build_chat_chain(
+                runtime.settings,
+                tenant_id=context.tenant,
+                retrieve_topk=runtime.retrieve_topk,
+            )
             rewritten_message = rewrite_with_history(payload.message, history_text) if runtime.langchain_use_history_aware else payload.message
             lc_result = chain(
                 payload=payload,
@@ -185,6 +195,12 @@ def handle_chat(
                     "summary": summary_text,
                     "memory": memory_text,
                     "conversation_id": conversation_id,
+                    "request_metadata": {
+                        "tenant_id": context.tenant,
+                        "owner": context.tenant,
+                        "user_id": payload.user_id,
+                        "conversation_id": conversation_id,
+                    },
                 },
             )
             answer = str(lc_result.get("answer") or lc_result.get("output") or "").strip()
