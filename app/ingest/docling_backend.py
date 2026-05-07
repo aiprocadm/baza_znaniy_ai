@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import io
+import tempfile
 from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
 
 from app.core.config import get_settings
 
@@ -12,6 +15,7 @@ from app.core.config import get_settings
 class DoclingParseOptions:
     timeout: float
     max_pages: int | None
+    ocr_enabled: bool
 
 
 def _options_from_settings() -> DoclingParseOptions:
@@ -19,7 +23,41 @@ def _options_from_settings() -> DoclingParseOptions:
     return DoclingParseOptions(
         timeout=float(getattr(settings, "docling_timeout", 60.0)),
         max_pages=getattr(settings, "docling_max_pages", None),
+        ocr_enabled=bool(getattr(settings, "docling_ocr_enabled", False)),
     )
+
+
+def _extract_page_texts(result: Any) -> list[tuple[int, str]]:
+    document = getattr(result, "document", None)
+    if document is None:
+        return []
+
+    page_items = getattr(document, "pages", None)
+    if page_items:
+        pages: list[tuple[int, str]] = []
+        for index, page in enumerate(page_items, start=1):
+            text = ""
+            for candidate in ("text", "content"):
+                value = getattr(page, candidate, None)
+                if value:
+                    text = str(value).strip()
+                    break
+            if not text and hasattr(page, "export_to_markdown"):
+                try:
+                    text = str(page.export_to_markdown()).strip()
+                except Exception:
+                    text = ""
+            if text:
+                pages.append((index, text))
+        if pages:
+            return pages
+
+    markdown = ""
+    if hasattr(document, "export_to_markdown"):
+        markdown = str(document.export_to_markdown() or "").strip()
+    if not markdown:
+        return []
+    return [(1, markdown)]
 
 
 class DoclingBackend:
@@ -41,16 +79,31 @@ class DoclingBackend:
             raise RuntimeError(f"Docling import failed: {exc}") from exc
 
         options = _options_from_settings()
-        try:
-            converter = DocumentConverter()
-            result = converter.convert(source=io.BytesIO(raw_bytes), timeout=options.timeout)
-            markdown = result.document.export_to_markdown()
-        except Exception as exc:
-            raise RuntimeError(f"Docling conversion failed: {exc}") from exc
+        converter = DocumentConverter()
 
-        lines = [line.strip() for line in str(markdown).splitlines() if line.strip()]
-        if options.max_pages and isinstance(options.max_pages, int) and options.max_pages > 0:
-            lines = lines[: options.max_pages]
-        if not lines:
-            return []
-        return [(1, "\n".join(lines))]
+        convert_error: Exception | None = None
+        result: Any | None = None
+        for source in (io.BytesIO(raw_bytes), raw_bytes):
+            try:
+                result = converter.convert(source=source, timeout=options.timeout)
+                break
+            except Exception as exc:
+                convert_error = exc
+
+        if result is None:
+            suffix = Path(filename).suffix or ".bin"
+            with tempfile.NamedTemporaryFile(suffix=suffix) as temp:
+                temp.write(raw_bytes)
+                temp.flush()
+                try:
+                    result = converter.convert(source=temp.name, timeout=options.timeout)
+                except Exception as exc:
+                    convert_error = exc
+
+        if result is None:
+            raise RuntimeError(f"Docling conversion failed: {convert_error}")
+
+        pages = _extract_page_texts(result)
+        if options.max_pages and options.max_pages > 0:
+            pages = pages[: options.max_pages]
+        return pages
