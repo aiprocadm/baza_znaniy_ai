@@ -95,6 +95,7 @@ except ModuleNotFoundError as exc:  # pragma: no cover - triggered in minimal te
 from app.ingest.ocr import OCRError, OCRConfig, iter_pdf_pages_with_ocr
 
 
+from app.ingest.docling_backend import DoclingBackend
 from app.ingest.html import html_to_plain_text, html_to_text_sections
 
 try:  # pragma: no cover - metrics are optional during lightweight testing
@@ -128,44 +129,6 @@ class ParseResult:
     fallback_reason: str | None
     ocr_used: bool
     metadata: dict[str, Any]
-
-
-class DoclingParserAdapter:
-    SUPPORTED_MIME = {
-        "application/pdf",
-        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        "text/plain",
-        "text/markdown",
-    }
-
-    def parse(self, filename: str, raw_bytes: bytes) -> list[tuple[int, str]]:
-        try:
-            from docling.document_converter import DocumentConverter  # type: ignore
-        except Exception as exc:  # pragma: no cover
-            raise RuntimeError(f"Docling import failed: {exc}") from exc
-
-        settings = get_settings()
-        timeout = float(getattr(settings, "docling_timeout", 60.0))
-        max_pages = getattr(settings, "docling_max_pages", None)
-        ocr_enabled = bool(getattr(settings, "docling_ocr_enabled", False))
-
-        try:
-            converter = DocumentConverter()
-            result = converter.convert(source=io.BytesIO(raw_bytes), timeout=timeout)
-            markdown = result.document.export_to_markdown()
-        except Exception as exc:
-            raise RuntimeError(f"Docling conversion failed: {exc}") from exc
-
-        lines = [line.strip() for line in str(markdown).splitlines() if line.strip()]
-        if max_pages and isinstance(max_pages, int) and max_pages > 0:
-            lines = lines[:max_pages]
-        if not lines:
-            return []
-        text = _clean("\n".join(lines))
-        return [(1, text)]
-
 
 
 
@@ -850,10 +813,10 @@ def parse_document(filename: str, data: Union[bytes, bytearray, BinaryIO]) -> Pa
     fallback_reason = None
     pages: list[tuple[int, str]] = []
 
-    if backend in {"docling", "auto"} and mime in DoclingParserAdapter.SUPPORTED_MIME:
+    if backend in {"docling", "auto"} and mime in DoclingBackend.SUPPORTED_MIME:
         docling_start = time.perf_counter()
         try:
-            pages = DoclingParserAdapter().parse(name, bytes(raw_bytes))
+            pages = DoclingBackend().parse(name, bytes(raw_bytes))
             parser_backend_used = "docling"
             record_docling_parse("success", time.perf_counter() - docling_start)
         except Exception as exc:

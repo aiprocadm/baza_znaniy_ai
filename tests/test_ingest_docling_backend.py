@@ -26,12 +26,12 @@ def test_parse_document_auto_docling(monkeypatch):
     monkeypatch.setattr(chunking, "_resolve_parser_backend", lambda explicit_backend=None: "auto")
 
     class FakeAdapter:
-        SUPPORTED_MIME = chunking.DoclingParserAdapter.SUPPORTED_MIME
+        SUPPORTED_MIME = chunking.DoclingBackend.SUPPORTED_MIME
 
         def parse(self, filename, raw_bytes):
             return [(1, "docling parsed")]
 
-    monkeypatch.setattr(chunking, "DoclingParserAdapter", FakeAdapter)
+    monkeypatch.setattr(chunking, "DoclingBackend", FakeAdapter)
 
     result = chunking.parse_document("sample.pdf", b"pdf")
     assert result.parser_backend_used == "docling"
@@ -45,12 +45,12 @@ def test_parse_document_auto_legacy_fallback(monkeypatch):
     monkeypatch.setattr(chunking, "_resolve_parser_backend", lambda explicit_backend=None: "auto")
 
     class FakeAdapter:
-        SUPPORTED_MIME = chunking.DoclingParserAdapter.SUPPORTED_MIME
+        SUPPORTED_MIME = chunking.DoclingBackend.SUPPORTED_MIME
 
         def parse(self, filename, raw_bytes):
             raise RuntimeError("boom")
 
-    monkeypatch.setattr(chunking, "DoclingParserAdapter", FakeAdapter)
+    monkeypatch.setattr(chunking, "DoclingBackend", FakeAdapter)
     monkeypatch.setattr(chunking, "_iter_pdf_pages", lambda data: iter([(1, "legacy text")]))
 
     result = chunking.parse_document("sample.pdf", b"pdf")
@@ -65,12 +65,12 @@ def test_parse_document_docling_hard_fail_with_fallback(monkeypatch):
     monkeypatch.setattr(chunking, "_resolve_parser_backend", lambda explicit_backend=None: "docling")
 
     class FakeAdapter:
-        SUPPORTED_MIME = chunking.DoclingParserAdapter.SUPPORTED_MIME
+        SUPPORTED_MIME = chunking.DoclingBackend.SUPPORTED_MIME
 
         def parse(self, filename, raw_bytes):
             raise RuntimeError("docling unavailable")
 
-    monkeypatch.setattr(chunking, "DoclingParserAdapter", FakeAdapter)
+    monkeypatch.setattr(chunking, "DoclingBackend", FakeAdapter)
     monkeypatch.setattr(chunking, "_iter_pdf_pages", lambda data: iter([(1, "legacy text")]))
 
     result = chunking.parse_document("sample.pdf", b"pdf")
