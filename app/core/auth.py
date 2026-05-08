@@ -16,6 +16,7 @@ from sqlmodel import Session, select
 from app.core.config import get_settings
 from app.core.deps import get_ingest_session, get_tenant
 from app.core.datetime_utils import utc_now
+from app.models.file import ApiKeyRecord
 from app.models.tenant import TenantRecord
 from app.models.user import UserRecord, UserRole
 from app.security import InvalidTokenError, create_access_token, decode_token
@@ -172,18 +173,38 @@ def _extract_bearer_token(request: Any) -> str | None:
 def _hash_api_key(raw_key: str) -> str:
     salt = os.getenv("API_KEY_HASH_SALT", "")
     if not salt:
-        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, detail="API_KEY_SALT_NOT_CONFIGURED")
+        raise HTTPException(500, detail="API_KEY_SALT_NOT_CONFIGURED")
     return hashlib.sha256(f"{salt}:{raw_key}".encode("utf-8")).hexdigest()
 
 
-def get_subject_attribution(request: Request, user: UserRecord = Depends(get_current_active_user)) -> SubjectAttribution:
-    api_key = request.headers.get("X-API-Key")
-    if api_key:
-        hashed = _hash_api_key(api_key)
-        return SubjectAttribution(subject_type="api_key", subject_id=hashed[:16], tenant=get_tenant(request))
-    if user is None:
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="AUTH_REQUIRED")
-    return SubjectAttribution(subject_type="user", subject_id=str(getattr(user, "id", "unknown")), tenant=get_tenant(request))
+def _resolve_api_key_subject(request: Request, session: Session) -> SubjectAttribution | None:
+    headers = getattr(request, "headers", None)
+    raw_key = ""
+    if headers is not None:
+        raw_key = (headers.get("X-API-Key") or headers.get("x-api-key") or "").strip()
+    if not raw_key:
+        return None
+    hashed = _hash_api_key(raw_key)
+    tenant = get_tenant(request)
+    statement = select(ApiKeyRecord)
+    if hasattr(statement, "where"):
+        statement = statement.where(
+            ApiKeyRecord.tenant_id == tenant,
+            ApiKeyRecord.key_hash == hashed,
+            ApiKeyRecord.is_active.is_(True),
+        )
+    record = session.exec(statement).first()
+    if record is None:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="INVALID_API_KEY")
+    return SubjectAttribution(subject_type="api_key", subject_id=str(record.id), tenant=tenant)
+
+
+def get_subject_attribution(request: Request, session: Session = Depends(get_ingest_session)) -> SubjectAttribution:
+    api_key_subject = _resolve_api_key_subject(request, session)
+    if api_key_subject is not None:
+        return api_key_subject
+    user = get_current_active_user(get_current_user(request, session))
+    return SubjectAttribution(subject_type="user", subject_id=str(getattr(user, "id", "unknown")), tenant=user.tenant_slug)
 
 
 @dataclass

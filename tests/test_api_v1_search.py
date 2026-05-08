@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import app.api.v1.search as search_api
+from tests.stubs.fastapi import Request
 
 
 def test_search_endpoint_passes_owner_and_tags_filters(monkeypatch) -> None:
@@ -33,7 +34,9 @@ def test_search_endpoint_passes_owner_and_tags_filters(monkeypatch) -> None:
 
     monkeypatch.setattr(search_api, "search", _fake_search)
 
+    request = Request({"app": type("App", (), {"state": type("State", (), {"usage_sink": None})()})()})
     response = search_api.search_endpoint(
+        request=request,
         query="replication",
         top_k=3,
         owner="alice@kb.ai",
@@ -83,7 +86,9 @@ def test_search_endpoint_normalizes_empty_filters(monkeypatch) -> None:
 
     monkeypatch.setattr(search_api, "search", _fake_search)
 
+    request = Request({"app": type("App", (), {"state": type("State", (), {"usage_sink": None})()})()})
     response = search_api.search_endpoint(
+        request=request,
         query="replication",
         owner="   ",
         tags=["", "  "],
@@ -127,7 +132,9 @@ def test_search_endpoint_passes_all_npa_filters(monkeypatch) -> None:
 
     monkeypatch.setattr(search_api, "search", _fake_search)
 
+    request = Request({"app": type("App", (), {"state": type("State", (), {"usage_sink": None})()})()})
     search_api.search_endpoint(
+        request=request,
         query="law 123",
         top_k=7,
         owner="alice@kb.ai",
@@ -163,4 +170,5 @@ def test_search_endpoint_requires_tenant_context(monkeypatch) -> None:
     import pytest
 
     with pytest.raises(ValueError, match="tenant context is required"):
-        search_api.search_endpoint(query="replication", tenant="   ")
+        request = Request({"app": type("App", (), {"state": type("State", (), {"usage_sink": None})()})()})
+        search_api.search_endpoint(request=request, query="replication", tenant="   ")

@@ -157,7 +157,25 @@ def chat(
     sink = getattr(app_state, "usage_sink", None)
     if sink is not None:
         from app.services.accounting import UsageEvent
-        sink.write(UsageEvent(tenant_id=subject.tenant, subject_type=subject.subject_type, subject_id=subject.subject_id, event_type="chat", payload={"message": payload.message}))
+        sink.write(
+            UsageEvent(
+                tenant_id=subject.tenant,
+                subject_type=subject.subject_type,
+                subject_id=subject.subject_id,
+                event_type="chat",
+                payload={"message": payload.message},
+                idempotency_key=request.headers.get("Idempotency-Key") if request is not None else None,
+            )
+        )
+        write_rag = getattr(sink, "write_rag_run", None)
+        if callable(write_rag):
+            write_rag(
+                tenant_id=subject.tenant,
+                subject_type=subject.subject_type,
+                subject_id=subject.subject_id,
+                query=payload.message,
+                sources=[citation.model_dump() for citation in response.citations],
+            )
     return response
 
 
