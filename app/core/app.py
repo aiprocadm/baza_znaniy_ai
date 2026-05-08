@@ -13,6 +13,7 @@ from typing import Sequence
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from sqlmodel import Session
 try:
     from starlette.middleware.base import BaseHTTPMiddleware
 except ModuleNotFoundError:  # pragma: no cover - fallback for stubbed test envs
@@ -101,6 +102,7 @@ from app.observability.logging import bind_log_context, configure_structured_log
 from app.observability.metrics import API_REQUESTS_IN_FLIGHT, record_api_request
 from app.retriever import CrossEncoderReranker, get_reranker, get_vector_store
 from app.services.files import FileStore, IngestQueue
+from app.services.accounting import NoopBillingSink, NoopUsageSink, SqlBillingSink, SqlUsageSink
 from app.services import vectorstore as vectorstore_service
 from app.ui import router as ui_router
 
@@ -343,6 +345,13 @@ def create_app(provider: LLMProvider | None = None) -> FastAPI:
     application.state.min_citations = min_citations
     application.state.max_citations = max_citations
     application.state.token_registry = TokenRegistry()
+    if getattr(settings, "environment", "dev") in {"dev", "test"}:
+        application.state.usage_sink = NoopUsageSink()
+        application.state.billing_sink = NoopBillingSink()
+    else:
+        session_factory = lambda: Session(ingest_service.engine)
+        application.state.usage_sink = SqlUsageSink(session_factory)
+        application.state.billing_sink = SqlBillingSink(session_factory)
 
     if getattr(settings, "use_lora", False):
         default_adapter = getattr(settings, "lora_default_adapter", "none") or "none"
