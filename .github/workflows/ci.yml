@@ -101,12 +101,20 @@ jobs:
             exit 1
           fi
 
-          if rg -n "(primary|основн).*OpenAPI.*backend/app/main.py" README.md; then
+          # Use grep (always available) instead of rg (not installed by default
+          # on ubuntu-latest). -E for extended regex on the first check, -F for
+          # fixed-string on the second so backticks in the pattern are taken
+          # literally (otherwise the shell would treat them as command
+          # substitution and try to execute app/api/main.py).
+          if grep -nE "(primary|основн).*OpenAPI.*backend/app/main\.py" README.md; then
             echo "ERROR: README marks legacy OpenAPI as primary"
             exit 1
           fi
 
-          if ! rg -n "Source-of-truth backend entrypoint: `app/api/main.py`" README.md; then
+          # Match both bold and plain markdown styles. Pattern is wrapped in
+          # single quotes so the shell does not expand backticks as command
+          # substitution; the regex itself stays as a single argument to grep.
+          if ! grep -nE '(\*\*)?Source-of-truth backend entrypoint:(\*\*)? +`app/api/main\.py`' README.md; then
             echo "ERROR: README must explicitly pin app/api/main.py as source-of-truth"
             exit 1
           fi
