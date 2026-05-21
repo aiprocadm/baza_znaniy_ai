@@ -31,4 +31,6 @@ models/*
 !models/.gitkeep
 !models/model_manifest.json
 .vscode/
+.claude/
+.hypothesis/
 TEST_RESULTS.md

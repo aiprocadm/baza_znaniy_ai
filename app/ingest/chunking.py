@@ -802,7 +802,7 @@ def parse_document(filename: str, data: Union[bytes, bytearray, BinaryIO]) -> Pa
         return ParseResult([], "legacy", None, False, {"document": {}, "pages": [], "chunks": []})
 
     ext = name.rsplit(".", 1)[-1].lower()
-    mime_by_ext = {"pdf": "application/pdf", "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation", "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "txt": "text/plain", "md": "text/markdown", "markdown": "text/markdown"}
+    mime_by_ext = {"pdf": "application/pdf", "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation", "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "txt": "text/plain", "md": "text/markdown", "markdown": "text/markdown", "html": "text/html", "htm": "text/html"}
     mime = mime_by_ext.get(ext, "application/octet-stream")
     stream = _ensure_binary_stream(data)
     raw_bytes = _read_stream_to_bytes(stream)

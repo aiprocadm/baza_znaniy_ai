@@ -1,0 +1,94 @@
+name: kb
+
+# Compose-стек MVP базы знаний с нейропоиском.
+#
+# Сервисы:
+#   * qdrant   — векторное хранилище для зрелого пайплайна (используется
+#                существующим /api/v1/* кодом). MVP-эндпоинты /api/kb/*
+#                продолжат работать даже без него — у них собственный
+#                SQLite-индекс.
+#   * kb_api   — FastAPI (uvicorn), exposes /api/kb/* и /api/v1/*.
+#   * kb_web   — nginx, отдаёт data/www/* как статический фронтенд и
+#                проксирует /api/* в kb_api.
+#
+# Сеть "web" создаётся внешне (docker network create web). Если она
+# существует — сервисы просто к ней присоединяются.
+
+networks:
+  web:
+    name: web
+    external: true
+
+services:
+  qdrant:
+    image: qdrant/qdrant:${QDRANT_IMAGE_TAG:-v1.15.4}
+    container_name: kb_qdrant
+    restart: unless-stopped
+    environment:
+      QDRANT__STORAGE__ON_DISK: "true"
+    volumes:
+      - ./var/data/qdrant:/qdrant/storage
+    networks:
+      - web
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import json,sys,urllib.request;sys.exit(0 if json.load(urllib.request.urlopen('http://127.0.0.1:6333/healthz'))['status']=='ok' else 1)\""]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  kb_api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        INSTALL_DEV: "0"
+    container_name: kb_api
+    restart: unless-stopped
+    command: ["uvicorn", "app.api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    env_file:
+      - .env
+    environment:
+      BACKEND_ENTRYPOINT: "app.api.main:app"
+      INGEST_AUTOSTART_WORKER: "false"
+      INGEST_USE_LOCAL_QUEUE: "true"
+      QDRANT_URL: "http://qdrant:6333"
+      DATA_DIR: "/app/var/data"
+      KB_MVP_DB_PATH: "/app/var/data/kb_mvp.sqlite"
+    volumes:
+      - ./var/data:/app/var/data
+      - ./models:/app/models
+    depends_on:
+      qdrant:
+        condition: service_healthy
+    networks:
+      - web
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import sys, urllib.request; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/api/kb/health').getcode() == 200 else 1)\""]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  kb_web:
+    image: nginx:1.27-alpine
+    container_name: kb_web
+    restart: unless-stopped
+    environment:
+      APP_HOST: "${APP_HOST:-kb.local}"
+    volumes:
+      - ./data/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./data/www:/usr/share/nginx/html:ro
+    ports:
+      - "80:80"
+    depends_on:
+      kb_api:
+        condition: service_started
+    networks:
+      - web
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1/api/kb/health >/dev/null 2>&1 || exit 1"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
