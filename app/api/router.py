@@ -9,6 +9,7 @@ from pathlib import Path
 from fastapi import APIRouter
 
 from app.api import routes as root_routes
+from app.api.kb_mvp import router as kb_mvp_router
 from app.api.routes_lora import router as lora_admin_router
 
 
@@ -38,19 +39,30 @@ api_router = APIRouter()
 api_router.include_router(root_routes.router)
 api_router.include_router(lora_admin_router)
 
-try:  # pragma: no cover - exercised in real FastAPI runtime
-    api_router.include_router(v1_router, prefix="/api/v1")
-except TypeError:  # pragma: no cover - fallback for test stubs without prefix support
-    routes = list(getattr(v1_router, "_routes", []))
+
+def _include_with_prefix(target: APIRouter, source: APIRouter, prefix: str) -> None:
+    """Include *source* under *prefix*, tolerating stubbed APIRouter classes."""
+
+    try:  # pragma: no cover - exercised in real FastAPI runtime
+        target.include_router(source, prefix=prefix)
+        return
+    except TypeError:  # pragma: no cover - fallback for test stubs without prefix support
+        pass
+
+    routes = list(getattr(source, "_routes", []))
     route_type = type(routes[0]) if routes else None
     for route in routes:
-        prefixed = f"/api/v1{route.path}".replace("//", "/")
+        prefixed = f"{prefix}{route.path}".replace("//", "/")
         if route_type is not None:
-            api_router._routes.append(
+            target._routes.append(
                 route_type(route.method, prefixed, route.handler, route.status_code)
             )
         else:  # pragma: no cover - defensive
-            api_router._routes.append(route)
+            target._routes.append(route)
+
+
+_include_with_prefix(api_router, kb_mvp_router, "/api/kb")
+_include_with_prefix(api_router, v1_router, "/api/v1")
 
 
 __all__ = ["api_router"]

@@ -59,6 +59,52 @@ def test_parse_document_auto_legacy_fallback(monkeypatch):
     assert result.pages == [(1, "legacy text")]
 
 
+def test_extract_page_texts_prefers_markdown() -> None:
+    """Markdown export должен иметь приоритет над raw page.text для RAG."""
+
+    from app.ingest.docling_backend import _extract_page_texts
+
+    class FakePage:
+        text = "Plain text without tables"
+
+        def export_to_markdown(self) -> str:
+            return "# Heading\n\n| A | B |\n|---|---|\n| 1 | 2 |"
+
+    class FakeDocument:
+        pages = [FakePage()]
+
+    class FakeResult:
+        document = FakeDocument()
+
+    pages = _extract_page_texts(FakeResult())
+    assert len(pages) == 1
+    assert pages[0][0] == 1
+    # Markdown с таблицей должен выиграть у plain text
+    assert "| A | B |" in pages[0][1]
+    assert "Plain text" not in pages[0][1]
+
+
+def test_extract_page_texts_falls_back_to_text_when_markdown_empty() -> None:
+    """Если export_to_markdown() пустой — берём page.text как fallback."""
+
+    from app.ingest.docling_backend import _extract_page_texts
+
+    class FakePage:
+        text = "Plain text fallback"
+
+        def export_to_markdown(self) -> str:
+            return ""
+
+    class FakeDocument:
+        pages = [FakePage()]
+
+    class FakeResult:
+        document = FakeDocument()
+
+    pages = _extract_page_texts(FakeResult())
+    assert pages == [(1, "Plain text fallback")]
+
+
 def test_parse_document_docling_hard_fail_with_fallback(monkeypatch):
     from app.ingest import chunking
 

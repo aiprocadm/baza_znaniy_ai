@@ -1,170 +1,1014 @@
-<!doctype html><meta charset="utf-8">
-<title>KB</title>
-<style>
-body { font-family: system-ui, sans-serif; margin: 2rem; max-width: 760px; }
-form { margin-bottom: 1.5rem; display: grid; gap: 0.5rem; }
-fieldset { border: 1px solid #ccc; padding: 1rem; }
-legend { font-weight: 600; }
-input, button, textarea { font: inherit; padding: 0.4rem 0.6rem; }
-textarea { resize: vertical; min-height: 4rem; }
-#out { white-space: pre-wrap; background: #f8f9fa; padding: 1rem; border-radius: 0.5rem; border: 1px solid #e5e7eb; }
-.status { color: #b91c1c; min-height: 1.2rem; }
-</style>
-<h1>KB Chat</h1>
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>KB · Корпоративная база знаний с нейропоиском</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #f6f7f9;
+      --card: #ffffff;
+      --text: #111827;
+      --muted: #6b7280;
+      --accent: #2563eb;
+      --accent-soft: #dbeafe;
+      --border: #e5e7eb;
+      --danger: #b91c1c;
+      --ok: #047857;
+      --warn: #b45309;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #0f172a;
+        --card: #111827;
+        --text: #f9fafb;
+        --muted: #9ca3af;
+        --accent: #60a5fa;
+        --accent-soft: #1e3a8a;
+        --border: #1f2937;
+        --warn: #fbbf24;
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+    }
+    .wrap {
+      max-width: 960px;
+      margin: 0 auto;
+      padding: 2rem 1.25rem 4rem;
+    }
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+      margin-bottom: 1.5rem;
+      flex-wrap: wrap;
+    }
+    h1 { font-size: 1.5rem; margin: 0; }
+    h2 { font-size: 1.1rem; margin: 0 0 0.75rem; }
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.45rem;
+      padding: 0.3rem 0.75rem;
+      border-radius: 999px;
+      background: var(--accent-soft);
+      color: var(--accent);
+      font-size: 0.85rem;
+      font-weight: 500;
+    }
+    .pill .dot {
+      width: 0.55rem;
+      height: 0.55rem;
+      border-radius: 50%;
+      background: var(--muted);
+    }
+    .pill.ok .dot { background: var(--ok); }
+    .pill.error .dot { background: var(--danger); }
+    .pill.warn .dot { background: var(--warn); }
+    .pill-row { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+    .grid { display: grid; gap: 1rem; }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 0.75rem;
+      padding: 1.25rem;
+      box-shadow: 0 1px 2px rgba(0,0,0,0.03);
+    }
+    form { display: grid; gap: 0.6rem; }
+    label {
+      display: grid;
+      gap: 0.3rem;
+      font-size: 0.85rem;
+      color: var(--muted);
+    }
+    input, textarea, button, select {
+      font: inherit;
+      padding: 0.6rem 0.75rem;
+      border-radius: 0.5rem;
+      border: 1px solid var(--border);
+      background: transparent;
+      color: var(--text);
+    }
+    textarea { resize: vertical; min-height: 6rem; }
+    button {
+      background: var(--accent);
+      color: white;
+      border: none;
+      cursor: pointer;
+      transition: opacity 0.15s;
+    }
+    button:disabled { opacity: 0.6; cursor: progress; }
+    button.secondary {
+      background: transparent;
+      color: var(--accent);
+      border: 1px solid var(--accent);
+    }
+    button.danger {
+      background: transparent;
+      color: var(--danger);
+      border: 1px solid var(--danger);
+      padding: 0.3rem 0.6rem;
+      font-size: 0.85rem;
+    }
+    .tabs {
+      display: flex;
+      gap: 0.25rem;
+      margin-bottom: 1rem;
+      flex-wrap: wrap;
+    }
+    .tabs button {
+      background: transparent;
+      color: var(--muted);
+      border: 1px solid var(--border);
+      padding: 0.4rem 0.85rem;
+      border-radius: 999px;
+      cursor: pointer;
+      font-size: 0.85rem;
+    }
+    .tabs button.active {
+      color: white;
+      background: var(--accent);
+      border-color: var(--accent);
+    }
+    .tab-panel { display: none; }
+    .tab-panel.active { display: grid; gap: 1rem; }
+    .hint { color: var(--muted); font-size: 0.85rem; }
+    .doc-list { display: grid; gap: 0.5rem; margin: 0; padding: 0; list-style: none; }
+    .doc-list li {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.5rem;
+      padding: 0.6rem 0.85rem;
+      border: 1px solid var(--border);
+      border-radius: 0.5rem;
+    }
+    .doc-list li .meta { color: var(--muted); font-size: 0.8rem; }
+    .doc-list li .badge {
+      display: inline-block;
+      padding: 0.1rem 0.4rem;
+      border-radius: 0.3rem;
+      font-size: 0.7rem;
+      background: var(--accent-soft);
+      color: var(--accent);
+      margin-right: 0.4rem;
+    }
+    .pre {
+      white-space: pre-wrap;
+      word-wrap: break-word;
+      background: rgba(127,127,127,0.08);
+      padding: 0.85rem 1rem;
+      border-radius: 0.5rem;
+      font-size: 0.9rem;
+      line-height: 1.5;
+    }
+    .feedback { min-height: 1.25rem; font-size: 0.85rem; color: var(--danger); }
+    .feedback.ok { color: var(--ok); }
+    .feedback.muted { color: var(--muted); }
+    .sources { display: grid; gap: 0.5rem; }
+    .source {
+      padding: 0.65rem 0.85rem;
+      border-left: 3px solid var(--accent);
+      background: rgba(127,127,127,0.05);
+      border-radius: 0 0.5rem 0.5rem 0;
+      font-size: 0.9rem;
+    }
+    .source .title { font-weight: 600; margin-bottom: 0.25rem; }
+    .source .score { color: var(--muted); font-size: 0.8rem; }
+    .row { display: flex; gap: 0.5rem; align-items: flex-end; }
+    .row .grow { flex: 1; }
+    .drop-zone {
+      border: 2px dashed var(--border);
+      border-radius: 0.6rem;
+      padding: 1.5rem;
+      text-align: center;
+      color: var(--muted);
+      cursor: pointer;
+      transition: border-color 0.15s, background 0.15s;
+    }
+    .drop-zone.dragover {
+      border-color: var(--accent);
+      background: var(--accent-soft);
+      color: var(--accent);
+    }
+    .drop-zone input[type=file] { display: none; }
+    footer {
+      margin-top: 2rem;
+      color: var(--muted);
+      font-size: 0.8rem;
+      text-align: center;
+    }
+    code { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 0.85em; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <h1>KB · Корпоративная база знаний с нейропоиском</h1>
+      <div class="pill-row">
+        <span id="health-pill" class="pill"><span class="dot"></span><span class="label">проверка…</span></span>
+        <span id="llm-pill" class="pill" title="Активный LLM-провайдер"><span class="dot"></span><span class="label">LLM…</span></span>
+        <span id="emb-pill" class="pill" title="Активный embedder"><span class="dot"></span><span class="label">emb…</span></span>
+        <span id="rerank-pill" class="pill" title="Cross-encoder reranker"><span class="dot"></span><span class="label">rerank…</span></span>
+        <span id="auth-pill" class="pill" title="Аутентификация"><span class="dot"></span><span class="label">auth…</span></span>
+        <button id="auth-toggle" type="button" class="secondary" style="padding:0.25rem 0.6rem;font-size:0.8rem;">Ключ</button>
+      </div>
+    </header>
 
-<section>
-  <fieldset>
-    <legend>Параметры запроса</legend>
-    <label>
-      User ID
-      <input id="user-id" placeholder="Например, user-123" required>
-    </label>
-    <label>
-      Conversation ID (необязательно)
-      <input id="conversation-id" placeholder="general">
-    </label>
-  </fieldset>
-</section>
+    <div id="auth-panel" class="card" hidden style="margin-bottom: 1rem;">
+      <h2 style="margin-top:0;">API ключ</h2>
+      <p class="hint">
+        Когда на сервере задан <code>KB_API_KEY</code> — все запросы (кроме <code>/health</code> и <code>/providers</code>)
+        требуют заголовок <code>X-API-Key</code>. Ключ сохраняется в <code>localStorage</code> только этого браузера.
+      </p>
+      <div class="row">
+        <input id="auth-input" type="password" placeholder="Введите API ключ" autocomplete="off" style="flex:1;">
+        <button id="auth-save" type="button">Сохранить</button>
+        <button id="auth-clear" type="button" class="secondary">Очистить</button>
+      </div>
+      <div id="auth-feedback" class="feedback" style="margin-top: 0.4rem;"></div>
+    </div>
 
-<section>
-  <fieldset>
-    <legend>Чат</legend>
-    <form id="chat-form">
-      <textarea id="message" placeholder="Введите вопрос" required></textarea>
-      <button>Отправить</button>
-    </form>
-    <div id="chat-status" class="status"></div>
-  </fieldset>
-  <pre id="out"></pre>
-</section>
+    <nav class="tabs">
+      <button type="button" data-tab="docs" class="active">Документы</button>
+      <button type="button" data-tab="upload">Загрузка файлов</button>
+      <button type="button" data-tab="search">Поиск</button>
+      <button type="button" data-tab="ask">Вопрос-ответ</button>
+      <button type="button" data-tab="history">История</button>
+      <button type="button" data-tab="providers">Провайдеры</button>
+    </nav>
 
-<section>
-  <fieldset>
-    <legend>Загрузка документов</legend>
-    <form id="upload-form">
-      <input id="upload-file" type="file" accept=".pdf,.docx,.txt" required>
-      <button>Загрузить</button>
-    </form>
-    <div id="upload-status" class="status"></div>
-  </fieldset>
-</section>
+    <section id="tab-docs" class="tab-panel active">
+      <div class="card">
+        <h2>Добавить текстовый документ</h2>
+        <form id="doc-form">
+          <label>
+            Название
+            <input id="doc-title" type="text" placeholder="Например, Регламент онбординга" maxlength="300">
+          </label>
+          <label>
+            Текст
+            <textarea id="doc-text" placeholder="Вставьте текст документа…" required></textarea>
+          </label>
+          <div class="row">
+            <button type="submit">Сохранить</button>
+            <span id="doc-feedback" class="feedback"></span>
+          </div>
+        </form>
+      </div>
 
-<script>
-const userInput = document.getElementById('user-id');
-const conversationInput = document.getElementById('conversation-id');
-const messageInput = document.getElementById('message');
-const chatStatus = document.getElementById('chat-status');
-const uploadStatus = document.getElementById('upload-status');
-const output = document.getElementById('out');
-const chatForm = document.getElementById('chat-form');
-const uploadForm = document.getElementById('upload-form');
-const fileInput = document.getElementById('upload-file');
+      <div class="card">
+        <h2>Документы в базе</h2>
+        <p id="docs-empty" class="hint">База пуста. Добавьте первый документ.</p>
+        <ul id="docs" class="doc-list"></ul>
+      </div>
+    </section>
 
-function requireUserId() {
-  const value = userInput.value.trim();
-  if (!value) {
-    throw new Error('Укажите user_id.');
-  }
-  return value;
-}
+    <section id="tab-upload" class="tab-panel">
+      <div class="card">
+        <h2>Загрузка файла</h2>
+        <p class="hint">
+          Поддерживаются <code>PDF, DOCX, PPTX, XLSX, TXT, MD, HTML</code> до 25 MiB.
+          Файл будет распарсен и проиндексирован.
+        </p>
+        <form id="upload-form">
+          <label class="drop-zone" id="drop-zone">
+            <span id="drop-label">Перетащите файл сюда или нажмите, чтобы выбрать</span>
+            <input id="upload-file" type="file"
+              accept=".pdf,.docx,.pptx,.xlsx,.txt,.md,.markdown,.html,.htm">
+          </label>
+          <label>
+            Название (необязательно)
+            <input id="upload-title" type="text" placeholder="По умолчанию — имя файла" maxlength="300">
+          </label>
+          <div class="row">
+            <button type="submit">Загрузить и проиндексировать</button>
+            <span id="upload-feedback" class="feedback"></span>
+          </div>
+        </form>
+      </div>
+    </section>
 
-function buildConversationId() {
-  const raw = conversationInput.value.trim();
-  return raw || null;
-}
+    <section id="tab-search" class="tab-panel">
+      <div class="card">
+        <h2>Семантический поиск</h2>
+        <form id="search-form">
+          <div class="row">
+            <label class="grow">
+              Запрос
+              <input id="search-query" type="text" placeholder="Что искать в базе?">
+            </label>
+            <label style="width:6rem">
+              top_k
+              <input id="search-topk" type="number" min="1" max="50" value="5">
+            </label>
+          </div>
+          <div class="row">
+            <button type="submit">Искать</button>
+            <span id="search-feedback" class="feedback"></span>
+          </div>
+        </form>
+        <div id="search-results" class="sources" style="margin-top: 0.75rem;"></div>
+      </div>
+    </section>
 
-chatForm.addEventListener('submit', async (event) => {
-  event.preventDefault();
-  chatStatus.textContent = '';
-  output.textContent = 'Загрузка...';
+    <section id="tab-ask" class="tab-panel">
+      <div class="card">
+        <h2>Вопрос-ответ (RAG)</h2>
+        <p class="hint">
+          Используется активный LLM-провайдер. Если он не настроен — extractive-ответ из топ-фрагментов.
+        </p>
+        <div id="ask-conv-bar" class="hint" style="margin-bottom: 0.5rem;">
+          Новый диалог
+          <button id="ask-conv-clear" type="button" class="secondary" style="display:none;margin-left:0.5rem;padding:0.2rem 0.6rem;font-size:0.8rem;">Сбросить</button>
+        </div>
+        <form id="ask-form">
+          <label>
+            Вопрос
+            <textarea id="ask-question" placeholder="Сформулируйте вопрос по содержимому базы знаний." required></textarea>
+          </label>
+          <div class="row" style="align-items: center;">
+            <button type="submit">Спросить</button>
+            <label style="display:flex;align-items:center;gap:0.4rem;flex-direction:row;color:var(--text);font-size:0.9rem;cursor:pointer;">
+              <input id="ask-stream" type="checkbox" checked style="width:auto;padding:0;">
+              потоковый ответ
+            </label>
+            <span id="ask-feedback" class="feedback" style="flex:1;"></span>
+          </div>
+        </form>
+        <div id="ask-answer" class="pre" hidden></div>
+        <div id="ask-sources" class="sources" style="margin-top: 0.75rem;"></div>
+      </div>
+    </section>
 
-  let userId;
-  try {
-    userId = requireUserId();
-  } catch (err) {
-    output.textContent = '';
-    chatStatus.textContent = err.message;
-    return;
-  }
+    <section id="tab-history" class="tab-panel">
+      <div class="card">
+        <h2>История диалогов</h2>
+        <p class="hint">
+          Каждый <code>/ask</code> сохраняет вопрос и ответ в диалог.
+          Откройте диалог, чтобы продолжить — следующие вопросы будут учитывать контекст.
+        </p>
+        <div class="row" style="margin-bottom: 0.75rem;">
+          <button id="history-refresh" type="button" class="secondary" style="padding:0.4rem 0.8rem;">Обновить</button>
+          <span id="history-feedback" class="feedback"></span>
+        </div>
+        <p id="history-empty" class="hint">История пуста. Задайте вопрос в разделе «Вопрос-ответ».</p>
+        <ul id="history-list" class="doc-list"></ul>
+      </div>
 
-  const payload = {
-    user_id: userId,
-    conversation_id: buildConversationId(),
-    message: messageInput.value,
-  };
+      <div class="card" id="history-detail-card" hidden>
+        <div class="row" style="justify-content: space-between; align-items: center;">
+          <h2 id="history-detail-title" style="margin: 0;"></h2>
+          <div>
+            <button id="history-continue" type="button" class="secondary" style="padding:0.3rem 0.6rem;font-size:0.85rem;">Продолжить →</button>
+            <button id="history-delete" type="button" class="danger">Удалить</button>
+          </div>
+        </div>
+        <div id="history-messages" style="margin-top: 0.75rem; display:grid; gap:0.6rem;"></div>
+      </div>
+    </section>
 
-  try {
-    const response = await fetch('/api/chat', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
+    <section id="tab-providers" class="tab-panel">
+      <div class="card">
+        <h2>LLM-провайдеры</h2>
+        <p class="hint">Снэпшот из <code>/api/kb/providers</code>. Активный провайдер выбирается по env-переменным.</p>
+        <div id="providers-list"></div>
+      </div>
+    </section>
+
+    <footer>
+      MVP RAG поверх локального индекса · endpoints под <code>/api/kb/*</code>
+      · поддержка DeepSeek, Groq, OpenRouter, Ollama
+    </footer>
+  </div>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const apiBase = "/api/kb";
+    const AUTH_STORAGE_KEY = "kb_mvp_api_key";
+
+    function getApiKey() {
+      try { return localStorage.getItem(AUTH_STORAGE_KEY) || ""; }
+      catch (_) { return ""; }
+    }
+
+    function withAuthHeaders(headers = {}) {
+      const key = getApiKey();
+      if (key) headers["X-API-Key"] = key;
+      return headers;
+    }
+
+    const json = (path, opts = {}) => {
+      const headers = withAuthHeaders({ "Content-Type": "application/json", ...(opts.headers || {}) });
+      return fetch(`${apiBase}${path}`, { ...opts, headers });
+    };
+    const rawApi = (path, opts = {}) => {
+      const headers = withAuthHeaders({ ...(opts.headers || {}) });
+      return fetch(`${apiBase}${path}`, { ...opts, headers });
+    };
+
+    // --- Tabs --------------------------------------------------------------
+    document.querySelectorAll(".tabs button[data-tab]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        document.querySelectorAll(".tabs button").forEach((b) => b.classList.toggle("active", b === btn));
+        document.querySelectorAll(".tab-panel").forEach((p) => p.classList.toggle("active", p.id === `tab-${btn.dataset.tab}`));
+        if (btn.dataset.tab === "providers") refreshProviders();
+        if (btn.dataset.tab === "history") refreshHistory();
+      });
     });
 
-    if (!response.ok) {
-      throw new Error(`Ошибка ${response.status}`);
+    // --- Utils -------------------------------------------------------------
+    function setPill(id, kind, label, title) {
+      const pill = $(id);
+      pill.classList.remove("ok", "error", "warn");
+      if (kind) pill.classList.add(kind);
+      pill.querySelector(".label").textContent = label;
+      if (title) pill.setAttribute("title", title);
     }
 
-    const data = await response.json();
-    const lines = [data.answer?.trim() || ''];
-    lines.push('', 'Цитаты:');
-    if (data.citations && data.citations.length) {
-      lines.push(JSON.stringify(data.citations, null, 2));
-    } else {
-      lines.push('Нет доступных ссылок');
+    function setFeedback(id, message, kind) {
+      const el = $(id);
+      el.textContent = message || "";
+      el.classList.remove("ok", "muted");
+      if (kind) el.classList.add(kind);
     }
-    if (data.citations_insufficient) {
-      lines.push('', '⚠️ Найдено меньше трёх релевантных цитат');
+
+    function escapeHtml(value) {
+      return String(value).replace(/[&<>"']/g, (c) => ({
+        "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;",
+      })[c]);
     }
-    output.textContent = lines.join('\n');
-  } catch (err) {
-    output.textContent = '';
-    chatStatus.textContent = err.message || 'Не удалось отправить сообщение';
-    console.error(err);
-  }
-});
 
-uploadForm.addEventListener('submit', async (event) => {
-  event.preventDefault();
-  uploadStatus.textContent = '';
+    // --- Health and provider pills ----------------------------------------
+    async function refreshHealth() {
+      try {
+        const r = await rawApi("/health");
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const data = await r.json();
+        setPill("health-pill", "ok", "сервис в строю");
 
-  let userId;
-  try {
-    userId = requireUserId();
-  } catch (err) {
-    uploadStatus.textContent = err.message;
-    return;
-  }
+        const sel = data.llm && data.llm.selected;
+        if (sel) {
+          setPill("llm-pill", "ok", `LLM: ${sel.name} (${sel.model})`, `api_base: ${sel.api_base}`);
+        } else {
+          setPill("llm-pill", "warn", "LLM: extractive", "Ни один LLM-провайдер не настроен; ответы собираются из фрагментов");
+        }
 
-  const file = fileInput.files?.[0];
-  if (!file) {
-    uploadStatus.textContent = 'Выберите файл';
-    return;
-  }
+        const emb = data.embedder || {};
+        const dimLabel = (typeof emb.dimension === "number") ? `, dim=${emb.dimension}` : "";
+        setPill("emb-pill", emb.name === "hash" ? "warn" : "ok", `emb: ${emb.name}${dimLabel}`);
 
-  const form = new FormData();
-  form.append('file', file);
-  form.append('user_id', userId);
-  const conv = buildConversationId();
-  if (conv) {
-    form.append('conversation_id', conv);
-  }
+        const rer = data.reranker || {};
+        if (rer.enabled) {
+          const loaded = rer.loaded ? "loaded" : "lazy";
+          const shortModel = (rer.model || "").split("/").slice(-1)[0] || rer.model;
+          setPill("rerank-pill", "ok", `rerank: ${shortModel} (${loaded})`,
+            `Cross-encoder активен. Кандидатов: ${rer.candidates}, финальных: ${rer.top_n}`);
+        } else {
+          setPill("rerank-pill", "warn", "rerank: off",
+            "KB_RERANK_ENABLED=true для включения cross-encoder reranker");
+        }
 
-  try {
-    const response = await fetch('/api/docs/upload', {
-      method: 'POST',
-      body: form,
+        const auth = data.auth || {};
+        const hasKey = !!getApiKey();
+        if (auth.enabled) {
+          if (hasKey) {
+            setPill("auth-pill", "ok", "auth: key saved",
+              `Сервер требует ${auth.header}. Ключ сохранён локально.`);
+          } else {
+            setPill("auth-pill", "error", "auth: key required",
+              `Сервер требует ${auth.header}. Откройте «Ключ» и введите значение KB_API_KEY.`);
+          }
+        } else {
+          setPill("auth-pill", "warn", "auth: open",
+            "KB_API_KEY не задан на сервере. Для prod-деплоя установите его в .env.");
+        }
+      } catch (err) {
+        setPill("health-pill", "error", "API недоступен");
+        setPill("llm-pill", "error", "LLM: ?");
+        setPill("emb-pill", "error", "emb: ?");
+        setPill("rerank-pill", "error", "rerank: ?");
+        setPill("auth-pill", "error", "auth: ?");
+      }
+    }
+
+    // --- Auth panel --------------------------------------------------------
+    $("auth-toggle").addEventListener("click", () => {
+      const panel = $("auth-panel");
+      panel.hidden = !panel.hidden;
+      if (!panel.hidden) {
+        $("auth-input").value = getApiKey();
+        $("auth-input").focus();
+      }
     });
 
-    if (!response.ok) {
-      throw new Error(`Ошибка ${response.status}`);
+    $("auth-save").addEventListener("click", () => {
+      const value = $("auth-input").value.trim();
+      try {
+        if (value) localStorage.setItem(AUTH_STORAGE_KEY, value);
+        else localStorage.removeItem(AUTH_STORAGE_KEY);
+        setFeedback("auth-feedback", value ? "Ключ сохранён" : "Ключ очищен", "ok");
+        refreshHealth();
+      } catch (err) {
+        setFeedback("auth-feedback", "localStorage недоступен");
+      }
+    });
+
+    $("auth-clear").addEventListener("click", () => {
+      try {
+        localStorage.removeItem(AUTH_STORAGE_KEY);
+        $("auth-input").value = "";
+        setFeedback("auth-feedback", "Ключ удалён", "ok");
+        refreshHealth();
+      } catch (_) {}
+    });
+
+    // --- Documents tab -----------------------------------------------------
+    async function refreshDocs() {
+      try {
+        const r = await rawApi("/documents");
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const docs = await r.json();
+        const list = $("docs");
+        const empty = $("docs-empty");
+        list.innerHTML = "";
+        if (!docs.length) {
+          empty.hidden = false;
+          return;
+        }
+        empty.hidden = true;
+        for (const d of docs) {
+          const li = document.createElement("li");
+          const badge = d.source === "file"
+            ? `<span class="badge">FILE</span>`
+            : `<span class="badge" style="background:rgba(0,0,0,.06);color:var(--muted)">TEXT</span>`;
+          const sub = d.filename ? `файл: ${escapeHtml(d.filename)} · ` : "";
+          li.innerHTML = `
+            <div>
+              <div>${badge}<strong>#${d.id}</strong> · ${escapeHtml(d.title)}</div>
+              <div class="meta">${sub}фрагментов: ${d.chunks} · ${d.created_at}</div>
+            </div>
+          `;
+          const btn = document.createElement("button");
+          btn.className = "danger";
+          btn.type = "button";
+          btn.textContent = "Удалить";
+          btn.addEventListener("click", () => removeDoc(d.id));
+          li.appendChild(btn);
+          list.appendChild(li);
+        }
+      } catch (err) {
+        console.error(err);
+      }
     }
 
-    const data = await response.json();
-    uploadStatus.textContent = `Загружено фрагментов: ${data.chunks}`;
-    fileInput.value = '';
-  } catch (err) {
-    uploadStatus.textContent = err.message || 'Не удалось загрузить файл';
-    console.error(err);
-  }
-});
-</script>
+    async function removeDoc(id) {
+      if (!confirm(`Удалить документ #${id}?`)) return;
+      try {
+        const r = await rawApi(`/documents/${id}`, { method: "DELETE" });
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        await refreshDocs();
+      } catch (err) {
+        alert(`Не удалось удалить: ${err.message || err}`);
+      }
+    }
+
+    $("doc-form").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const title = $("doc-title").value.trim();
+      const text = $("doc-text").value.trim();
+      if (!text) {
+        setFeedback("doc-feedback", "Введите текст документа");
+        return;
+      }
+      setFeedback("doc-feedback", "Отправка…", "muted");
+      try {
+        const r = await json("/documents", {
+          method: "POST",
+          body: JSON.stringify({ title, text }),
+        });
+        if (!r.ok) {
+          const detail = await r.json().catch(() => ({}));
+          throw new Error(detail.detail || `HTTP ${r.status}`);
+        }
+        const data = await r.json();
+        setFeedback("doc-feedback", `Сохранено #${data.id} (${data.chunks} фрагментов)`, "ok");
+        $("doc-form").reset();
+        await refreshDocs();
+      } catch (err) {
+        setFeedback("doc-feedback", err.message || "Ошибка сохранения");
+      }
+    });
+
+    // --- Upload tab --------------------------------------------------------
+    const dropZone = $("drop-zone");
+    const fileInput = $("upload-file");
+
+    dropZone.addEventListener("click", () => fileInput.click());
+    dropZone.addEventListener("dragover", (e) => { e.preventDefault(); dropZone.classList.add("dragover"); });
+    dropZone.addEventListener("dragleave", () => dropZone.classList.remove("dragover"));
+    dropZone.addEventListener("drop", (e) => {
+      e.preventDefault();
+      dropZone.classList.remove("dragover");
+      if (e.dataTransfer.files.length) {
+        fileInput.files = e.dataTransfer.files;
+        updateDropLabel();
+      }
+    });
+    fileInput.addEventListener("change", updateDropLabel);
+
+    function updateDropLabel() {
+      const file = fileInput.files?.[0];
+      $("drop-label").textContent = file
+        ? `Выбран: ${file.name} (${(file.size / 1024).toFixed(1)} KiB)`
+        : "Перетащите файл сюда или нажмите, чтобы выбрать";
+    }
+
+    $("upload-form").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const file = fileInput.files?.[0];
+      if (!file) { setFeedback("upload-feedback", "Выберите файл"); return; }
+      setFeedback("upload-feedback", "Загрузка и парсинг…", "muted");
+      const form = new FormData();
+      form.append("file", file);
+      const title = $("upload-title").value.trim();
+      if (title) form.append("title", title);
+      try {
+        const r = await rawApi("/documents/upload", { method: "POST", body: form });
+        if (!r.ok) {
+          const detail = await r.json().catch(() => ({}));
+          throw new Error(detail.detail || `HTTP ${r.status}`);
+        }
+        const data = await r.json();
+        setFeedback("upload-feedback", `Документ #${data.id} (${data.chunks} фрагментов)`, "ok");
+        $("upload-form").reset();
+        updateDropLabel();
+        await refreshDocs();
+      } catch (err) {
+        setFeedback("upload-feedback", err.message || "Ошибка загрузки");
+      }
+    });
+
+    // --- Search tab --------------------------------------------------------
+    function renderSources(target, items) {
+      const el = $(target);
+      el.innerHTML = "";
+      if (!items || !items.length) {
+        el.innerHTML = '<div class="hint">Релевантных фрагментов не найдено.</div>';
+        return;
+      }
+      for (const hit of items) {
+        const block = document.createElement("div");
+        block.className = "source";
+        const label = hit.filename ? `${hit.document_title} (файл: ${hit.filename})` : hit.document_title;
+        block.innerHTML = `
+          <div class="title">#${hit.document_id} · ${escapeHtml(label || "Без названия")}<span class="score"> · score ${Number(hit.score).toFixed(3)}</span></div>
+          <div>${escapeHtml(hit.text)}</div>
+        `;
+        el.appendChild(block);
+      }
+    }
+
+    $("search-form").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const query = $("search-query").value.trim();
+      const topK = Number($("search-topk").value) || 5;
+      if (!query) { setFeedback("search-feedback", "Введите запрос"); return; }
+      setFeedback("search-feedback", "Идёт поиск…", "muted");
+      try {
+        const r = await json("/search", { method: "POST", body: JSON.stringify({ query, top_k: topK }) });
+        if (!r.ok) {
+          const detail = await r.json().catch(() => ({}));
+          throw new Error(detail.detail || `HTTP ${r.status}`);
+        }
+        const data = await r.json();
+        const rerankNote = data.rerank && data.rerank.used
+          ? ` · rerank=${data.rerank.candidates}→${data.hits.length}${data.rerank.elapsed_ms ? ` (${Number(data.rerank.elapsed_ms).toFixed(0)}ms)` : ""}`
+          : "";
+        setFeedback("search-feedback", `Найдено: ${data.hits.length}${rerankNote}`, "ok");
+        renderSources("search-results", data.hits);
+      } catch (err) {
+        setFeedback("search-feedback", err.message || "Ошибка поиска");
+        renderSources("search-results", []);
+      }
+    });
+
+    // --- Ask tab + Conversations ------------------------------------------
+    let activeConversationId = null;
+    let activeConversationTitle = null;
+
+    function setActiveConversation(id, title) {
+      activeConversationId = id || null;
+      activeConversationTitle = title || null;
+      const bar = $("ask-conv-bar");
+      const clearBtn = $("ask-conv-clear");
+      if (activeConversationId) {
+        bar.innerHTML = `Диалог: <strong>${escapeHtml(activeConversationTitle || activeConversationId.slice(0,8))}</strong> <span class="meta">${activeConversationId.slice(0,8)}…</span>`;
+        bar.appendChild(clearBtn);
+        clearBtn.style.display = "";
+      } else {
+        bar.innerHTML = "Новый диалог";
+        bar.appendChild(clearBtn);
+        clearBtn.style.display = "none";
+      }
+    }
+    $("ask-conv-clear").addEventListener("click", () => setActiveConversation(null, null));
+
+    function buildAskBody(question) {
+      const body = { question, top_k: 4 };
+      if (activeConversationId) body.conversation_id = activeConversationId;
+      return body;
+    }
+
+    function summariseAskMeta(data, sourcesLen, elapsedMs) {
+      const elapsed = elapsedMs ? `, ${Number(elapsedMs).toFixed(0)} ms` : "";
+      const model = data.model ? `:${data.model}` : "";
+      const rerankNote = data.rerank && data.rerank.used
+        ? ` · rerank=${data.rerank.candidates}→${sourcesLen}`
+        : "";
+      const convNote = data.conversation_id ? ` · диалог=${data.conversation_id.slice(0,8)}` : "";
+      return `Источников: ${sourcesLen} · provider=${data.provider}${model}${elapsed}${rerankNote}${convNote}`;
+    }
+
+    async function askSync(question) {
+      const r = await json("/ask", { method: "POST", body: JSON.stringify(buildAskBody(question)) });
+      if (!r.ok) {
+        const detail = await r.json().catch(() => ({}));
+        throw new Error(detail.detail || `HTTP ${r.status}`);
+      }
+      const data = await r.json();
+      const answerEl = $("ask-answer");
+      answerEl.textContent = data.answer || "(пустой ответ)";
+      answerEl.hidden = false;
+      setFeedback("ask-feedback", summariseAskMeta(data, data.sources.length, data.elapsed_ms), "ok");
+      renderSources("ask-sources", data.sources);
+      if (data.conversation_id && !activeConversationId) {
+        setActiveConversation(data.conversation_id, question.split("\n")[0].slice(0, 60));
+      }
+    }
+
+    function parseSseChunks(buffer) {
+      // Split on blank line separator; returns [events, remaining-buffer]
+      const events = [];
+      let idx;
+      while ((idx = buffer.indexOf("\n\n")) !== -1) {
+        events.push(buffer.slice(0, idx));
+        buffer = buffer.slice(idx + 2);
+      }
+      return [events, buffer];
+    }
+
+    function parseSseEvent(raw) {
+      let eventName = "message";
+      let data = "";
+      for (const line of raw.split("\n")) {
+        if (line.startsWith("event:")) eventName = line.slice(6).trim();
+        else if (line.startsWith("data:")) {
+          if (data) data += "\n";
+          data += line.slice(5).trim();
+        }
+      }
+      try { data = data ? JSON.parse(data) : {}; }
+      catch (_) { /* keep as string */ }
+      return { event: eventName, data };
+    }
+
+    async function askStream(question) {
+      const answerEl = $("ask-answer");
+      answerEl.textContent = "";
+      answerEl.hidden = false;
+      renderSources("ask-sources", []);
+      let sourcesLen = 0;
+      let convId = null;
+      let provider = "?";
+      let modelName = null;
+      let elapsedMs = null;
+      let rerankInfo = null;
+
+      const response = await fetch(`${apiBase}/ask/stream`, {
+        method: "POST",
+        headers: withAuthHeaders({ "Content-Type": "application/json", "Accept": "text/event-stream" }),
+        body: JSON.stringify(buildAskBody(question)),
+      });
+      if (!response.ok) {
+        const detail = await response.json().catch(() => ({}));
+        throw new Error(detail.detail || `HTTP ${response.status}`);
+      }
+      if (!response.body) throw new Error("стриминг не поддерживается браузером");
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        let events;
+        [events, buffer] = parseSseChunks(buffer);
+        for (const raw of events) {
+          const { event, data } = parseSseEvent(raw);
+          if (event === "meta") {
+            convId = data.conversation_id;
+            sourcesLen = (data.sources || []).length;
+            rerankInfo = data.rerank;
+            renderSources("ask-sources", data.sources || []);
+          } else if (event === "token") {
+            answerEl.textContent += data.text || "";
+          } else if (event === "done") {
+            provider = data.provider || provider;
+            modelName = data.model;
+            elapsedMs = data.elapsed_ms;
+          } else if (event === "error") {
+            throw new Error(data.message || "stream error");
+          }
+        }
+      }
+
+      const meta = { provider, model: modelName, conversation_id: convId, rerank: rerankInfo };
+      setFeedback("ask-feedback", summariseAskMeta(meta, sourcesLen, elapsedMs), "ok");
+      if (convId && !activeConversationId) {
+        setActiveConversation(convId, question.split("\n")[0].slice(0, 60));
+      }
+    }
+
+    $("ask-form").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const question = $("ask-question").value.trim();
+      if (!question) { setFeedback("ask-feedback", "Введите вопрос"); return; }
+      const wantStream = $("ask-stream").checked;
+      setFeedback("ask-feedback", wantStream ? "Генерация (поток)…" : "Генерация ответа…", "muted");
+      $("ask-answer").hidden = true;
+      try {
+        if (wantStream) {
+          await askStream(question);
+        } else {
+          await askSync(question);
+        }
+        $("ask-question").value = "";
+      } catch (err) {
+        setFeedback("ask-feedback", err.message || "Ошибка запроса");
+        renderSources("ask-sources", []);
+      }
+    });
+
+    // --- History tab -------------------------------------------------------
+    async function refreshHistory() {
+      const list = $("history-list");
+      const empty = $("history-empty");
+      try {
+        const r = await rawApi("/conversations");
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const convs = await r.json();
+        list.innerHTML = "";
+        if (!convs.length) {
+          empty.hidden = false;
+          $("history-detail-card").hidden = true;
+          return;
+        }
+        empty.hidden = true;
+        for (const c of convs) {
+          const li = document.createElement("li");
+          li.style.cursor = "pointer";
+          li.innerHTML = `
+            <div>
+              <div><strong>${escapeHtml(c.title)}</strong></div>
+              <div class="meta">${c.message_count} сообщений · обновлён ${c.updated_at}</div>
+            </div>
+            <span class="meta">${c.id.slice(0,8)}…</span>
+          `;
+          li.addEventListener("click", () => openConversation(c.id));
+          list.appendChild(li);
+        }
+        setFeedback("history-feedback", `Диалогов: ${convs.length}`, "ok");
+      } catch (err) {
+        setFeedback("history-feedback", err.message || "Ошибка загрузки истории");
+      }
+    }
+
+    async function openConversation(convId) {
+      try {
+        const r = await rawApi(`/conversations/${encodeURIComponent(convId)}`);
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const conv = await r.json();
+        const card = $("history-detail-card");
+        card.hidden = false;
+        card.dataset.convId = conv.id;
+        card.dataset.convTitle = conv.title;
+        $("history-detail-title").textContent = conv.title;
+        const target = $("history-messages");
+        target.innerHTML = "";
+        for (const msg of conv.messages) {
+          const block = document.createElement("div");
+          block.style.cssText = msg.role === "user"
+            ? "padding: 0.6rem 0.85rem; background: rgba(37,99,235,0.08); border-radius: 0.5rem;"
+            : "padding: 0.6rem 0.85rem; background: rgba(127,127,127,0.05); border-left: 3px solid var(--accent); border-radius: 0 0.5rem 0.5rem 0;";
+          const head = msg.role === "user" ? "Пользователь" : (msg.provider ? `Ассистент · ${msg.provider}` : "Ассистент");
+          block.innerHTML = `
+            <div class="meta" style="margin-bottom: 0.3rem;">${head} · ${msg.created_at}</div>
+            <div style="white-space: pre-wrap;">${escapeHtml(msg.content)}</div>
+          `;
+          if (msg.role === "assistant" && msg.sources && msg.sources.length) {
+            const details = document.createElement("details");
+            details.style.marginTop = "0.4rem";
+            details.innerHTML = `<summary class="meta">Источники: ${msg.sources.length}</summary>`;
+            const sourcesDiv = document.createElement("div");
+            sourcesDiv.className = "sources";
+            sourcesDiv.style.marginTop = "0.4rem";
+            for (const hit of msg.sources) {
+              const sBlock = document.createElement("div");
+              sBlock.className = "source";
+              sBlock.innerHTML = `
+                <div class="title">#${hit.document_id} · ${escapeHtml(hit.document_title || "")}<span class="score"> · ${Number(hit.score).toFixed(3)}</span></div>
+                <div>${escapeHtml(hit.text)}</div>`;
+              sourcesDiv.appendChild(sBlock);
+            }
+            details.appendChild(sourcesDiv);
+            block.appendChild(details);
+          }
+          target.appendChild(block);
+        }
+      } catch (err) {
+        setFeedback("history-feedback", err.message || "Ошибка");
+      }
+    }
+
+    $("history-refresh").addEventListener("click", refreshHistory);
+
+    $("history-continue").addEventListener("click", () => {
+      const card = $("history-detail-card");
+      const convId = card.dataset.convId;
+      const title = card.dataset.convTitle;
+      if (!convId) return;
+      setActiveConversation(convId, title);
+      // Переключаемся на tab ask
+      document.querySelector('.tabs button[data-tab="ask"]').click();
+      $("ask-question").focus();
+    });
+
+    $("history-delete").addEventListener("click", async () => {
+      const card = $("history-detail-card");
+      const convId = card.dataset.convId;
+      if (!convId || !confirm(`Удалить диалог ${card.dataset.convTitle}?`)) return;
+      try {
+        const r = await rawApi(`/conversations/${encodeURIComponent(convId)}`, { method: "DELETE" });
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        card.hidden = true;
+        if (activeConversationId === convId) setActiveConversation(null, null);
+        await refreshHistory();
+      } catch (err) {
+        alert(`Не удалось удалить: ${err.message || err}`);
+      }
+    });
+
+    // --- Providers tab -----------------------------------------------------
+    async function refreshProviders() {
+      const target = $("providers-list");
+      target.innerHTML = '<p class="hint">Загрузка…</p>';
+      try {
+        const r = await rawApi("/providers");
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const data = await r.json();
+        const lines = [];
+        if (data.selected) {
+          lines.push(`<p>✅ Активный провайдер: <strong>${escapeHtml(data.selected.name)}</strong>
+            (${escapeHtml(data.selected.model)}, base: <code>${escapeHtml(data.selected.api_base)}</code>)</p>`);
+        } else {
+          lines.push(`<p class="hint">⚠️ LLM не настроен — ответы /ask будут собираться из фрагментов (extractive).</p>`);
+        }
+        if (data.explicit) {
+          lines.push(`<p class="hint">KB_LLM_PROVIDER=<code>${escapeHtml(data.explicit)}</code></p>`);
+        }
+        lines.push("<ul class='doc-list'>");
+        for (const p of data.providers || []) {
+          const badge = p.configured ? '<span class="badge" style="background:#d1fae5;color:#065f46">configured</span>' :
+                                       '<span class="badge" style="background:#fee2e2;color:#991b1b">no key</span>';
+          const env = p.key_env ? `key env: <code>${escapeHtml(p.key_env)}</code>` :
+                                  (p.base_env ? `base env: <code>${escapeHtml(p.base_env)}</code>` : "—");
+          lines.push(`<li>
+            <div>${badge}<strong>${escapeHtml(p.name)}</strong> · default model <code>${escapeHtml(p.default_model || "")}</code></div>
+            <div class="meta">${env}</div>
+          </li>`);
+        }
+        lines.push("</ul>");
+        target.innerHTML = lines.join("");
+      } catch (err) {
+        target.innerHTML = `<p class="feedback">Ошибка: ${escapeHtml(err.message || err)}</p>`;
+      }
+    }
+
+    // --- Bootstrap ---------------------------------------------------------
+    refreshHealth();
+    refreshDocs();
+    setInterval(refreshHealth, 30000);
+  </script>
+</body>
+</html>
