@@ -269,6 +269,24 @@ def create_app(provider: LLMProvider | None = None) -> FastAPI:
         expose_headers=["*"],
     )
     application.add_middleware(RequestIDMiddleware)
+
+    # Audit middleware: persists every /api/kb/* request to audit_log.
+    # Uses a closure over `application` so the engine is fetched lazily
+    # at request time, after ingest_service is attached to app.state.
+    from app.core.audit_middleware import AuditMiddleware
+
+    def _audit_session_factory():
+        from sqlmodel import Session as _Session
+
+        service = application.state.ingest_service
+        return _Session(service.engine)
+
+    application.add_middleware(
+        AuditMiddleware,
+        session_factory=_audit_session_factory,
+        path_prefix="/api/kb",
+    )
+
     if Limiter is not None:
         storage_uri = getattr(settings, "redis_url", None)
         if storage_uri:
