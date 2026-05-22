@@ -725,6 +725,17 @@ make run
 make worker
 ```
 
+### Lightweight dev server (MVP only)
+
+Если не нужен полный multi-tenant стек, можно запустить только MVP-роутер
+`/api/kb/*` с минимальными зависимостями:
+
+```bash
+python -m uvicorn scripts.dev_server_mvp:app --reload --port 8001
+```
+
+Это удобно для UI-разработки и smoke-тестов без Qdrant/llama-cpp/sentence-transformers.
+
 ## Контейнерный запуск
 
 В репозитории подготовлен многоконтейнерный стек:
