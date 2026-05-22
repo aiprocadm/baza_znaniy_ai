@@ -122,6 +122,8 @@ class HitOut(BaseModel):
     score: float
     source: str = "text"
     filename: Optional[str] = None
+    page: Optional[int] = None
+    has_original: bool = False
 
 
 class RerankInfo(BaseModel):
@@ -252,6 +254,8 @@ def _hit_to_out(hit: SearchHit) -> HitOut:
         score=round(hit.score, 6),
         source=hit.source,
         filename=hit.filename,
+        page=hit.page,
+        has_original=hit.has_original,
     )
 
 
@@ -271,6 +275,15 @@ def _sources_payload_to_hit_out(items: List[Any]) -> List[HitOut]:
         if not isinstance(raw, dict):
             continue
         try:
+            page_val = raw.get("page")
+            page_int: Optional[int]
+            if page_val is None:
+                page_int = None
+            else:
+                try:
+                    page_int = int(page_val)
+                except (TypeError, ValueError):
+                    page_int = None
             out.append(
                 HitOut(
                     document_id=int(raw.get("document_id") or 0),
@@ -280,6 +293,8 @@ def _sources_payload_to_hit_out(items: List[Any]) -> List[HitOut]:
                     score=float(raw.get("score") or 0.0),
                     source=str(raw.get("source") or "text"),
                     filename=raw.get("filename") if isinstance(raw.get("filename"), str) else None,
+                    page=page_int,
+                    has_original=bool(raw.get("has_original") or False),
                 )
             )
         except (TypeError, ValueError):
