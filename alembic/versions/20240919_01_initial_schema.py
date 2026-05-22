@@ -159,27 +159,33 @@ def upgrade() -> None:
     op.create_index("ix_settings_key", "settings", ["key"], unique=False)
     op.create_index("ix_settings_tenant_slug", "settings", ["tenant_slug"], unique=False)
 
-    op.create_foreign_key(
-        "fk_files_document_id",
-        "files",
-        "documents",
-        ["document_id"],
-        ["id"],
-        ondelete="SET NULL",
-    )
-    op.create_foreign_key(
-        "fk_documents_file_id",
-        "documents",
-        "files",
-        ["file_id"],
-        ["id"],
-        ondelete="SET NULL",
-    )
+    # SQLite does not support ALTER TABLE ADD CONSTRAINT; these circular-ref
+    # FK constraints are only applied on PostgreSQL.
+    bind = op.get_bind()
+    if bind.dialect.name != "sqlite":
+        op.create_foreign_key(
+            "fk_files_document_id",
+            "files",
+            "documents",
+            ["document_id"],
+            ["id"],
+            ondelete="SET NULL",
+        )
+        op.create_foreign_key(
+            "fk_documents_file_id",
+            "documents",
+            "files",
+            ["file_id"],
+            ["id"],
+            ondelete="SET NULL",
+        )
 
 
 def downgrade() -> None:
-    op.drop_constraint("fk_documents_file_id", "documents", type_="foreignkey")
-    op.drop_constraint("fk_files_document_id", "files", type_="foreignkey")
+    bind = op.get_bind()
+    if bind.dialect.name != "sqlite":
+        op.drop_constraint("fk_documents_file_id", "documents", type_="foreignkey")
+        op.drop_constraint("fk_files_document_id", "files", type_="foreignkey")
 
     op.drop_index("ix_settings_tenant_slug", table_name="settings")
     op.drop_index("ix_settings_key", table_name="settings")
