@@ -511,6 +511,56 @@ def _parse_file_bytes(filename: str, data: bytes) -> tuple[str, str]:
     return full_text, mime
 
 
+def _parse_file_bytes_with_pages(
+    filename: str, data: bytes
+) -> tuple[list[tuple[int, str]], str]:
+    """Like :func:`_parse_file_bytes` but preserves per-page structure.
+
+    Returns ``(pages, mime_type)`` where ``pages`` is a list of
+    ``(page_number, text)`` tuples (page numbers 1-indexed). Empty pages
+    are dropped. Plain-text formats produce a single virtual page.
+
+    Raises ``HTTPException`` on parse failure (same contract as
+    ``_parse_file_bytes``).
+    """
+
+    ext = _extension_for(filename)
+    if not ext:
+        text = _decode_text(data).strip()
+        return ([(1, text)] if text else []), "text/plain"
+
+    if ext in {"txt", "md", "markdown"}:
+        text = _decode_text(data).strip()
+        mime = "text/markdown" if ext != "txt" else "text/plain"
+        return ([(1, text)] if text else []), mime
+
+    try:
+        from app.ingest.chunking import parse_document
+    except Exception as exc:  # pragma: no cover - optional dep missing
+        LOGGER.warning("parse_document unavailable (%s); decoding as text", exc)
+        text = _decode_text(data).strip()
+        return ([(1, text)] if text else []), "application/octet-stream"
+
+    try:
+        result = parse_document(filename, data)
+    except Exception as exc:
+        LOGGER.exception("Failed to parse %s: %s", filename, exc)
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"FAILED_TO_PARSE: {exc}",
+        ) from exc
+
+    raw_pages = getattr(result, "pages", []) or []
+    pages: list[tuple[int, str]] = []
+    for page_number, page_text in raw_pages:
+        text = (str(page_text) if page_text is not None else "").strip()
+        if text:
+            pages.append((int(page_number), text))
+
+    mime = (result.metadata.get("document", {}) or {}).get("mime_type") or "application/octet-stream"
+    return pages, mime
+
+
 @public.get("/health")
 def health() -> dict[str, Any]:
     """Liveness probe with LLM, embedder, reranker and auth diagnostics."""
