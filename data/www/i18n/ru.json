@@ -30,5 +30,10 @@
   "doc.chunks": "Чанков",
   "doc.source": "Источник",
   "doc.source.text": "Текст",
-  "doc.source.file": "Файл"
+  "doc.source.file": "Файл",
+  "admin.title": "KB Admin",
+  "admin.header": "Knowledge Base — Admin",
+  "admin.section.upload": "Загрузка документа",
+  "admin.section.history": "История загрузок",
+  "admin.section.docs": "Управление документами"
 }

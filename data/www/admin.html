@@ -1,6 +1,6 @@
 <!doctype html>
 <meta charset="utf-8">
-<title>KB Admin</title>
+<title data-i18n="admin.title">KB Admin</title>
 <style>
   :root {
     color-scheme: light dark;
@@ -119,7 +119,7 @@
 </style>
 <main>
   <section>
-    <h1>Knowledge Base — Admin</h1>
+    <h1 data-i18n="admin.header">Knowledge Base — Admin</h1>
     <p>Загрузите новые документы и следите за историей индексации. Доступ ограничен администраторами.</p>
     <form id="token-form">
       <label for="token">Auth token</label>
@@ -130,7 +130,7 @@
     <div id="auth-status"></div>
   </section>
   <section id="upload-section" class="hidden">
-    <h2>Загрузка документа</h2>
+    <h2 data-i18n="admin.section.upload">Загрузка документа</h2>
     <p>Принимаются файлы PDF, DOCX и TXT. Файл отправляется на <code>/api/docs/upload</code> с вашим токеном.</p>
     <form id="upload-form">
       <input id="file" type="file" accept=".pdf,.doc,.docx,.txt" required>
@@ -139,7 +139,7 @@
     <div id="upload-status"></div>
   </section>
   <section>
-    <h2>История загрузок</h2>
+    <h2 data-i18n="admin.section.history">История загрузок</h2>
     <p><small>История хранится только в вашем браузере. Очистите её, если хотите начать заново.</small></p>
     <div class="actions">
       <button type="button" class="secondary" id="clear-history">Очистить историю</button>
@@ -158,7 +158,7 @@
     </table>
   </section>
   <section id="doc-admin" class="hidden">
-    <h2>Управление документами</h2>
+    <h2 data-i18n="admin.section.docs">Управление документами</h2>
     <p><small>Функции активируются автоматически, когда сервер предоставляет админские эндпоинты.</small></p>
     <div class="actions">
       <button type="button" id="refresh-docs">Обновить список</button>
@@ -475,3 +475,4 @@
   });
 })();
 </script>
+<script src="/i18n/_loader.js"></script>

@@ -31,7 +31,7 @@ def test_loader_js_exists_and_uses_data_i18n_attribute():
 
 
 def test_ru_json_has_minimum_keys():
-    """Sanity check: ru.json must have keys for header, common actions."""
+    """Sanity check: ru.json must have keys for header, common actions, admin sections."""
     data = json.loads((I18N / "ru.json").read_text(encoding="utf-8"))
     expected_keys = {
         "app.title",
@@ -42,6 +42,9 @@ def test_ru_json_has_minimum_keys():
         "action.upload",
         "action.search",
         "action.ask",
+        "admin.title",
+        "admin.header",
+        "admin.section.upload",
     }
     missing = expected_keys - data.keys()
     assert not missing, f"missing keys: {missing}"
