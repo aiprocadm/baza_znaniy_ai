@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import time
 import uuid
 from pathlib import Path
@@ -472,6 +473,29 @@ def _decode_text(data: bytes) -> str:
     return data.decode("utf-8", errors="replace")
 
 
+def _resolve_kb_files_dir() -> Path:
+    """Return the kb_files directory, creating it if needed.
+
+    Resolution order: DATA_DIR env → FILES_ROOT env → get_settings().data_dir →
+    './var/data'. The 4-level fallback exists because the project's
+    Settings instantiation has a known AliasChoices bug (see
+    app/core/config.py:82) that breaks in some test environments; the
+    env-var fast path bypasses it.
+    """
+    base_str = os.environ.get("DATA_DIR") or os.environ.get("FILES_ROOT")
+    if base_str:
+        base = Path(base_str)
+    else:
+        try:
+            from app.core.config import get_settings
+            base = Path(get_settings().data_dir)
+        except Exception:
+            base = Path("./var/data")
+    kb_files_dir = base / "kb_files"
+    kb_files_dir.mkdir(parents=True, exist_ok=True)
+    return kb_files_dir
+
+
 def _parse_file_bytes(filename: str, data: bytes) -> tuple[str, str]:
     """Return ``(plain_text, mime_type)`` extracted from an uploaded file.
 
@@ -637,20 +661,7 @@ async def upload_document(
     tmp_blob: Optional[Path] = None
     kb_files_dir: Optional[Path] = None
     if ext == "pdf":
-        import os
-        # Read data_dir from env (DATA_DIR/FILES_ROOT) to avoid circular
-        # imports and the known AliasChoices config bug in some environments.
-        _data_dir_env = os.environ.get("DATA_DIR") or os.environ.get("FILES_ROOT")
-        if _data_dir_env:
-            _data_dir = Path(_data_dir_env)
-        else:
-            try:
-                from app.core.config import get_settings  # local import to avoid cycles
-                _data_dir = Path(get_settings().data_dir)
-            except Exception:
-                _data_dir = Path("./var/data")
-        kb_files_dir = _data_dir / "kb_files"
-        kb_files_dir.mkdir(parents=True, exist_ok=True)
+        kb_files_dir = _resolve_kb_files_dir()
         tmp_blob = kb_files_dir / f".tmp-{uuid.uuid4().hex}.pdf"
         tmp_blob.write_bytes(data)
 

@@ -30,10 +30,9 @@ def app_and_store(tmp_path: Path, monkeypatch):
 
 
 def _minimal_pdf_bytes() -> bytes:
-    """Return a tiny valid PDF that Docling can parse, or a stub that
-    `parse_document` recognises. Use a real header + one page."""
-    # PDF.js will parse this; for upload-side tests we patch the parser
-    # instead of relying on real Docling parsing.
+    """Minimal PDF header bytes; real parsing is patched in the tests
+    that use this. The bytes are just the bytes that will be persisted
+    as the blob — content doesn't matter."""
     return b"%PDF-1.4\n%minimal\n"
 
 
