@@ -536,7 +536,7 @@ def _parse_file_bytes_with_pages(
 
     try:
         from app.ingest.chunking import parse_document
-    except Exception as exc:  # pragma: no cover - optional dep missing
+    except Exception as exc:  # pragma: no cover - optional dependency missing
         LOGGER.warning("parse_document unavailable (%s); decoding as text", exc)
         text = _decode_text(data).strip()
         return ([(1, text)] if text else []), "application/octet-stream"

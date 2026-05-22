@@ -33,7 +33,6 @@ def test_parse_rich_format_returns_multiple_pages(monkeypatch):
     def fake_parse_document(filename, data):
         return FakeResult()
 
-    import app.api.kb_mvp as kb_mvp
     monkeypatch.setattr("app.ingest.chunking.parse_document", fake_parse_document)
 
     pages, mime = _parse_file_bytes_with_pages("doc.pdf", b"%PDF-1.4")
@@ -50,3 +49,42 @@ def test_parse_rich_format_drops_empty_pages(monkeypatch):
     pages, mime = _parse_file_bytes_with_pages("doc.pdf", b"%PDF-1.4")
     assert pages == [(2, "real")]
     assert mime == "application/pdf"
+
+
+@pytest.mark.parametrize("filename,expected_mime_default", [
+    ("report.docx", "application/octet-stream"),
+    ("deck.pptx", "application/octet-stream"),
+    ("data.xlsx", "application/octet-stream"),
+])
+def test_parse_rich_formats_reach_parse_document(monkeypatch, filename, expected_mime_default):
+    """Non-PDF rich formats route through parse_document (not the txt branch)."""
+    class FakeResult:
+        pages = [(1, "sheet content")]
+        metadata = {"document": {}}  # no mime → fallback to octet-stream
+
+    captured: dict = {}
+
+    def fake_parse_document(name, data):
+        captured["filename"] = name
+        return FakeResult()
+
+    monkeypatch.setattr("app.ingest.chunking.parse_document", fake_parse_document)
+
+    pages, mime = _parse_file_bytes_with_pages(filename, b"binary blob")
+    assert pages == [(1, "sheet content")]
+    assert mime == expected_mime_default
+    assert captured["filename"] == filename
+
+
+def test_parse_no_extension_strips_whitespace():
+    """Unlike legacy _parse_file_bytes, the new helper strips no-ext input
+    so trailing whitespace doesn't produce a chunk with a trailing newline."""
+    pages, mime = _parse_file_bytes_with_pages("noext", b"  hello world  \n")
+    assert pages == [(1, "hello world")]
+    assert mime == "text/plain"
+
+
+def test_parse_no_extension_empty_after_strip_returns_no_pages():
+    """Whitespace-only no-ext input results in zero pages."""
+    pages, _mime = _parse_file_bytes_with_pages("noext", b"   \n\n  ")
+    assert pages == []
