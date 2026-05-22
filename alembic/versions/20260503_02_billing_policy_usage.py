@@ -5,7 +5,7 @@ from __future__ import annotations
 import sqlalchemy as sa
 from alembic import op
 
-revision = "20260503_02"
+revision = "20260503_02_billing_policy_usage"
 down_revision = "20260503_01"
 branch_labels = None
 depends_on = None

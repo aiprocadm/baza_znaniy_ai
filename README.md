@@ -669,6 +669,9 @@ OLLAMA_EMBED_MODEL=nomic-embed-text
 - **UI active branch:** `frontend/` — primary web UI для продуктового сценария.
 - **`app/ui` статус:** встроенная диагностическая Operations Console для runtime-проверок и отладки.
 
+Подробнее об архитектурных решениях, в том числе про два параллельных
+HTTP-пути и причины их разделения — см. [`docs/architecture.md`](docs/architecture.md).
+
 ## Архитектура
 
 - **FastAPI + Uvicorn** — REST API (`app/api`) и статический фронтенд (`app/ui`).
@@ -724,6 +727,17 @@ make run
 ```bash
 make worker
 ```
+
+### Lightweight dev server (MVP only)
+
+Если не нужен полный multi-tenant стек, можно запустить только MVP-роутер
+`/api/kb/*` с минимальными зависимостями:
+
+```bash
+python -m uvicorn scripts.dev_server_mvp:app --reload --port 8001
+```
+
+Это удобно для UI-разработки и smoke-тестов без Qdrant/llama-cpp/sentence-transformers.
 
 ## Контейнерный запуск
 
