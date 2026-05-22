@@ -77,6 +77,8 @@ class Document:
     source: str = "text"
     filename: Optional[str] = None
     mime_type: Optional[str] = None
+    has_original_file: bool = False
+    file_relpath: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -90,6 +92,8 @@ class SearchHit:
     score: float
     source: str = "text"
     filename: Optional[str] = None
+    page: Optional[int] = None
+    has_original: bool = False
 
 
 @dataclass(frozen=True)
@@ -240,7 +244,9 @@ class KnowledgeBaseStore:
                     created_at TEXT NOT NULL,
                     source TEXT NOT NULL DEFAULT 'text',
                     filename TEXT,
-                    mime_type TEXT
+                    mime_type TEXT,
+                    has_original_file INTEGER NOT NULL DEFAULT 0,
+                    file_relpath TEXT
                 );
                 CREATE TABLE IF NOT EXISTS kb_chunks (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -249,10 +255,12 @@ class KnowledgeBaseStore:
                     text TEXT NOT NULL,
                     embedding BLOB NOT NULL,
                     embedder TEXT NOT NULL DEFAULT 'hash',
-                    dim INTEGER NOT NULL DEFAULT 256
+                    dim INTEGER NOT NULL DEFAULT 256,
+                    page_number INTEGER
                 );
                 CREATE INDEX IF NOT EXISTS idx_kb_chunks_doc ON kb_chunks(document_id);
                 CREATE INDEX IF NOT EXISTS idx_kb_chunks_dim ON kb_chunks(dim);
+                CREATE INDEX IF NOT EXISTS idx_kb_chunks_doc_page ON kb_chunks(document_id, page_number);
                 CREATE TABLE IF NOT EXISTS kb_conversations (
                     id TEXT PRIMARY KEY,
                     title TEXT NOT NULL,
@@ -295,58 +303,91 @@ class KnowledgeBaseStore:
     def add_document(
         self,
         title: str,
-        text: str,
+        text: Optional[str] = None,
         *,
+        pages: Optional[Sequence[tuple[int, str]]] = None,
         chunk_size: int = DEFAULT_CHUNK_SIZE,
         overlap: int = DEFAULT_OVERLAP,
         source: str = "text",
         filename: Optional[str] = None,
         mime_type: Optional[str] = None,
     ) -> Document:
+        if text is not None and pages is not None:
+            raise ValueError("Pass either text= or pages=, not both")
+
         cleaned_title = (title or "").strip() or "Untitled"
         if len(cleaned_title) > 300:
             cleaned_title = cleaned_title[:300]
-        cleaned_text = (text or "").strip()
-        if not cleaned_text:
-            raise ValueError("Text is empty")
-        if len(cleaned_text) > MAX_TEXT_LEN:
-            raise ValueError(f"Text exceeds {MAX_TEXT_LEN} characters")
 
-        chunks = split_text(cleaned_text, chunk_size=chunk_size, overlap=overlap) or [cleaned_text]
+        # Normalise input to per-page form. Legacy text= goes in as a single
+        # virtual page; pages= is used verbatim. Both go through split_text.
+        if pages is not None:
+            normalised: list[tuple[Optional[int], str]] = []
+            for page_no, page_text in pages:
+                cleaned_page = (page_text or "").strip()
+                if cleaned_page:
+                    normalised.append((int(page_no), cleaned_page))
+            if not normalised:
+                raise ValueError("Text is empty")
+            full_text = "\n\n".join(t for _, t in normalised)
+            if len(full_text) > MAX_TEXT_LEN:
+                raise ValueError(f"Text exceeds {MAX_TEXT_LEN} characters")
+        else:
+            cleaned_text = (text or "").strip()
+            if not cleaned_text:
+                raise ValueError("Text is empty")
+            if len(cleaned_text) > MAX_TEXT_LEN:
+                raise ValueError(f"Text exceeds {MAX_TEXT_LEN} characters")
+            normalised = [(None, cleaned_text)]  # None — no page info
+            full_text = cleaned_text
+
+        # Per-page chunking — each chunk remembers its source page number
+        chunks_with_pages: list[tuple[Optional[int], str]] = []
+        for page_no, page_text in normalised:
+            page_chunks = split_text(page_text, chunk_size=chunk_size, overlap=overlap) or [page_text]
+            for chunk in page_chunks:
+                chunks_with_pages.append((page_no, chunk))
+
+        chunk_texts = [t for _, t in chunks_with_pages]
         created_at = datetime.now(timezone.utc).isoformat()
-        embedded_blobs, embedder_name, dim = self._embed_chunks(chunks)
+        embedded_blobs, embedder_name, dim = self._embed_chunks(chunk_texts)
 
         with self._lock, self._connect() as conn:
             cur = conn.execute(
                 """
-                INSERT INTO kb_documents(title, text, created_at, source, filename, mime_type)
-                VALUES(?, ?, ?, ?, ?, ?)
+                INSERT INTO kb_documents(title, text, created_at, source, filename, mime_type,
+                                          has_original_file, file_relpath)
+                VALUES(?, ?, ?, ?, ?, ?, 0, NULL)
                 """,
-                (cleaned_title, cleaned_text, created_at, source, filename, mime_type),
+                (cleaned_title, full_text, created_at, source, filename, mime_type),
             )
             doc_id = int(cur.lastrowid)
-            for idx, (chunk, blob) in enumerate(zip(chunks, embedded_blobs)):
+            for idx, ((page_no, chunk), blob) in enumerate(zip(chunks_with_pages, embedded_blobs)):
                 conn.execute(
                     """
-                    INSERT INTO kb_chunks(document_id, chunk_index, text, embedding, embedder, dim)
-                    VALUES(?, ?, ?, ?, ?, ?)
+                    INSERT INTO kb_chunks(document_id, chunk_index, text, embedding,
+                                           embedder, dim, page_number)
+                    VALUES(?, ?, ?, ?, ?, ?, ?)
                     """,
-                    (doc_id, idx, chunk, blob, embedder_name, dim),
+                    (doc_id, idx, chunk, blob, embedder_name, dim, page_no),
                 )
 
         return Document(
             id=doc_id,
             title=cleaned_title,
-            text=cleaned_text,
+            text=full_text,
             created_at=created_at,
-            chunks=len(chunks),
+            chunks=len(chunks_with_pages),
             source=source,
             filename=filename,
             mime_type=mime_type,
+            has_original_file=False,
+            file_relpath=None,
         )
 
     @staticmethod
     def _row_to_document(row: tuple) -> Document:
+        # Row order matches the SELECTs in list_documents/get_document.
         return Document(
             id=row[0],
             title=row[1],
@@ -356,6 +397,8 @@ class KnowledgeBaseStore:
             source=row[5] or "text",
             filename=row[6],
             mime_type=row[7],
+            has_original_file=bool(row[8]),
+            file_relpath=row[9],
         )
 
     def list_documents(self) -> List[Document]:
@@ -364,7 +407,8 @@ class KnowledgeBaseStore:
                 """
                 SELECT d.id, d.title, d.text, d.created_at,
                     (SELECT COUNT(*) FROM kb_chunks c WHERE c.document_id = d.id) AS chunks,
-                    d.source, d.filename, d.mime_type
+                    d.source, d.filename, d.mime_type,
+                    d.has_original_file, d.file_relpath
                 FROM kb_documents d
                 ORDER BY d.id DESC
                 """
@@ -377,7 +421,8 @@ class KnowledgeBaseStore:
                 """
                 SELECT d.id, d.title, d.text, d.created_at,
                     (SELECT COUNT(*) FROM kb_chunks c WHERE c.document_id = d.id) AS chunks,
-                    d.source, d.filename, d.mime_type
+                    d.source, d.filename, d.mime_type,
+                    d.has_original_file, d.file_relpath
                 FROM kb_documents d WHERE d.id = ?
                 """,
                 (int(doc_id),),
@@ -387,6 +432,20 @@ class KnowledgeBaseStore:
     def delete_document(self, doc_id: int) -> bool:
         with self._lock, self._connect() as conn:
             cur = conn.execute("DELETE FROM kb_documents WHERE id = ?", (int(doc_id),))
+            return cur.rowcount > 0
+
+    def update_file_metadata(self, doc_id: int, *, file_relpath: str) -> bool:
+        """Flip has_original_file=1 and store the relative blob path.
+
+        Returns True if a row was updated. Caller should ensure the file
+        actually exists at ``<settings.data_dir>/<file_relpath>`` first;
+        this method does not verify the filesystem.
+        """
+        with self._lock, self._connect() as conn:
+            cur = conn.execute(
+                "UPDATE kb_documents SET has_original_file = 1, file_relpath = ? WHERE id = ?",
+                (file_relpath, int(doc_id)),
+            )
             return cur.rowcount > 0
 
     def search(self, query: str, *, top_k: int = 5) -> List[SearchHit]:
@@ -407,7 +466,7 @@ class KnowledgeBaseStore:
             rows = conn.execute(
                 """
                 SELECT c.document_id, d.title, c.chunk_index, c.text, c.embedding, c.dim,
-                       d.source, d.filename
+                       d.source, d.filename, c.page_number, d.has_original_file
                 FROM kb_chunks c JOIN kb_documents d ON d.id = c.document_id
                 WHERE c.dim = ?
                 LIMIT ?
@@ -421,7 +480,7 @@ class KnowledgeBaseStore:
             )
 
         scored: List[Tuple[float, SearchHit]] = []
-        for doc_id, title, idx, text, blob, _dim, source, filename in rows:
+        for doc_id, title, idx, text, blob, _dim, source, filename, page_number, has_original in rows:
             score = _cosine(q_vec, self._unpack(blob))
             if score <= 0.0:
                 continue
@@ -436,6 +495,8 @@ class KnowledgeBaseStore:
                         score=score,
                         source=source or "text",
                         filename=filename,
+                        page=int(page_number) if page_number is not None else None,
+                        has_original=bool(has_original),
                     ),
                 )
             )
