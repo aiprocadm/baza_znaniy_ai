@@ -294,7 +294,7 @@ def _sources_payload_to_hit_out(items: List[Any]) -> List[HitOut]:
                     source=str(raw.get("source") or "text"),
                     filename=raw.get("filename") if isinstance(raw.get("filename"), str) else None,
                     page=page_int,
-                    has_original=bool(raw.get("has_original") or False),
+                    has_original=bool(raw.get("has_original")),
                 )
             )
         except (TypeError, ValueError):

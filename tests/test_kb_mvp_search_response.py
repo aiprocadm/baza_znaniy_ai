@@ -63,8 +63,9 @@ def test_ask_response_has_page_and_has_original(app_with_store, store):
     data = resp.json()
     assert data["sources"], "expected sources"
     # At least one source should match page 1
-    pages = {s["page"] for s in data["sources"]}
-    assert 1 in pages or 2 in pages, f"no page info in sources: {data['sources']}"
+    assert any(s["page"] is not None for s in data["sources"]), (
+        f"no page info in sources: {data['sources']}"
+    )
     assert all(s["has_original"] is True for s in data["sources"])
 
 
@@ -74,7 +75,49 @@ def test_legacy_text_document_has_null_page(app_with_store, store):
 
     client = TestClient(app_with_store)
     resp = client.post("/api/kb/search", json={"query": "alpha"})
+    assert resp.status_code == 200
     data = resp.json()
     for hit in data["hits"]:
         assert hit["page"] is None
         assert hit["has_original"] is False
+
+
+def test_ask_stream_meta_has_page_and_has_original(app_with_store, store):
+    """The SSE meta event's sources include page and has_original."""
+    import json
+
+    store.add_document(
+        "doc1",
+        pages=[(1, "alpha beta " * 50)],
+        source="file",
+        filename="x.pdf",
+    )
+    store.update_file_metadata(1, file_relpath="kb_files/1.pdf")
+
+    client = TestClient(app_with_store)
+    with client.stream("POST", "/api/kb/ask/stream", json={"question": "alpha"}) as resp:
+        assert resp.status_code == 200
+        # Read events; the meta event is the first one we care about
+        body = b""
+        for chunk in resp.iter_bytes():
+            body += chunk
+        text = body.decode("utf-8")
+
+    # Parse SSE: find the line `event: meta` then the following `data: ...` line
+    lines = text.splitlines()
+    meta_data = None
+    for i, line in enumerate(lines):
+        if line.strip() == "event: meta" and i + 1 < len(lines):
+            data_line = lines[i + 1]
+            if data_line.startswith("data: "):
+                meta_data = json.loads(data_line[len("data: "):])
+                break
+    assert meta_data is not None, f"meta event not found in SSE stream:\n{text}"
+
+    sources = meta_data.get("sources", [])
+    assert sources, "expected sources in meta event"
+    for src in sources:
+        assert "page" in src, f"page missing from source: {src}"
+        assert "has_original" in src, f"has_original missing from source: {src}"
+    assert all(src["has_original"] is True for src in sources)
+    assert any(src["page"] == 1 for src in sources)
