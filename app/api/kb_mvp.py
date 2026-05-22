@@ -473,8 +473,8 @@ def _decode_text(data: bytes) -> str:
     return data.decode("utf-8", errors="replace")
 
 
-def _resolve_kb_files_dir() -> Path:
-    """Return the kb_files directory, creating it if needed.
+def _resolve_data_dir() -> Path:
+    """Return the data directory using env-var fallback chain.
 
     Resolution order: DATA_DIR env → FILES_ROOT env → get_settings().data_dir →
     './var/data'. The 4-level fallback exists because the project's
@@ -484,14 +484,17 @@ def _resolve_kb_files_dir() -> Path:
     """
     base_str = os.environ.get("DATA_DIR") or os.environ.get("FILES_ROOT")
     if base_str:
-        base = Path(base_str)
-    else:
-        try:
-            from app.core.config import get_settings
-            base = Path(get_settings().data_dir)
-        except Exception:
-            base = Path("./var/data")
-    kb_files_dir = base / "kb_files"
+        return Path(base_str)
+    try:
+        from app.core.config import get_settings
+        return Path(get_settings().data_dir)
+    except Exception:
+        return Path("./var/data")
+
+
+def _resolve_kb_files_dir() -> Path:
+    """Return <data_dir>/kb_files, creating it if needed."""
+    kb_files_dir = _resolve_data_dir() / "kb_files"
     kb_files_dir.mkdir(parents=True, exist_ok=True)
     return kb_files_dir
 
@@ -737,10 +740,28 @@ def get_document(doc_id: int, request: Request) -> DocumentOut:
 
 @protected.delete("/documents/{doc_id}")
 def delete_document(doc_id: int, request: Request) -> dict[str, Any]:
-    """Delete a document and its chunks."""
+    """Delete a document, its chunks, and the original blob (if any).
+
+    The blob is removed BEFORE the DB row so an orphaned filesystem entry
+    is never possible. If the file vanished (race / manual cleanup), we
+    log a warning but still drop the DB row — the goal is to satisfy
+    DELETE, not to fail because of dangling state.
+    """
 
     store = _store_for(request)
+    doc = store.get_document(doc_id)
+    if doc is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="DOCUMENT_NOT_FOUND")
+
+    if doc.has_original_file and doc.file_relpath:
+        blob_path = _resolve_data_dir() / doc.file_relpath
+        try:
+            blob_path.unlink(missing_ok=True)
+        except OSError as exc:
+            LOGGER.warning("failed to remove blob for doc %d: %s", doc_id, exc)
+
     if not store.delete_document(doc_id):
+        # Race: someone else deleted it between get_document and delete.
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="DOCUMENT_NOT_FOUND")
     return {"ok": True, "id": doc_id}
 

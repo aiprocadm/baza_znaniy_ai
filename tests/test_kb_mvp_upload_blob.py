@@ -109,3 +109,44 @@ def test_upload_pdf_orphan_tmp_cleaned_on_parse_error(app_and_store, monkeypatch
     if kb_files.exists():
         leftovers = [p for p in kb_files.iterdir() if p.name.startswith(".tmp-")]
         assert leftovers == [], f"orphan tmp blobs found: {leftovers}"
+
+
+def test_delete_document_removes_blob(app_and_store, monkeypatch):
+    """DELETE on a doc with original_file removes both DB row and blob."""
+    app, store, tmp_path = app_and_store
+
+    class FakeResult:
+        pages = [(1, "alpha")]
+        metadata = {"document": {"mime_type": "application/pdf"}}
+
+    monkeypatch.setattr("app.ingest.chunking.parse_document", lambda *_: FakeResult())
+
+    client = TestClient(app)
+    resp = client.post(
+        "/api/kb/documents/upload",
+        files={"file": ("doc.pdf", io.BytesIO(b"%PDF-1.4\n"), "application/pdf")},
+    )
+    doc_id = resp.json()["id"]
+    blob_path = tmp_path / "kb_files" / f"{doc_id}.pdf"
+    assert blob_path.exists()
+
+    resp = client.delete(f"/api/kb/documents/{doc_id}")
+    assert resp.status_code == 200, resp.text
+
+    assert not blob_path.exists(), "blob should be removed after delete"
+    assert store.get_document(doc_id) is None
+
+
+def test_delete_document_without_blob_no_error(app_and_store):
+    """DELETE on a non-PDF doc completes even though no blob exists."""
+    app, store, tmp_path = app_and_store
+
+    client = TestClient(app)
+    client.post(
+        "/api/kb/documents/upload",
+        files={"file": ("notes.txt", io.BytesIO(b"hi"), "text/plain")},
+    )
+    doc_id = 1  # first doc
+
+    resp = client.delete(f"/api/kb/documents/{doc_id}")
+    assert resp.status_code == 200
