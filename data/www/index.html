@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>KB · Корпоративная база знаний с нейропоиском</title>
+  <title data-i18n="app.title">KB · Корпоративная база знаний с нейропоиском</title>
   <style>
     :root {
       color-scheme: light dark;
@@ -212,7 +212,7 @@
 <body>
   <div class="wrap">
     <header>
-      <h1>KB · Корпоративная база знаний с нейропоиском</h1>
+      <h1 data-i18n="header.subtitle">KB · Корпоративная база знаний с нейропоиском</h1>
       <div class="pill-row">
         <span id="health-pill" class="pill"><span class="dot"></span><span class="label">проверка…</span></span>
         <span id="llm-pill" class="pill" title="Активный LLM-провайдер"><span class="dot"></span><span class="label">LLM…</span></span>
@@ -238,11 +238,11 @@
     </div>
 
     <nav class="tabs">
-      <button type="button" data-tab="docs" class="active">Документы</button>
+      <button type="button" data-tab="docs" class="active" data-i18n="tab.documents">Документы</button>
       <button type="button" data-tab="upload">Загрузка файлов</button>
-      <button type="button" data-tab="search">Поиск</button>
-      <button type="button" data-tab="ask">Вопрос-ответ</button>
-      <button type="button" data-tab="history">История</button>
+      <button type="button" data-tab="search" data-i18n="tab.search">Поиск</button>
+      <button type="button" data-tab="ask" data-i18n="tab.qa">Вопрос-ответ</button>
+      <button type="button" data-tab="history" data-i18n="tab.history">История</button>
       <button type="button" data-tab="providers">Провайдеры</button>
     </nav>
 
@@ -290,7 +290,7 @@
             <input id="upload-title" type="text" placeholder="По умолчанию — имя файла" maxlength="300">
           </label>
           <div class="row">
-            <button type="submit">Загрузить и проиндексировать</button>
+            <button type="submit" data-i18n="action.upload">Загрузить и проиндексировать</button>
             <span id="upload-feedback" class="feedback"></span>
           </div>
         </form>
@@ -312,7 +312,7 @@
             </label>
           </div>
           <div class="row">
-            <button type="submit">Искать</button>
+            <button type="submit" data-i18n="action.search">Искать</button>
             <span id="search-feedback" class="feedback"></span>
           </div>
         </form>
@@ -336,7 +336,7 @@
             <textarea id="ask-question" placeholder="Сформулируйте вопрос по содержимому базы знаний." required></textarea>
           </label>
           <div class="row" style="align-items: center;">
-            <button type="submit">Спросить</button>
+            <button type="submit" data-i18n="action.ask">Спросить</button>
             <label style="display:flex;align-items:center;gap:0.4rem;flex-direction:row;color:var(--text);font-size:0.9rem;cursor:pointer;">
               <input id="ask-stream" type="checkbox" checked style="width:auto;padding:0;">
               потоковый ответ
@@ -357,7 +357,7 @@
           Откройте диалог, чтобы продолжить — следующие вопросы будут учитывать контекст.
         </p>
         <div class="row" style="margin-bottom: 0.75rem;">
-          <button id="history-refresh" type="button" class="secondary" style="padding:0.4rem 0.8rem;">Обновить</button>
+          <button id="history-refresh" type="button" class="secondary" style="padding:0.4rem 0.8rem;" data-i18n="action.refresh">Обновить</button>
           <span id="history-feedback" class="feedback"></span>
         </div>
         <p id="history-empty" class="hint">История пуста. Задайте вопрос в разделе «Вопрос-ответ».</p>
@@ -1010,5 +1010,6 @@
     refreshDocs();
     setInterval(refreshHealth, 30000);
   </script>
+  <script src="/i18n/_loader.js"></script>
 </body>
 </html>
