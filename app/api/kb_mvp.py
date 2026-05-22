@@ -12,6 +12,8 @@ from __future__ import annotations
 import json
 import logging
 import time
+import uuid
+from pathlib import Path
 from typing import Any, AsyncIterator, List, Optional
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile, status
@@ -629,27 +631,68 @@ async def upload_document(
             detail=f"FILE_TOO_LARGE: max {MAX_UPLOAD_BYTES} bytes",
         )
 
-    text, mime_type = _parse_file_bytes(filename, data)
-    text = (text or "").strip()
-    if not text:
-        raise HTTPException(
-            status.HTTP_422_UNPROCESSABLE_ENTITY, detail="NO_EXTRACTABLE_TEXT"
-        )
+    # For PDFs we keep the raw blob so the viewer can show the original.
+    # Write to a tmp name first; rename to <doc_id>.pdf AFTER the DB INSERT
+    # succeeds, so we never leave a blob without a matching row.
+    tmp_blob: Optional[Path] = None
+    kb_files_dir: Optional[Path] = None
+    if ext == "pdf":
+        import os
+        # Read data_dir from env (DATA_DIR/FILES_ROOT) to avoid circular
+        # imports and the known AliasChoices config bug in some environments.
+        _data_dir_env = os.environ.get("DATA_DIR") or os.environ.get("FILES_ROOT")
+        if _data_dir_env:
+            _data_dir = Path(_data_dir_env)
+        else:
+            try:
+                from app.core.config import get_settings  # local import to avoid cycles
+                _data_dir = Path(get_settings().data_dir)
+            except Exception:
+                _data_dir = Path("./var/data")
+        kb_files_dir = _data_dir / "kb_files"
+        kb_files_dir.mkdir(parents=True, exist_ok=True)
+        tmp_blob = kb_files_dir / f".tmp-{uuid.uuid4().hex}.pdf"
+        tmp_blob.write_bytes(data)
 
-    effective_title = (title or "").strip() or filename
-    store = _store_for(request)
     try:
-        doc = store.add_document(
-            effective_title,
-            text,
-            source="file",
-            filename=filename,
-            mime_type=mime_type,
-        )
-    except ValueError as exc:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        pages, mime_type = _parse_file_bytes_with_pages(filename, data)
+        if not pages:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY, detail="NO_EXTRACTABLE_TEXT"
+            )
 
-    return _doc_to_out(doc)
+        effective_title = (title or "").strip() or filename
+        store = _store_for(request)
+        try:
+            doc = store.add_document(
+                effective_title,
+                pages=pages,
+                source="file",
+                filename=filename,
+                mime_type=mime_type,
+            )
+        except ValueError as exc:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+        # Promote tmp blob to final name and mark the doc.
+        if tmp_blob is not None and kb_files_dir is not None:
+            final_blob = kb_files_dir / f"{doc.id}.pdf"
+            tmp_blob.rename(final_blob)
+            tmp_blob = None  # ownership transferred
+            store.update_file_metadata(doc.id, file_relpath=f"kb_files/{doc.id}.pdf")
+            # Refresh the in-memory Document so we return up-to-date flags
+            refreshed = store.get_document(doc.id)
+            if refreshed is not None:
+                doc = refreshed
+
+        return _doc_to_out(doc)
+    finally:
+        # Clean up orphan tmp on any error path
+        if tmp_blob is not None:
+            try:
+                tmp_blob.unlink(missing_ok=True)
+            except OSError:
+                LOGGER.warning("failed to remove tmp blob %s", tmp_blob)
 
 
 @protected.get("/documents", response_model=List[DocumentListItem])
