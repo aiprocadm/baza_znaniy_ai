@@ -52,7 +52,7 @@ def upgrade() -> None:
             sa.Column("dim", sa.Integer, nullable=False, server_default="256"),
         )
 
-    # Refresh inspector after potential table creations
+    # Re-bind the inspector so it sees any tables just created above.
     inspector = sa.inspect(bind)
 
     chunk_cols = {col["name"] for col in inspector.get_columns("kb_chunks")}
@@ -74,6 +74,12 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    # Asymmetric with upgrade(): this only undoes the columns + index
+    # this migration added. The kb_documents / kb_chunks tables themselves
+    # remain because KnowledgeBaseStore._init_schema() owns their
+    # lifecycle (see app/services/kb_store.py). Calling downgrade on a
+    # DB where this migration never ran will raise — that's intentional;
+    # downgrade is only safe after a successful upgrade.
     op.drop_index("idx_kb_chunks_doc_page", table_name="kb_chunks")
     op.drop_column("kb_documents", "file_relpath")
     op.drop_column("kb_documents", "has_original_file")

@@ -12,7 +12,6 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
-import pytest
 from alembic import command as alembic_cmd
 from alembic.config import Config as AlembicConfig
 
