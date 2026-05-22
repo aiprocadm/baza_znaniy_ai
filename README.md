@@ -669,6 +669,9 @@ OLLAMA_EMBED_MODEL=nomic-embed-text
 - **UI active branch:** `frontend/` — primary web UI для продуктового сценария.
 - **`app/ui` статус:** встроенная диагностическая Operations Console для runtime-проверок и отладки.
 
+Подробнее об архитектурных решениях, в том числе про два параллельных
+HTTP-пути и причины их разделения — см. [`docs/architecture.md`](docs/architecture.md).
+
 ## Архитектура
 
 - **FastAPI + Uvicorn** — REST API (`app/api`) и статический фронтенд (`app/ui`).
