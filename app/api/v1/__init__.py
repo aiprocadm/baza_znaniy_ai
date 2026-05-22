@@ -10,6 +10,7 @@ LOGGER = logging.getLogger(__name__)
 router = APIRouter()
 for _module_name in (
     "admin",
+    "admin_audit",
     "auth",
     "users",
     "tenants",
