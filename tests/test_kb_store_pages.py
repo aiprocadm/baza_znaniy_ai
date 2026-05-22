@@ -77,3 +77,9 @@ def test_add_document_empty_pages_raises(store: KnowledgeBaseStore) -> None:
     """All-empty pages → ValueError(Text is empty)."""
     with pytest.raises(ValueError):
         store.add_document("x", pages=[(1, ""), (2, "  ")])
+
+
+def test_add_document_neither_text_nor_pages_raises(store: KnowledgeBaseStore) -> None:
+    """Passing neither text= nor pages= → ValueError with explicit message."""
+    with pytest.raises(ValueError, match="Pass either text= or pages="):
+        store.add_document("x")

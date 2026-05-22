@@ -314,6 +314,8 @@ class KnowledgeBaseStore:
     ) -> Document:
         if text is not None and pages is not None:
             raise ValueError("Pass either text= or pages=, not both")
+        if text is None and pages is None:
+            raise ValueError("Pass either text= or pages=")
 
         cleaned_title = (title or "").strip() or "Untitled"
         if len(cleaned_title) > 300:
