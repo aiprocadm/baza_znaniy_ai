@@ -37,3 +37,4 @@ TEST_RESULTS.md
 venv/
 runs/
 *.sqlite-journal
+srv/projects/kb/data/files/
