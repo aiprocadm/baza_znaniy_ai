@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any, AsyncIterator, List, Optional
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile, status
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field, field_validator
 
 from app.api.kb_auth import auth_status, require_api_key
@@ -738,6 +738,54 @@ def get_document(doc_id: int, request: Request) -> DocumentOut:
     return _doc_to_out(doc, include_text=True)
 
 
+@protected.get("/documents/{doc_id}/file")
+def get_document_file(doc_id: int, request: Request) -> FileResponse:
+    """Stream the original blob for documents with has_original_file=true.
+
+    Returns ``application/pdf`` with ``inline`` disposition so the
+    browser/PDF.js can render it. Auth-gated by the ``protected``
+    router — when ``KB_API_KEY`` is set, requires the standard
+    ``X-API-Key`` header.
+    """
+
+    store = _store_for(request)
+    doc = store.get_document(doc_id)
+    if doc is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="DOCUMENT_NOT_FOUND")
+
+    if not doc.has_original_file or not doc.file_relpath:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="NO_ORIGINAL_FILE")
+
+    data_dir = _resolve_data_dir().resolve()
+    absolute = (data_dir / doc.file_relpath).resolve()
+    expected_root = (data_dir / "kb_files").resolve()
+
+    # Path-traversal guard: resolved path must live under <data_dir>/kb_files/
+    try:
+        absolute.relative_to(expected_root)
+    except ValueError:
+        LOGGER.error(
+            "Path traversal attempted for doc %d: %s", doc_id, doc.file_relpath
+        )
+        raise HTTPException(
+            status.HTTP_500_INTERNAL_SERVER_ERROR, detail="STORAGE_ERROR"
+        )
+
+    if not absolute.is_file():
+        LOGGER.warning(
+            "Original file missing for doc %d: %s", doc_id, absolute
+        )
+        raise HTTPException(status.HTTP_410_GONE, detail="FILE_DELETED")
+
+    return FileResponse(
+        absolute,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'inline; filename="{doc.filename or doc_id}.pdf"',
+        },
+    )
+
+
 @protected.delete("/documents/{doc_id}")
 def delete_document(doc_id: int, request: Request) -> dict[str, Any]:
     """Delete a document, its chunks, and the original blob (if any).
@@ -754,11 +802,24 @@ def delete_document(doc_id: int, request: Request) -> dict[str, Any]:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="DOCUMENT_NOT_FOUND")
 
     if doc.has_original_file and doc.file_relpath:
-        blob_path = _resolve_data_dir() / doc.file_relpath
+        data_dir = _resolve_data_dir().resolve()
+        expected_root = (data_dir / "kb_files").resolve()
+        candidate = (data_dir / doc.file_relpath).resolve()
         try:
-            blob_path.unlink(missing_ok=True)
-        except OSError as exc:
-            LOGGER.warning("failed to remove blob for doc %d: %s", doc_id, exc)
+            candidate.relative_to(expected_root)
+        except ValueError:
+            LOGGER.error(
+                "Path traversal attempted on delete for doc %d: %s",
+                doc_id, doc.file_relpath,
+            )
+            # Refuse to unlink anything outside kb_files/ — but still drop the row
+            # so the corruption is at least cleared from the DB
+            candidate = None
+        if candidate is not None:
+            try:
+                candidate.unlink(missing_ok=True)
+            except OSError as exc:
+                LOGGER.warning("failed to remove blob for doc %d: %s", doc_id, exc)
 
     if not store.delete_document(doc_id):
         # Race: someone else deleted it between get_document and delete.
