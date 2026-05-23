@@ -136,6 +136,8 @@
         viewport: viewport,
       }).promise;
     }
+
+    state.hasTextLayer = textLayerDiv.querySelectorAll("span").length > 0;
   }
 
   function buildSearchQuery(snippet) {
@@ -144,9 +146,28 @@
   }
 
   function triggerFind(state) {
-    const { pdfjsLib, pdfDoc, snippet } = state;
+    const { pdfjsLib, pdfDoc, snippet, els } = state;
     const query = buildSearchQuery(snippet);
     if (!query) return;
+
+    if (state.hasTextLayer === false) {
+      const existing = els.canvasHost.querySelector(".kb-scan-banner");
+      if (existing) existing.remove();
+      const banner = document.createElement("div");
+      banner.className = "kb-modal-error kb-scan-banner";
+      banner.style.position = "absolute";
+      banner.style.top = "0";
+      banner.style.left = "0";
+      banner.style.right = "0";
+      banner.style.padding = "0.4rem";
+      banner.textContent = tr(
+        "viewer.fallback.scan_no_text",
+        "В PDF нет текстового слоя — подсветка фрагмента невозможна",
+      );
+      els.canvasHost.style.position = "relative";
+      els.canvasHost.prepend(banner);
+      return;
+    }
 
     try {
       const eventBus = new pdfjsLib.EventBus();

@@ -55,6 +55,7 @@ def _search_hard_limit() -> int:
         return DEFAULT_SEARCH_HARD_LIMIT
     return max(100, min(value, 1_000_000))
 
+
 VALID_MESSAGE_ROLES = {"user", "assistant", "system"}
 
 
@@ -346,7 +347,9 @@ class KnowledgeBaseStore:
         # Per-page chunking — each chunk remembers its source page number
         chunks_with_pages: list[tuple[Optional[int], str]] = []
         for page_no, page_text in normalised:
-            page_chunks = split_text(page_text, chunk_size=chunk_size, overlap=overlap) or [page_text]
+            page_chunks = split_text(page_text, chunk_size=chunk_size, overlap=overlap) or [
+                page_text
+            ]
             for chunk in page_chunks:
                 chunks_with_pages.append((page_no, chunk))
 
@@ -482,7 +485,18 @@ class KnowledgeBaseStore:
             )
 
         scored: List[Tuple[float, SearchHit]] = []
-        for doc_id, title, idx, text, blob, _dim, source, filename, page_number, has_original in rows:
+        for (
+            doc_id,
+            title,
+            idx,
+            text,
+            blob,
+            _dim,
+            source,
+            filename,
+            page_number,
+            has_original,
+        ) in rows:
             score = _cosine(q_vec, self._unpack(blob))
             if score <= 0.0:
                 continue
@@ -560,7 +574,13 @@ class KnowledgeBaseStore:
             ).fetchone()
         if row is None:
             return None
-        return Conversation(id=row[0], title=row[1], created_at=row[2], updated_at=row[3], message_count=int(row[4] or 0))
+        return Conversation(
+            id=row[0],
+            title=row[1],
+            created_at=row[2],
+            updated_at=row[3],
+            message_count=int(row[4] or 0),
+        )
 
     def list_conversations(self, *, limit: int = 100) -> List[Conversation]:
         limit = max(1, min(int(limit), 500))
@@ -576,7 +596,13 @@ class KnowledgeBaseStore:
                 (limit,),
             ).fetchall()
         return [
-            Conversation(id=row[0], title=row[1], created_at=row[2], updated_at=row[3], message_count=int(row[4] or 0))
+            Conversation(
+                id=row[0],
+                title=row[1],
+                created_at=row[2],
+                updated_at=row[3],
+                message_count=int(row[4] or 0),
+            )
             for row in rows
         ]
 
@@ -657,7 +683,15 @@ class KnowledgeBaseStore:
                 INSERT INTO kb_messages(conversation_id, role, content, sources_json, provider, model, created_at)
                 VALUES(?, ?, ?, ?, ?, ?, ?)
                 """,
-                (str(conversation_id), role_clean, content_clean, sources_blob, provider, model, now),
+                (
+                    str(conversation_id),
+                    role_clean,
+                    content_clean,
+                    sources_blob,
+                    provider,
+                    model,
+                    now,
+                ),
             )
             msg_id = int(cur.lastrowid)
             conn.execute(
@@ -729,7 +763,9 @@ class KnowledgeBaseStore:
             for row in rows
         ]
 
-    def recent_messages(self, conversation_id: str, *, limit: int = DEFAULT_HISTORY_LIMIT) -> List[Message]:
+    def recent_messages(
+        self, conversation_id: str, *, limit: int = DEFAULT_HISTORY_LIMIT
+    ) -> List[Message]:
         """Return the most recent ``limit`` messages in chronological order."""
 
         return self.list_messages(conversation_id, limit=limit)

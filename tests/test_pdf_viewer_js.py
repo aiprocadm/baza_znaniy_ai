@@ -43,3 +43,24 @@ def test_pdf_viewer_uses_find_phrase_search():
 def test_index_html_loads_pdf_viewer_js():
     html = (ROOT / "data" / "www" / "index.html").read_text(encoding="utf-8")
     assert "/js/pdf-viewer.js" in html
+
+
+def test_pdf_viewer_detects_no_text_layer():
+    """After renderTextLayer, the viewer should count spans and remember
+    whether the page has any extractable text (scan-PDF detection)."""
+    content = (JS / "pdf-viewer.js").read_text(encoding="utf-8")
+    assert 'querySelectorAll("span")' in content, (
+        "renderPage must count text-layer span elements"
+    )
+    assert "hasTextLayer" in content, (
+        "viewer must remember the no-text-layer state on the controller state"
+    )
+
+
+def test_pdf_viewer_shows_scan_no_text_banner():
+    """When the text layer is empty, triggerFind must bail out early and
+    surface the viewer.fallback.scan_no_text i18n message."""
+    content = (JS / "pdf-viewer.js").read_text(encoding="utf-8")
+    assert "viewer.fallback.scan_no_text" in content, (
+        "triggerFind must reference the scan_no_text i18n key"
+    )
