@@ -777,11 +777,12 @@ def get_document_file(doc_id: int, request: Request) -> FileResponse:
         )
         raise HTTPException(status.HTTP_410_GONE, detail="FILE_DELETED")
 
+    safe_name = (doc.filename or f"{doc_id}.pdf").replace('"', "_")
     return FileResponse(
         absolute,
         media_type="application/pdf",
         headers={
-            "Content-Disposition": f'inline; filename="{doc.filename or doc_id}.pdf"',
+            "Content-Disposition": f'inline; filename="{safe_name}"',
         },
     )
 

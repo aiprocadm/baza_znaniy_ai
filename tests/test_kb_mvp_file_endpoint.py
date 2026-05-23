@@ -51,7 +51,8 @@ def test_file_endpoint_returns_pdf(uploaded_pdf):
     resp = client.get(f"/api/kb/documents/{doc_id}/file")
     assert resp.status_code == 200
     assert resp.headers["content-type"] == "application/pdf"
-    assert "inline" in resp.headers["content-disposition"]
+    # Exact match — guards against double-extension regression
+    assert resp.headers["content-disposition"] == 'inline; filename="doc.pdf"'
     assert resp.content == pdf_bytes
 
 
@@ -138,3 +139,38 @@ def test_file_endpoint_requires_auth_when_key_set(app_and_store, monkeypatch):
         headers={"X-API-Key": "secret-key-xxx"},
     )
     assert resp.status_code == 200
+
+
+def test_file_endpoint_sanitises_quote_in_filename(app_and_store, monkeypatch):
+    """If a malicious filename slipped past upload validation, the header
+    is still well-formed (no broken HTTP header parsing)."""
+    app, store, tmp_path = app_and_store
+
+    class FakeResult:
+        pages = [(1, "alpha")]
+        metadata = {"document": {"mime_type": "application/pdf"}}
+
+    monkeypatch.setattr("app.ingest.chunking.parse_document", lambda *_: FakeResult())
+
+    client = TestClient(app)
+    # FastAPI/Starlette would normally reject this at upload, but for the
+    # endpoint test we inject the doc directly via the store to focus on
+    # the response-side sanitisation.
+    doc = store.add_document(
+        "evil",
+        pages=[(1, "alpha")],
+        source="file",
+        filename='evil".pdf',
+        mime_type="application/pdf",
+    )
+    # Write a real blob so we get 200, not 410
+    kb_dir = tmp_path / "kb_files"
+    kb_dir.mkdir(parents=True, exist_ok=True)
+    blob = kb_dir / f"{doc.id}.pdf"
+    blob.write_bytes(b"%PDF-1.4\n")
+    store.update_file_metadata(doc.id, file_relpath=f"kb_files/{doc.id}.pdf")
+
+    resp = client.get(f"/api/kb/documents/{doc.id}/file")
+    assert resp.status_code == 200
+    # The unsafe `"` is replaced with `_`
+    assert resp.headers["content-disposition"] == 'inline; filename="evil_.pdf"'
