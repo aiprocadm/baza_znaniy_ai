@@ -390,30 +390,20 @@
     </footer>
   </div>
 
+  <script src="/js/kb-auth.js"></script>
   <script>
     const $ = (id) => document.getElementById(id);
-    const apiBase = "/api/kb";
-    const AUTH_STORAGE_KEY = "kb_mvp_api_key";
+    const apiBase = window.kbAuth.apiBase;
+    const AUTH_STORAGE_KEY = window.kbAuth.storageKey;
 
-    function getApiKey() {
-      try { return localStorage.getItem(AUTH_STORAGE_KEY) || ""; }
-      catch (_) { return ""; }
-    }
-
-    function withAuthHeaders(headers = {}) {
-      const key = getApiKey();
-      if (key) headers["X-API-Key"] = key;
-      return headers;
-    }
+    const getApiKey = window.kbAuth.getApiKey;
+    const withAuthHeaders = window.kbAuth.withAuthHeaders;
 
     const json = (path, opts = {}) => {
       const headers = withAuthHeaders({ "Content-Type": "application/json", ...(opts.headers || {}) });
       return fetch(`${apiBase}${path}`, { ...opts, headers });
     };
-    const rawApi = (path, opts = {}) => {
-      const headers = withAuthHeaders({ ...(opts.headers || {}) });
-      return fetch(`${apiBase}${path}`, { ...opts, headers });
-    };
+    const rawApi = (path, opts = {}) => window.kbAuth.fetch(path, opts);
 
     // --- Tabs --------------------------------------------------------------
     document.querySelectorAll(".tabs button[data-tab]").forEach((btn) => {
@@ -513,8 +503,7 @@
     $("auth-save").addEventListener("click", () => {
       const value = $("auth-input").value.trim();
       try {
-        if (value) localStorage.setItem(AUTH_STORAGE_KEY, value);
-        else localStorage.removeItem(AUTH_STORAGE_KEY);
+        window.kbAuth.setApiKey(value);
         setFeedback("auth-feedback", value ? "Ключ сохранён" : "Ключ очищен", "ok");
         refreshHealth();
       } catch (err) {
@@ -524,7 +513,7 @@
 
     $("auth-clear").addEventListener("click", () => {
       try {
-        localStorage.removeItem(AUTH_STORAGE_KEY);
+        window.kbAuth.setApiKey("");
         $("auth-input").value = "";
         setFeedback("auth-feedback", "Ключ удалён", "ok");
         refreshHealth();
