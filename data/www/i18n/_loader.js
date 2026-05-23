@@ -49,11 +49,17 @@
     });
   }
 
-  window.t = function (key, fallback) {
+  window.t = function (key, fallback, vars) {
+    let raw;
     if (window._kbDict && Object.prototype.hasOwnProperty.call(window._kbDict, key)) {
-      return window._kbDict[key];
+      raw = window._kbDict[key];
+    } else {
+      raw = fallback || key;
     }
-    return fallback || key;
+    if (!vars || typeof vars !== "object") return raw;
+    return String(raw).replace(/\{(\w+)\}/g, (m, name) => {
+      return Object.prototype.hasOwnProperty.call(vars, name) ? String(vars[name]) : m;
+    });
   };
 
   document.addEventListener("DOMContentLoaded", async () => {

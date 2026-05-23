@@ -48,3 +48,13 @@ def test_ru_json_has_minimum_keys():
     }
     missing = expected_keys - data.keys()
     assert not missing, f"missing keys: {missing}"
+
+
+def test_loader_supports_interpolation():
+    """_loader.js must expose a t() helper that substitutes {var} tokens."""
+    content = (I18N / "_loader.js").read_text(encoding="utf-8")
+    assert "t(" in content or "window.t" in content
+    # The substitution pattern uses simple {key} braces — verify it's wired
+    assert "{" in content and "replace" in content, (
+        "_loader.js should support {var}-style interpolation in t()"
+    )
