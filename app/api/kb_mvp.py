@@ -345,7 +345,9 @@ def _retrieve_with_rerank(
     """
 
     config = kb_rerank.load_config()
-    rerank_info = RerankInfo(enabled=config.enabled, model=config.model_name if config.enabled else None)
+    rerank_info = RerankInfo(
+        enabled=config.enabled, model=config.model_name if config.enabled else None
+    )
 
     if not config.enabled:
         hits = store.search(query, top_k=top_k)
@@ -487,6 +489,7 @@ def _resolve_data_dir() -> Path:
         return Path(base_str)
     try:
         from app.core.config import get_settings
+
         return Path(get_settings().data_dir)
     except Exception:
         return Path("./var/data")
@@ -536,13 +539,13 @@ def _parse_file_bytes(filename: str, data: bytes) -> tuple[str, str]:
             continue
         text_parts.append(str(page_text).strip())
     full_text = "\n\n".join(part for part in text_parts if part)
-    mime = (result.metadata.get("document", {}) or {}).get("mime_type") or "application/octet-stream"
+    mime = (result.metadata.get("document", {}) or {}).get(
+        "mime_type"
+    ) or "application/octet-stream"
     return full_text, mime
 
 
-def _parse_file_bytes_with_pages(
-    filename: str, data: bytes
-) -> tuple[list[tuple[int, str]], str]:
+def _parse_file_bytes_with_pages(filename: str, data: bytes) -> tuple[list[tuple[int, str]], str]:
     """Like :func:`_parse_file_bytes` but preserves per-page structure.
 
     Returns ``(pages, mime_type)`` where ``pages`` is a list of
@@ -586,7 +589,9 @@ def _parse_file_bytes_with_pages(
         if text:
             pages.append((int(page_number), text))
 
-    mime = (result.metadata.get("document", {}) or {}).get("mime_type") or "application/octet-stream"
+    mime = (result.metadata.get("document", {}) or {}).get(
+        "mime_type"
+    ) or "application/octet-stream"
     return pages, mime
 
 
@@ -671,9 +676,7 @@ async def upload_document(
     try:
         pages, mime_type = _parse_file_bytes_with_pages(filename, data)
         if not pages:
-            raise HTTPException(
-                status.HTTP_422_UNPROCESSABLE_ENTITY, detail="NO_EXTRACTABLE_TEXT"
-            )
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, detail="NO_EXTRACTABLE_TEXT")
 
         effective_title = (title or "").strip() or filename
         store = _store_for(request)
@@ -764,17 +767,11 @@ def get_document_file(doc_id: int, request: Request) -> FileResponse:
     try:
         absolute.relative_to(expected_root)
     except ValueError:
-        LOGGER.error(
-            "Path traversal attempted for doc %d: %s", doc_id, doc.file_relpath
-        )
-        raise HTTPException(
-            status.HTTP_500_INTERNAL_SERVER_ERROR, detail="STORAGE_ERROR"
-        )
+        LOGGER.error("Path traversal attempted for doc %d: %s", doc_id, doc.file_relpath)
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, detail="STORAGE_ERROR")
 
     if not absolute.is_file():
-        LOGGER.warning(
-            "Original file missing for doc %d: %s", doc_id, absolute
-        )
+        LOGGER.warning("Original file missing for doc %d: %s", doc_id, absolute)
         raise HTTPException(status.HTTP_410_GONE, detail="FILE_DELETED")
 
     safe_name = (doc.filename or f"{doc_id}.pdf").replace('"', "_")
@@ -811,7 +808,8 @@ def delete_document(doc_id: int, request: Request) -> dict[str, Any]:
         except ValueError:
             LOGGER.error(
                 "Path traversal attempted on delete for doc %d: %s",
-                doc_id, doc.file_relpath,
+                doc_id,
+                doc.file_relpath,
             )
             # Refuse to unlink anything outside kb_files/ — but still drop the row
             # so the corruption is at least cleared from the DB
@@ -863,9 +861,7 @@ def ask(payload: AskRequest, request: Request) -> AskResponse:
     if payload.conversation_id:
         existing = store.get_conversation(payload.conversation_id)
         if existing is None:
-            raise HTTPException(
-                status.HTTP_404_NOT_FOUND, detail="CONVERSATION_NOT_FOUND"
-            )
+            raise HTTPException(status.HTTP_404_NOT_FOUND, detail="CONVERSATION_NOT_FOUND")
         conversation = existing
         if payload.history_limit > 0:
             prior = store.recent_messages(conversation.id, limit=payload.history_limit)
@@ -994,14 +990,16 @@ async def ask_stream(payload: AskRequest, request: Request) -> StreamingResponse
             yield _sse_event("token", {"text": answer})
             try:
                 store.add_message(conversation.id, "user", payload.question)
-                store.add_message(
-                    conversation.id, "assistant", answer, sources=[], provider="none"
-                )
+                store.add_message(conversation.id, "assistant", answer, sources=[], provider="none")
             except (ValueError, LookupError) as exc:
                 LOGGER.warning("Failed to persist empty-KB turn: %s", exc)
             yield _sse_event(
                 "done",
-                {"provider": "none", "model": None, "elapsed_ms": round((time.perf_counter() - start) * 1000.0, 2)},
+                {
+                    "provider": "none",
+                    "model": None,
+                    "elapsed_ms": round((time.perf_counter() - start) * 1000.0, 2),
+                },
             )
             return
 
@@ -1026,7 +1024,7 @@ async def ask_stream(payload: AskRequest, request: Request) -> StreamingResponse
                 LOGGER.warning("LLM stream transport error: %s", exc)
                 yield _sse_event("error", {"message": f"LLM transport error: {exc}"})
                 return
-            except Exception as exc:  # pragma: no cover - defensive
+            except Exception:  # pragma: no cover - defensive
                 LOGGER.exception("LLM streaming failure")
                 yield _sse_event("error", {"message": "internal streaming error"})
                 return
