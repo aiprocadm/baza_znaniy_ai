@@ -207,6 +207,135 @@
       text-align: center;
     }
     code { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 0.85em; }
+
+    /* PDF citation viewer modal */
+    .kb-modal {
+      width: min(95vw, 1100px);
+      max-height: 90vh;
+      padding: 0;
+      border: 1px solid var(--border);
+      border-radius: 0.75rem;
+      background: var(--card);
+      color: var(--text);
+    }
+    .kb-modal::backdrop {
+      background: rgba(0, 0, 0, 0.6);
+      backdrop-filter: blur(2px);
+    }
+    .kb-modal-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 0.75rem 1rem;
+      border-bottom: 1px solid var(--border);
+    }
+    .kb-modal-header h2 {
+      margin: 0;
+      font-size: 1rem;
+    }
+    .kb-modal-close {
+      background: transparent;
+      border: none;
+      font-size: 1.25rem;
+      cursor: pointer;
+      color: var(--muted);
+      padding: 0.25rem 0.5rem;
+    }
+    .kb-modal-toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.5rem 1rem;
+      border-bottom: 1px solid var(--border);
+      font-size: 0.9rem;
+      color: var(--muted);
+    }
+    .kb-modal-filename {
+      flex: 1;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      color: var(--text);
+    }
+    .kb-modal-page-input {
+      width: 4rem;
+      padding: 0.2rem 0.4rem;
+      text-align: center;
+    }
+    .kb-modal-body {
+      position: relative;
+      overflow: auto;
+      max-height: calc(90vh - 7rem);
+      background: var(--bg);
+      padding: 0.5rem;
+    }
+    .kb-modal-loading,
+    .kb-modal-error {
+      padding: 1.5rem;
+      text-align: center;
+      color: var(--muted);
+    }
+    .kb-modal-error { color: var(--danger); }
+    .kb-modal-text-fallback {
+      padding: 1rem;
+      background: var(--card);
+      border-radius: 0.5rem;
+      white-space: pre-wrap;
+      line-height: 1.5;
+    }
+    .kb-modal-text-fallback .kb-fallback-reason {
+      display: block;
+      margin-bottom: 0.75rem;
+      color: var(--warn);
+      font-style: italic;
+    }
+    .kb-canvas-wrap {
+      position: relative;
+      margin: 0 auto;
+      max-width: max-content;
+    }
+    .kb-canvas-wrap canvas { display: block; }
+    /* PDF.js text layer styles (minimal — find-bar highlights) */
+    .kb-text-layer {
+      position: absolute;
+      inset: 0;
+      overflow: hidden;
+      opacity: 0.2;
+      line-height: 1.0;
+      user-select: text;
+    }
+    .kb-text-layer ::selection { background: rgba(0, 100, 255, 0.4); }
+    .kb-text-layer .highlight {
+      background: rgba(255, 255, 0, 0.55);
+      border-radius: 2px;
+    }
+    .kb-text-layer .highlight.selected {
+      background: rgba(255, 140, 0, 0.7);
+    }
+
+    /* Citation button in chat */
+    .kb-citation {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      padding: 0.3rem 0.6rem;
+      border-radius: 999px;
+      background: var(--accent-soft);
+      color: var(--accent);
+      border: 1px solid transparent;
+      cursor: pointer;
+      font-size: 0.85rem;
+    }
+    .kb-citation:hover { border-color: var(--accent); }
+    .kb-citation[data-has-original="false"] { background: var(--bg); color: var(--muted); }
+    .kb-citation-icon {
+      font-weight: 600;
+      font-size: 0.7rem;
+      letter-spacing: 0.05em;
+    }
+    .kb-citation-chevron { font-size: 0.85rem; }
   </style>
 </head>
 <body>
@@ -390,30 +519,21 @@
     </footer>
   </div>
 
+  <script src="/js/kb-auth.js"></script>
+  <script src="/js/pdf-viewer.js" defer></script>
   <script>
     const $ = (id) => document.getElementById(id);
-    const apiBase = "/api/kb";
-    const AUTH_STORAGE_KEY = "kb_mvp_api_key";
+    const apiBase = window.kbAuth.apiBase;
+    const AUTH_STORAGE_KEY = window.kbAuth.storageKey;
 
-    function getApiKey() {
-      try { return localStorage.getItem(AUTH_STORAGE_KEY) || ""; }
-      catch (_) { return ""; }
-    }
-
-    function withAuthHeaders(headers = {}) {
-      const key = getApiKey();
-      if (key) headers["X-API-Key"] = key;
-      return headers;
-    }
+    const getApiKey = window.kbAuth.getApiKey;
+    const withAuthHeaders = window.kbAuth.withAuthHeaders;
 
     const json = (path, opts = {}) => {
       const headers = withAuthHeaders({ "Content-Type": "application/json", ...(opts.headers || {}) });
       return fetch(`${apiBase}${path}`, { ...opts, headers });
     };
-    const rawApi = (path, opts = {}) => {
-      const headers = withAuthHeaders({ ...(opts.headers || {}) });
-      return fetch(`${apiBase}${path}`, { ...opts, headers });
-    };
+    const rawApi = (path, opts = {}) => window.kbAuth.fetch(path, opts);
 
     // --- Tabs --------------------------------------------------------------
     document.querySelectorAll(".tabs button[data-tab]").forEach((btn) => {
@@ -513,8 +633,7 @@
     $("auth-save").addEventListener("click", () => {
       const value = $("auth-input").value.trim();
       try {
-        if (value) localStorage.setItem(AUTH_STORAGE_KEY, value);
-        else localStorage.removeItem(AUTH_STORAGE_KEY);
+        window.kbAuth.setApiKey(value);
         setFeedback("auth-feedback", value ? "Ключ сохранён" : "Ключ очищен", "ok");
         refreshHealth();
       } catch (err) {
@@ -524,7 +643,7 @@
 
     $("auth-clear").addEventListener("click", () => {
       try {
-        localStorage.removeItem(AUTH_STORAGE_KEY);
+        window.kbAuth.setApiKey("");
         $("auth-input").value = "";
         setFeedback("auth-feedback", "Ключ удалён", "ok");
         refreshHealth();
@@ -1010,6 +1129,34 @@
     refreshDocs();
     setInterval(refreshHealth, 30000);
   </script>
+  <dialog id="kb-pdf-modal" class="kb-modal" aria-labelledby="kb-modal-title">
+    <header class="kb-modal-header">
+      <h2 id="kb-modal-title" data-i18n="modal.viewer_title">Просмотр документа</h2>
+      <button type="button" class="kb-modal-close"
+              data-i18n-attr="aria-label" data-i18n="action.close"
+              aria-label="Закрыть">&times;</button>
+    </header>
+    <div class="kb-modal-toolbar">
+      <span class="kb-modal-filename"></span>
+      <span>
+        <span data-i18n="viewer.page">Стр.</span>
+        <input type="number" class="kb-modal-page-input" min="1" value="1" />
+        / <span class="kb-modal-page-total">&mdash;</span>
+      </span>
+      <button type="button" class="kb-modal-prev"
+              data-i18n-attr="aria-label" data-i18n="viewer.prev"
+              aria-label="Предыдущая">&larr;</button>
+      <button type="button" class="kb-modal-next"
+              data-i18n-attr="aria-label" data-i18n="viewer.next"
+              aria-label="Следующая">&rarr;</button>
+    </div>
+    <div class="kb-modal-body">
+      <div class="kb-modal-loading" data-i18n="status.loading">Загрузка...</div>
+      <div class="kb-modal-error" hidden></div>
+      <div class="kb-modal-canvas-host"></div>
+      <div class="kb-modal-text-fallback" hidden></div>
+    </div>
+  </dialog>
   <script src="/i18n/_loader.js"></script>
 </body>
 </html>

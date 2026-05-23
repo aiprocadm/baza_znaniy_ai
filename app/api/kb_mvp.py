@@ -11,11 +11,14 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import time
+import uuid
+from pathlib import Path
 from typing import Any, AsyncIterator, List, Optional
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile, status
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field, field_validator
 
 from app.api.kb_auth import auth_status, require_api_key
@@ -122,6 +125,8 @@ class HitOut(BaseModel):
     score: float
     source: str = "text"
     filename: Optional[str] = None
+    page: Optional[int] = None
+    has_original: bool = False
 
 
 class RerankInfo(BaseModel):
@@ -252,6 +257,8 @@ def _hit_to_out(hit: SearchHit) -> HitOut:
         score=round(hit.score, 6),
         source=hit.source,
         filename=hit.filename,
+        page=hit.page,
+        has_original=hit.has_original,
     )
 
 
@@ -271,6 +278,15 @@ def _sources_payload_to_hit_out(items: List[Any]) -> List[HitOut]:
         if not isinstance(raw, dict):
             continue
         try:
+            page_val = raw.get("page")
+            page_int: Optional[int]
+            if page_val is None:
+                page_int = None
+            else:
+                try:
+                    page_int = int(page_val)
+                except (TypeError, ValueError):
+                    page_int = None
             out.append(
                 HitOut(
                     document_id=int(raw.get("document_id") or 0),
@@ -280,6 +296,8 @@ def _sources_payload_to_hit_out(items: List[Any]) -> List[HitOut]:
                     score=float(raw.get("score") or 0.0),
                     source=str(raw.get("source") or "text"),
                     filename=raw.get("filename") if isinstance(raw.get("filename"), str) else None,
+                    page=page_int,
+                    has_original=bool(raw.get("has_original")),
                 )
             )
         except (TypeError, ValueError):
@@ -455,6 +473,32 @@ def _decode_text(data: bytes) -> str:
     return data.decode("utf-8", errors="replace")
 
 
+def _resolve_data_dir() -> Path:
+    """Return the data directory using env-var fallback chain.
+
+    Resolution order: DATA_DIR env → FILES_ROOT env → get_settings().data_dir →
+    './var/data'. The 4-level fallback exists because the project's
+    Settings instantiation has a known AliasChoices bug (see
+    app/core/config.py:82) that breaks in some test environments; the
+    env-var fast path bypasses it.
+    """
+    base_str = os.environ.get("DATA_DIR") or os.environ.get("FILES_ROOT")
+    if base_str:
+        return Path(base_str)
+    try:
+        from app.core.config import get_settings
+        return Path(get_settings().data_dir)
+    except Exception:
+        return Path("./var/data")
+
+
+def _resolve_kb_files_dir() -> Path:
+    """Return <data_dir>/kb_files, creating it if needed."""
+    kb_files_dir = _resolve_data_dir() / "kb_files"
+    kb_files_dir.mkdir(parents=True, exist_ok=True)
+    return kb_files_dir
+
+
 def _parse_file_bytes(filename: str, data: bytes) -> tuple[str, str]:
     """Return ``(plain_text, mime_type)`` extracted from an uploaded file.
 
@@ -494,6 +538,56 @@ def _parse_file_bytes(filename: str, data: bytes) -> tuple[str, str]:
     full_text = "\n\n".join(part for part in text_parts if part)
     mime = (result.metadata.get("document", {}) or {}).get("mime_type") or "application/octet-stream"
     return full_text, mime
+
+
+def _parse_file_bytes_with_pages(
+    filename: str, data: bytes
+) -> tuple[list[tuple[int, str]], str]:
+    """Like :func:`_parse_file_bytes` but preserves per-page structure.
+
+    Returns ``(pages, mime_type)`` where ``pages`` is a list of
+    ``(page_number, text)`` tuples (page numbers 1-indexed). Empty pages
+    are dropped. Plain-text formats produce a single virtual page.
+
+    Raises ``HTTPException`` on parse failure (same contract as
+    ``_parse_file_bytes``).
+    """
+
+    ext = _extension_for(filename)
+    if not ext:
+        text = _decode_text(data).strip()
+        return ([(1, text)] if text else []), "text/plain"
+
+    if ext in {"txt", "md", "markdown"}:
+        text = _decode_text(data).strip()
+        mime = "text/markdown" if ext != "txt" else "text/plain"
+        return ([(1, text)] if text else []), mime
+
+    try:
+        from app.ingest.chunking import parse_document
+    except Exception as exc:  # pragma: no cover - optional dependency missing
+        LOGGER.warning("parse_document unavailable (%s); decoding as text", exc)
+        text = _decode_text(data).strip()
+        return ([(1, text)] if text else []), "application/octet-stream"
+
+    try:
+        result = parse_document(filename, data)
+    except Exception as exc:
+        LOGGER.exception("Failed to parse %s: %s", filename, exc)
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"FAILED_TO_PARSE: {exc}",
+        ) from exc
+
+    raw_pages = getattr(result, "pages", []) or []
+    pages: list[tuple[int, str]] = []
+    for page_number, page_text in raw_pages:
+        text = (str(page_text) if page_text is not None else "").strip()
+        if text:
+            pages.append((int(page_number), text))
+
+    mime = (result.metadata.get("document", {}) or {}).get("mime_type") or "application/octet-stream"
+    return pages, mime
 
 
 @public.get("/health")
@@ -564,27 +658,55 @@ async def upload_document(
             detail=f"FILE_TOO_LARGE: max {MAX_UPLOAD_BYTES} bytes",
         )
 
-    text, mime_type = _parse_file_bytes(filename, data)
-    text = (text or "").strip()
-    if not text:
-        raise HTTPException(
-            status.HTTP_422_UNPROCESSABLE_ENTITY, detail="NO_EXTRACTABLE_TEXT"
-        )
+    # For PDFs we keep the raw blob so the viewer can show the original.
+    # Write to a tmp name first; rename to <doc_id>.pdf AFTER the DB INSERT
+    # succeeds, so we never leave a blob without a matching row.
+    tmp_blob: Optional[Path] = None
+    kb_files_dir: Optional[Path] = None
+    if ext == "pdf":
+        kb_files_dir = _resolve_kb_files_dir()
+        tmp_blob = kb_files_dir / f".tmp-{uuid.uuid4().hex}.pdf"
+        tmp_blob.write_bytes(data)
 
-    effective_title = (title or "").strip() or filename
-    store = _store_for(request)
     try:
-        doc = store.add_document(
-            effective_title,
-            text,
-            source="file",
-            filename=filename,
-            mime_type=mime_type,
-        )
-    except ValueError as exc:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        pages, mime_type = _parse_file_bytes_with_pages(filename, data)
+        if not pages:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_ENTITY, detail="NO_EXTRACTABLE_TEXT"
+            )
 
-    return _doc_to_out(doc)
+        effective_title = (title or "").strip() or filename
+        store = _store_for(request)
+        try:
+            doc = store.add_document(
+                effective_title,
+                pages=pages,
+                source="file",
+                filename=filename,
+                mime_type=mime_type,
+            )
+        except ValueError as exc:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+        # Promote tmp blob to final name and mark the doc.
+        if tmp_blob is not None and kb_files_dir is not None:
+            final_blob = kb_files_dir / f"{doc.id}.pdf"
+            tmp_blob.rename(final_blob)
+            tmp_blob = None  # ownership transferred
+            store.update_file_metadata(doc.id, file_relpath=f"kb_files/{doc.id}.pdf")
+            # Refresh the in-memory Document so we return up-to-date flags
+            refreshed = store.get_document(doc.id)
+            if refreshed is not None:
+                doc = refreshed
+
+        return _doc_to_out(doc)
+    finally:
+        # Clean up orphan tmp on any error path
+        if tmp_blob is not None:
+            try:
+                tmp_blob.unlink(missing_ok=True)
+            except OSError:
+                LOGGER.warning("failed to remove tmp blob %s", tmp_blob)
 
 
 @protected.get("/documents", response_model=List[DocumentListItem])
@@ -616,12 +738,92 @@ def get_document(doc_id: int, request: Request) -> DocumentOut:
     return _doc_to_out(doc, include_text=True)
 
 
-@protected.delete("/documents/{doc_id}")
-def delete_document(doc_id: int, request: Request) -> dict[str, Any]:
-    """Delete a document and its chunks."""
+@protected.get("/documents/{doc_id}/file")
+def get_document_file(doc_id: int, request: Request) -> FileResponse:
+    """Stream the original blob for documents with has_original_file=true.
+
+    Returns ``application/pdf`` with ``inline`` disposition so the
+    browser/PDF.js can render it. Auth-gated by the ``protected``
+    router — when ``KB_API_KEY`` is set, requires the standard
+    ``X-API-Key`` header.
+    """
 
     store = _store_for(request)
+    doc = store.get_document(doc_id)
+    if doc is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="DOCUMENT_NOT_FOUND")
+
+    if not doc.has_original_file or not doc.file_relpath:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="NO_ORIGINAL_FILE")
+
+    data_dir = _resolve_data_dir().resolve()
+    absolute = (data_dir / doc.file_relpath).resolve()
+    expected_root = (data_dir / "kb_files").resolve()
+
+    # Path-traversal guard: resolved path must live under <data_dir>/kb_files/
+    try:
+        absolute.relative_to(expected_root)
+    except ValueError:
+        LOGGER.error(
+            "Path traversal attempted for doc %d: %s", doc_id, doc.file_relpath
+        )
+        raise HTTPException(
+            status.HTTP_500_INTERNAL_SERVER_ERROR, detail="STORAGE_ERROR"
+        )
+
+    if not absolute.is_file():
+        LOGGER.warning(
+            "Original file missing for doc %d: %s", doc_id, absolute
+        )
+        raise HTTPException(status.HTTP_410_GONE, detail="FILE_DELETED")
+
+    safe_name = (doc.filename or f"{doc_id}.pdf").replace('"', "_")
+    return FileResponse(
+        absolute,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'inline; filename="{safe_name}"',
+        },
+    )
+
+
+@protected.delete("/documents/{doc_id}")
+def delete_document(doc_id: int, request: Request) -> dict[str, Any]:
+    """Delete a document, its chunks, and the original blob (if any).
+
+    The blob is removed BEFORE the DB row so an orphaned filesystem entry
+    is never possible. If the file vanished (race / manual cleanup), we
+    log a warning but still drop the DB row — the goal is to satisfy
+    DELETE, not to fail because of dangling state.
+    """
+
+    store = _store_for(request)
+    doc = store.get_document(doc_id)
+    if doc is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="DOCUMENT_NOT_FOUND")
+
+    if doc.has_original_file and doc.file_relpath:
+        data_dir = _resolve_data_dir().resolve()
+        expected_root = (data_dir / "kb_files").resolve()
+        candidate = (data_dir / doc.file_relpath).resolve()
+        try:
+            candidate.relative_to(expected_root)
+        except ValueError:
+            LOGGER.error(
+                "Path traversal attempted on delete for doc %d: %s",
+                doc_id, doc.file_relpath,
+            )
+            # Refuse to unlink anything outside kb_files/ — but still drop the row
+            # so the corruption is at least cleared from the DB
+            candidate = None
+        if candidate is not None:
+            try:
+                candidate.unlink(missing_ok=True)
+            except OSError as exc:
+                LOGGER.warning("failed to remove blob for doc %d: %s", doc_id, exc)
+
     if not store.delete_document(doc_id):
+        # Race: someone else deleted it between get_document and delete.
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="DOCUMENT_NOT_FOUND")
     return {"ok": True, "id": doc_id}
 
