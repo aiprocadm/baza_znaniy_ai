@@ -777,23 +777,52 @@
     });
 
     // --- Search tab --------------------------------------------------------
+    function renderCitations(items) {
+      return (items || []).map((hit, i) => {
+        const hasOriginal = !!hit.has_original;
+        const page = hit.page;
+        const filename = hit.filename || "";
+        const title = hit.document_title || "";
+        const docLabel = filename || title || "Без названия";
+        let label;
+        if (filename && page) {
+          label = (typeof t === "function")
+            ? t("citation.with_page", `${filename}, стр. ${page}`, { filename, page })
+            : `${filename}, стр. ${page}`;
+        } else if (filename) {
+          label = (typeof t === "function")
+            ? t("citation.no_page", filename, { filename })
+            : filename;
+        } else {
+          label = (typeof t === "function")
+            ? t("citation.text_doc", title || docLabel, { title: title || docLabel })
+            : (title || docLabel);
+        }
+        const chevron = hasOriginal
+          ? '<span class="kb-citation-chevron" aria-hidden="true">›</span>'
+          : '';
+        return `
+          <button type="button" class="kb-citation"
+                  data-doc-id="${hit.document_id}"
+                  data-page="${page == null ? "" : page}"
+                  data-snippet="${escapeHtml(hit.text || "")}"
+                  data-has-original="${hasOriginal ? "true" : "false"}"
+                  data-filename="${escapeHtml(filename)}"
+                  data-title="${escapeHtml(title)}">
+            <span class="kb-citation-icon" aria-hidden="true">[${i + 1}]</span>
+            <span class="kb-citation-text">${escapeHtml(label)}</span>
+            ${chevron}
+          </button>`;
+      }).join("");
+    }
+
     function renderSources(target, items) {
       const el = $(target);
-      el.innerHTML = "";
       if (!items || !items.length) {
         el.innerHTML = '<div class="hint">Релевантных фрагментов не найдено.</div>';
         return;
       }
-      for (const hit of items) {
-        const block = document.createElement("div");
-        block.className = "source";
-        const label = hit.filename ? `${hit.document_title} (файл: ${hit.filename})` : hit.document_title;
-        block.innerHTML = `
-          <div class="title">#${hit.document_id} · ${escapeHtml(label || "Без названия")}<span class="score"> · score ${Number(hit.score).toFixed(3)}</span></div>
-          <div>${escapeHtml(hit.text)}</div>
-        `;
-        el.appendChild(block);
-      }
+      el.innerHTML = `<div class="kb-citations">${renderCitations(items)}</div>`;
     }
 
     $("search-form").addEventListener("submit", async (event) => {
@@ -1038,19 +1067,8 @@
           if (msg.role === "assistant" && msg.sources && msg.sources.length) {
             const details = document.createElement("details");
             details.style.marginTop = "0.4rem";
-            details.innerHTML = `<summary class="meta">Источники: ${msg.sources.length}</summary>`;
-            const sourcesDiv = document.createElement("div");
-            sourcesDiv.className = "sources";
-            sourcesDiv.style.marginTop = "0.4rem";
-            for (const hit of msg.sources) {
-              const sBlock = document.createElement("div");
-              sBlock.className = "source";
-              sBlock.innerHTML = `
-                <div class="title">#${hit.document_id} · ${escapeHtml(hit.document_title || "")}<span class="score"> · ${Number(hit.score).toFixed(3)}</span></div>
-                <div>${escapeHtml(hit.text)}</div>`;
-              sourcesDiv.appendChild(sBlock);
-            }
-            details.appendChild(sourcesDiv);
+            details.innerHTML = `<summary class="meta">Источники: ${msg.sources.length}</summary>`
+              + `<div class="kb-citations" style="margin-top: 0.4rem;">${renderCitations(msg.sources)}</div>`;
             block.appendChild(details);
           }
           target.appendChild(block);
@@ -1123,6 +1141,25 @@
         target.innerHTML = `<p class="feedback">Ошибка: ${escapeHtml(err.message || err)}</p>`;
       }
     }
+
+    // --- Citation click delegation ----------------------------------------
+    document.body.addEventListener("click", (ev) => {
+      const btn = ev.target.closest(".kb-citation");
+      if (!btn) return;
+      ev.preventDefault();
+      const docId = parseInt(btn.dataset.docId, 10);
+      const pageRaw = btn.dataset.page;
+      const page = pageRaw ? parseInt(pageRaw, 10) : null;
+      const snippet = btn.dataset.snippet || "";
+      const hasOriginal = btn.dataset.hasOriginal === "true";
+      const filename = btn.dataset.filename || "";
+      const fallbackTitle = btn.dataset.title || "";
+      if (window.kbPdfViewer && typeof window.kbPdfViewer.openCitation === "function") {
+        window.kbPdfViewer.openCitation({
+          docId, page, snippet, hasOriginal, filename, fallbackTitle,
+        });
+      }
+    });
 
     // --- Bootstrap ---------------------------------------------------------
     refreshHealth();
