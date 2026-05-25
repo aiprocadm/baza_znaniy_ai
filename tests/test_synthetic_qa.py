@@ -508,3 +508,56 @@ def test_generator_can_disable_self_consistency():
     # Without self-consistency, only one provider call happens
     assert len(provider.calls) == 1
     assert len(pairs) == 1
+
+
+def test_load_processed_chunk_ids_from_missing_file(tmp_path):
+    from app.services.synthetic_qa import load_processed_chunk_ids
+
+    processed = load_processed_chunk_ids(tmp_path / "missing.jsonl")
+    assert processed == set()
+
+
+def test_load_processed_chunk_ids_reads_meta(tmp_path):
+    from app.services.synthetic_qa import QAPair, load_processed_chunk_ids
+
+    path = tmp_path / "out.jsonl"
+    pairs = [
+        QAPair(instruction="Q1", input="", output="A1 long enough text here", source_chunk_id=10),
+        QAPair(instruction="Q2", input="", output="A2 long enough text here", source_chunk_id=20),
+        QAPair(instruction="Q3", input="", output="A3 long enough text here", source_chunk_id=10),  # dup
+    ]
+    with path.open("w", encoding="utf-8") as handle:
+        for pair in pairs:
+            handle.write(pair.to_jsonl_line())
+
+    processed = load_processed_chunk_ids(path)
+    assert processed == {10, 20}
+
+
+def test_load_processed_chunk_ids_skips_lines_without_meta(tmp_path):
+    from app.services.synthetic_qa import load_processed_chunk_ids
+
+    path = tmp_path / "out.jsonl"
+    path.write_text(
+        '{"instruction":"Q","input":"","output":"A long enough text goes here for sure"}\n'  # no meta
+        '{"instruction":"Q","input":"","output":"A long enough text goes here for sure","meta":{"source_chunk_id":5}}\n',
+        encoding="utf-8",
+    )
+
+    processed = load_processed_chunk_ids(path)
+    assert processed == {5}
+
+
+def test_load_processed_chunk_ids_tolerates_malformed_lines(tmp_path):
+    from app.services.synthetic_qa import QAPair, load_processed_chunk_ids
+
+    path = tmp_path / "out.jsonl"
+    pair = QAPair(instruction="Q", input="", output="A long enough text goes here for sure", source_chunk_id=99)
+    path.write_text(
+        "this is not json\n"
+        + pair.to_jsonl_line(),
+        encoding="utf-8",
+    )
+
+    processed = load_processed_chunk_ids(path)
+    assert processed == {99}

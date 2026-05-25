@@ -7,6 +7,7 @@ import logging
 import re
 from dataclasses import dataclass
 from enum import Enum
+from pathlib import Path
 from typing import Protocol
 
 LOGGER = logging.getLogger(__name__)
@@ -470,6 +471,39 @@ class SyntheticQAGenerator:
         return getattr(response, "text", "") or ""
 
 
+def load_processed_chunk_ids(path: Path) -> set[int]:
+    """Inspect *path* (an existing JSONL) and return chunk ids seen so far.
+
+    Lines without a ``meta.source_chunk_id`` are silently ignored, as
+    are lines that fail to parse — the CLI logs them but never aborts
+    a resume operation on a malformed entry.
+    """
+
+    processed: set[int] = set()
+    if not path.exists():
+        return processed
+
+    with path.open("r", encoding="utf-8") as handle:
+        for line in handle:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                data = json.loads(line)
+            except json.JSONDecodeError:
+                LOGGER.debug("Skipping malformed JSONL line during resume scan")
+                continue
+            meta = data.get("meta") if isinstance(data, dict) else None
+            if not isinstance(meta, dict):
+                continue
+            raw_id = meta.get("source_chunk_id")
+            try:
+                processed.add(int(raw_id))
+            except (TypeError, ValueError):
+                continue
+    return processed
+
+
 __all__ = [
     "QAPair",
     "GenerationMode",
@@ -482,6 +516,7 @@ __all__ = [
     "parse_qa_response",
     "estimate_chunk_cost_usd",
     "estimate_total_cost_usd",
+    "load_processed_chunk_ids",
     "MIN_INSTRUCTION_CHARS",
     "MAX_INSTRUCTION_CHARS",
     "MIN_OUTPUT_CHARS",
