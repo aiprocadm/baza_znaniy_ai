@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from dataclasses import dataclass
 
 LOGGER = logging.getLogger(__name__)
@@ -100,12 +101,48 @@ def is_refusal(text: str) -> bool:
     return any(marker in lowered for marker in _REFUSAL_MARKERS)
 
 
+_TOKEN_RE = re.compile(r"\w+", re.UNICODE)
+DEFAULT_CONSISTENCY_THRESHOLD = 0.4
+
+
+def _tokenise(text: str) -> set[str]:
+    return {m.group(0).lower() for m in _TOKEN_RE.finditer(text)}
+
+
+def self_consistent(
+    text_a: str,
+    text_b: str,
+    *,
+    threshold: float = DEFAULT_CONSISTENCY_THRESHOLD,
+) -> bool:
+    """Return True when two generated answers overlap enough to trust.
+
+    Computes a lowercase-token Jaccard similarity. ``threshold`` defaults
+    to 0.4 — empirically high enough to catch paraphrases on the same
+    chunk while rejecting unrelated content. Either text being empty is
+    treated as failure.
+    """
+
+    if not text_a.strip() or not text_b.strip():
+        return False
+    tokens_a = _tokenise(text_a)
+    tokens_b = _tokenise(text_b)
+    if not tokens_a or not tokens_b:
+        return False
+    intersection = len(tokens_a & tokens_b)
+    union = len(tokens_a | tokens_b)
+    similarity = intersection / union
+    return similarity >= threshold
+
+
 __all__ = [
     "QAPair",
     "length_ok",
     "is_refusal",
+    "self_consistent",
     "MIN_INSTRUCTION_CHARS",
     "MAX_INSTRUCTION_CHARS",
     "MIN_OUTPUT_CHARS",
     "MAX_OUTPUT_CHARS",
+    "DEFAULT_CONSISTENCY_THRESHOLD",
 ]

@@ -163,3 +163,43 @@ def test_refusal_filter_handles_empty_string():
 
     assert is_refusal("") is False
     assert is_refusal("   ") is False
+
+
+def test_self_consistency_accepts_identical_text():
+    from app.services.synthetic_qa import self_consistent
+
+    text = "The annual leave is 28 calendar days per year."
+    assert self_consistent(text, text) is True
+
+
+def test_self_consistency_accepts_paraphrase():
+    from app.services.synthetic_qa import self_consistent
+
+    a = "Annual leave is twenty-eight calendar days each year for every employee."
+    b = "Each employee is entitled to twenty-eight calendar days of annual leave per year."
+    assert self_consistent(a, b) is True
+
+
+def test_self_consistency_rejects_unrelated_text():
+    from app.services.synthetic_qa import self_consistent
+
+    a = "Annual leave is 28 calendar days per year."
+    b = "The kitchen ventilation system needs monthly inspection."
+    assert self_consistent(a, b) is False
+
+
+def test_self_consistency_handles_empty_text():
+    from app.services.synthetic_qa import self_consistent
+
+    assert self_consistent("", "") is False
+    assert self_consistent("Some text.", "") is False
+
+
+def test_self_consistency_threshold_can_be_overridden():
+    from app.services.synthetic_qa import self_consistent
+
+    a = "alpha beta gamma delta"
+    b = "alpha beta zeta theta"  # 2/6 unique tokens shared = 0.33 Jaccard
+
+    assert self_consistent(a, b, threshold=0.5) is False
+    assert self_consistent(a, b, threshold=0.3) is True
