@@ -325,3 +325,50 @@ def test_parse_response_skips_items_missing_required_fields():
 
     assert len(pairs) == 1
     assert pairs[0].instruction == "Q1"
+
+
+def test_estimate_chunk_cost_for_known_provider():
+    from app.services.synthetic_qa import GenerationMode, estimate_chunk_cost_usd
+
+    chunk_text = "x" * 4000  # ≈1000 input tokens
+    cost = estimate_chunk_cost_usd(
+        provider="deepseek",
+        model="deepseek-chat",
+        mode=GenerationMode.SINGLE,
+        chunk_chars=len(chunk_text),
+    )
+
+    # DeepSeek-chat is cheap; one chunk single mode should be far below 1c
+    assert 0 < cost < 0.01
+
+
+def test_estimate_chunk_cost_higher_for_paraphrase():
+    from app.services.synthetic_qa import GenerationMode, estimate_chunk_cost_usd
+
+    chunk_chars = 4000
+    single = estimate_chunk_cost_usd("deepseek", "deepseek-chat", GenerationMode.SINGLE, chunk_chars)
+    paraphrase = estimate_chunk_cost_usd("deepseek", "deepseek-chat", GenerationMode.PARAPHRASE, chunk_chars)
+
+    assert paraphrase > single
+
+
+def test_estimate_chunk_cost_unknown_provider_returns_none():
+    from app.services.synthetic_qa import GenerationMode, estimate_chunk_cost_usd
+
+    cost = estimate_chunk_cost_usd("unicorn-llm", "model-x", GenerationMode.SINGLE, 4000)
+    assert cost is None
+
+
+def test_estimate_total_cost_sums_chunks():
+    from app.services.synthetic_qa import GenerationMode, estimate_total_cost_usd
+
+    chunk_chars = [4000, 4000, 8000]
+    total = estimate_total_cost_usd(
+        provider="deepseek",
+        model="deepseek-chat",
+        mode=GenerationMode.SINGLE,
+        chunk_chars=chunk_chars,
+    )
+
+    assert total is not None
+    assert total > 0

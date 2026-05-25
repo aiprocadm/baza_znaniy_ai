@@ -323,6 +323,77 @@ def parse_qa_response(raw: str, *, source_chunk_id: int) -> list[QAPair]:
     return pairs
 
 
+# USD per 1M tokens. Conservative figures from late-2024 public pricing;
+# refresh when a provider publishes new rates. Unknown (provider, model)
+# combinations return None so the CLI can disable the budget guard with
+# a clear warning rather than miscalculate silently.
+_PRICING_USD_PER_M: dict[tuple[str, str], tuple[float, float]] = {
+    ("deepseek", "deepseek-chat"): (0.014, 0.28),
+    ("groq", "llama-3.3-70b-versatile"): (0.59, 0.79),
+    ("openai", "gpt-4o-mini"): (0.15, 0.60),
+    ("openrouter", "deepseek/deepseek-chat"): (0.014, 0.28),
+}
+
+# Approximate output token budget per generation mode. Used together
+# with input-token estimates from chunk size to bound cost forecasts.
+_OUTPUT_TOKENS_PER_MODE: dict[GenerationMode, int] = {
+    GenerationMode.SINGLE: 200,
+    GenerationMode.PARAPHRASE: 500,
+    GenerationMode.MULTI_HOP: 350,
+}
+
+CHARS_PER_TOKEN_HEURISTIC = 4.0
+
+
+def _chars_to_tokens(chars: int) -> int:
+    return max(1, int(chars / CHARS_PER_TOKEN_HEURISTIC))
+
+
+def estimate_chunk_cost_usd(
+    provider: str,
+    model: str,
+    mode: GenerationMode,
+    chunk_chars: int,
+) -> float | None:
+    """Estimated dollar cost of generating one batch for one chunk.
+
+    Returns ``None`` when the (provider, model) tuple is not in the
+    pricing table; the CLI then warns and disables the budget guard.
+    """
+
+    pricing = _PRICING_USD_PER_M.get((provider, model))
+    if pricing is None:
+        return None
+    input_price, output_price = pricing
+
+    input_tokens = _chars_to_tokens(chunk_chars) + 200  # 200 ≈ prompt overhead
+    output_tokens = _OUTPUT_TOKENS_PER_MODE[mode]
+
+    cost = (
+        input_tokens * input_price / 1_000_000
+        + output_tokens * output_price / 1_000_000
+    )
+    return cost
+
+
+def estimate_total_cost_usd(
+    *,
+    provider: str,
+    model: str,
+    mode: GenerationMode,
+    chunk_chars: list[int],
+) -> float | None:
+    """Sum of :func:`estimate_chunk_cost_usd` across all chunks."""
+
+    total = 0.0
+    for chars in chunk_chars:
+        per_chunk = estimate_chunk_cost_usd(provider, model, mode, chars)
+        if per_chunk is None:
+            return None
+        total += per_chunk
+    return total
+
+
 __all__ = [
     "QAPair",
     "GenerationMode",
@@ -331,9 +402,12 @@ __all__ = [
     "self_consistent",
     "build_prompt",
     "parse_qa_response",
+    "estimate_chunk_cost_usd",
+    "estimate_total_cost_usd",
     "MIN_INSTRUCTION_CHARS",
     "MAX_INSTRUCTION_CHARS",
     "MIN_OUTPUT_CHARS",
     "MAX_OUTPUT_CHARS",
     "DEFAULT_CONSISTENCY_THRESHOLD",
+    "CHARS_PER_TOKEN_HEURISTIC",
 ]
