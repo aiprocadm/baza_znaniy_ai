@@ -127,3 +127,39 @@ def test_length_filter_rejects_long_output():
     )
 
     assert length_ok(pair) is False
+
+
+def test_refusal_filter_accepts_normal_answer():
+    from app.services.synthetic_qa import is_refusal
+
+    assert is_refusal("The procedure requires two signatures.") is False
+
+
+def test_refusal_filter_detects_english_refusal():
+    from app.services.synthetic_qa import is_refusal
+
+    assert is_refusal("I cannot answer this question.") is True
+    assert is_refusal("Sorry, I can't help with that.") is True
+    assert is_refusal("As an AI language model, I cannot...") is True
+
+
+def test_refusal_filter_detects_russian_refusal():
+    from app.services.synthetic_qa import is_refusal
+
+    assert is_refusal("Извините, я не могу ответить на этот вопрос.") is True
+    assert is_refusal("Я не имею возможности ответить.") is True
+    assert is_refusal("Как языковая модель, я не могу") is True
+
+
+def test_refusal_filter_is_case_insensitive():
+    from app.services.synthetic_qa import is_refusal
+
+    assert is_refusal("I CANNOT answer") is True
+    assert is_refusal("извините, я Не Могу") is True
+
+
+def test_refusal_filter_handles_empty_string():
+    from app.services.synthetic_qa import is_refusal
+
+    assert is_refusal("") is False
+    assert is_refusal("   ") is False

@@ -70,9 +70,40 @@ def length_ok(pair: QAPair) -> bool:
     return True
 
 
+_REFUSAL_MARKERS = (
+    # English
+    "i cannot answer",
+    "i can't answer",
+    "i can't help",
+    "i cannot help",
+    "as an ai language model",
+    "i am not able to",
+    "i'm not able to",
+    "i'm sorry, but i can't",
+    "sorry, i can't",
+    "sorry, i cannot",
+    # Russian
+    "извините, я не могу",
+    "я не могу ответить",
+    "я не имею возможности",
+    "как языковая модель, я не могу",
+    "к сожалению, я не могу",
+)
+
+
+def is_refusal(text: str) -> bool:
+    """Return True when *text* looks like a generic teacher refusal."""
+
+    if not text or not text.strip():
+        return False
+    lowered = text.lower()
+    return any(marker in lowered for marker in _REFUSAL_MARKERS)
+
+
 __all__ = [
     "QAPair",
     "length_ok",
+    "is_refusal",
     "MIN_INSTRUCTION_CHARS",
     "MAX_INSTRUCTION_CHARS",
     "MIN_OUTPUT_CHARS",
