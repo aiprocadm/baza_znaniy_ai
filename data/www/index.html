@@ -342,14 +342,14 @@
   <div class="wrap">
     <header>
       <h1 data-i18n="header.subtitle">KB · Корпоративная база знаний с нейропоиском</h1>
-      <div class="pill-row">
+      <div class="pill-row" data-debug-pill="1">
         <span id="health-pill" class="pill"><span class="dot"></span><span class="label">проверка…</span></span>
         <span id="llm-pill" class="pill" title="Активный LLM-провайдер"><span class="dot"></span><span class="label">LLM…</span></span>
         <span id="emb-pill" class="pill" title="Активный embedder"><span class="dot"></span><span class="label">emb…</span></span>
         <span id="rerank-pill" class="pill" title="Cross-encoder reranker"><span class="dot"></span><span class="label">rerank…</span></span>
         <span id="auth-pill" class="pill" title="Аутентификация"><span class="dot"></span><span class="label">auth…</span></span>
-        <button id="auth-toggle" type="button" class="secondary" style="padding:0.25rem 0.6rem;font-size:0.8rem;">Ключ</button>
       </div>
+      <button id="auth-toggle" type="button" class="secondary" style="padding:0.25rem 0.6rem;font-size:0.8rem;">Ключ</button>
     </header>
 
     <div id="auth-panel" class="card" hidden style="margin-bottom: 1rem;">
@@ -522,6 +522,19 @@
   <script src="/js/kb-auth.js"></script>
   <script src="/js/pdf-viewer.js" defer></script>
   <script>
+    // Debug-pill toggle: hide infra pills unless ?debug=1 is in the URL.
+    (function () {
+      try {
+        const params = new URLSearchParams(window.location.search);
+        if (!params.has('debug')) {
+          const pillRow = document.querySelector('[data-debug-pill]');
+          if (pillRow) pillRow.style.display = 'none';
+        }
+      } catch (_) {
+        /* URL parsing failure — leave pills visible */
+      }
+    })();
+
     const $ = (id) => document.getElementById(id);
     const apiBase = window.kbAuth.apiBase;
     const AUTH_STORAGE_KEY = window.kbAuth.storageKey;

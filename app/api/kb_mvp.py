@@ -596,8 +596,46 @@ def _parse_file_bytes_with_pages(filename: str, data: bytes) -> tuple[list[tuple
 
 
 @public.get("/health")
-def health() -> dict[str, Any]:
-    """Liveness probe with LLM, embedder, reranker and auth diagnostics."""
+def health(request: Request) -> dict[str, Any]:
+    """Liveness probe with LLM, embedder, reranker, auth, KB stats and compliance."""
+
+    import shutil as _shutil
+    import sqlite3 as _sqlite3
+
+    store = _store_for(request)
+    db_path = Path(store.db_path)
+    documents_count = 0
+    chunks_count = 0
+    db_size_bytes = 0
+    last_indexed_at: Optional[str] = None
+    if db_path.is_file():
+        db_size_bytes = db_path.stat().st_size
+        try:
+            conn = _sqlite3.connect(str(db_path))
+            try:
+                row = conn.execute("SELECT COUNT(*) FROM kb_documents").fetchone()
+                if row:
+                    documents_count = int(row[0])
+                row = conn.execute("SELECT COUNT(*) FROM kb_chunks").fetchone()
+                if row:
+                    chunks_count = int(row[0])
+                row = conn.execute(
+                    "SELECT MAX(created_at) FROM kb_documents"
+                ).fetchone()
+                if row and row[0]:
+                    last_indexed_at = str(row[0])
+            finally:
+                conn.close()
+        except _sqlite3.Error:
+            pass
+
+    try:
+        disk_target = db_path.parent if db_path.parent.is_dir() else Path.cwd()
+        disk_free_bytes = _shutil.disk_usage(str(disk_target)).free
+    except OSError:
+        disk_free_bytes = 0
+
+    compliance_mode = os.environ.get("KB_COMPLIANCE_MODE") or None
 
     return {
         "status": "ok",
@@ -605,6 +643,15 @@ def health() -> dict[str, Any]:
         "embedder": kb_embeddings.embedder_status(),
         "reranker": kb_rerank.reranker_status(),
         "auth": auth_status(),
+        "kb_stats": {
+            "documents_count": documents_count,
+            "chunks_count": chunks_count,
+            "db_size_bytes": db_size_bytes,
+            "disk_free_bytes": disk_free_bytes,
+            "last_indexed_at": last_indexed_at,
+        },
+        "compliance_mode": compliance_mode,
+        "compliance_implemented": False,
     }
 
 
