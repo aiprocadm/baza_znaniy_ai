@@ -48,4 +48,33 @@ class QAPair:
         )
 
 
-__all__ = ["QAPair"]
+MIN_INSTRUCTION_CHARS = 10
+MAX_INSTRUCTION_CHARS = 200
+MIN_OUTPUT_CHARS = 30
+MAX_OUTPUT_CHARS = 2000
+
+
+def length_ok(pair: QAPair) -> bool:
+    """Return True when *pair* is within configured length bounds.
+
+    Bounds come from the W1 acceptance criteria in
+    docs/superpowers/specs/2026-05-25-ml-strengthening-pack-b-design.md.
+    """
+
+    instruction = pair.instruction.strip()
+    output = pair.output.strip()
+    if not (MIN_INSTRUCTION_CHARS <= len(instruction) <= MAX_INSTRUCTION_CHARS):
+        return False
+    if not (MIN_OUTPUT_CHARS <= len(output) <= MAX_OUTPUT_CHARS):
+        return False
+    return True
+
+
+__all__ = [
+    "QAPair",
+    "length_ok",
+    "MIN_INSTRUCTION_CHARS",
+    "MAX_INSTRUCTION_CHARS",
+    "MIN_OUTPUT_CHARS",
+    "MAX_OUTPUT_CHARS",
+]

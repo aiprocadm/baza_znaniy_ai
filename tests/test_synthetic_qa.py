@@ -62,3 +62,68 @@ def test_qa_pair_from_jsonl_line_round_trip():
     parsed = QAPair.from_jsonl_line(original.to_jsonl_line())
 
     assert parsed == original
+
+
+def test_length_filter_accepts_in_range_pair():
+    from app.services.synthetic_qa import QAPair, length_ok
+
+    pair = QAPair(
+        instruction="What does the regulation say about Y?",
+        input="",
+        output="The regulation states that Y must be done following X procedure.",
+        source_chunk_id=1,
+    )
+
+    assert length_ok(pair) is True
+
+
+def test_length_filter_rejects_short_instruction():
+    from app.services.synthetic_qa import QAPair, length_ok
+
+    pair = QAPair(
+        instruction="Why?",  # 4 chars < 10
+        input="",
+        output="A long enough answer goes here to pass that threshold.",
+        source_chunk_id=1,
+    )
+
+    assert length_ok(pair) is False
+
+
+def test_length_filter_rejects_long_instruction():
+    from app.services.synthetic_qa import QAPair, length_ok
+
+    pair = QAPair(
+        instruction="x" * 201,  # 201 chars > 200
+        input="",
+        output="A long enough answer goes here to pass that threshold.",
+        source_chunk_id=1,
+    )
+
+    assert length_ok(pair) is False
+
+
+def test_length_filter_rejects_short_output():
+    from app.services.synthetic_qa import QAPair, length_ok
+
+    pair = QAPair(
+        instruction="What is the rule about Z?",
+        input="",
+        output="Short.",  # 6 chars < 30
+        source_chunk_id=1,
+    )
+
+    assert length_ok(pair) is False
+
+
+def test_length_filter_rejects_long_output():
+    from app.services.synthetic_qa import QAPair, length_ok
+
+    pair = QAPair(
+        instruction="What is the rule about Z?",
+        input="",
+        output="x" * 2001,  # 2001 chars > 2000
+        source_chunk_id=1,
+    )
+
+    assert length_ok(pair) is False
