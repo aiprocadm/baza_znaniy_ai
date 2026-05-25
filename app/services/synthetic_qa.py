@@ -229,6 +229,100 @@ def build_prompt(
     raise ValueError(f"Unsupported generation mode: {mode!r}")
 
 
+_FENCE_PATTERN = re.compile(r"^\s*```(?:json)?\s*(.*?)\s*```\s*$", re.DOTALL)
+
+
+def _strip_markdown_fence(text: str) -> str:
+    match = _FENCE_PATTERN.match(text)
+    return match.group(1) if match else text
+
+
+def _extract_first_json_payload(text: str) -> str | None:
+    """Return the first top-level JSON object or array substring in *text*.
+
+    The scan is string-aware: characters inside JSON string literals are
+    ignored so that brackets appearing in an ``output`` value (e.g.
+    ``[doc_chunk:3]``) do not derail the matcher.
+    """
+
+    for open_ch, close_ch in (("[", "]"), ("{", "}")):
+        depth = 0
+        start = -1
+        in_string = False
+        escape = False
+        for i, ch in enumerate(text):
+            if in_string:
+                if escape:
+                    escape = False
+                elif ch == "\\":
+                    escape = True
+                elif ch == '"':
+                    in_string = False
+                continue
+            if ch == '"':
+                in_string = True
+                continue
+            if ch == open_ch:
+                if depth == 0:
+                    start = i
+                depth += 1
+            elif ch == close_ch and depth > 0:
+                depth -= 1
+                if depth == 0 and start >= 0:
+                    return text[start : i + 1]
+    return None
+
+
+def parse_qa_response(raw: str, *, source_chunk_id: int) -> list[QAPair]:
+    """Parse a teacher response into zero or more :class:`QAPair` objects.
+
+    Tolerates markdown code fences and surrounding prose. Items missing
+    ``instruction`` or ``output`` are dropped silently. Returns an empty
+    list on unrecoverable malformed input.
+    """
+
+    if not raw or not raw.strip():
+        return []
+
+    candidate = _strip_markdown_fence(raw).strip()
+
+    try:
+        data = json.loads(candidate)
+    except json.JSONDecodeError:
+        extracted = _extract_first_json_payload(candidate)
+        if extracted is None:
+            return []
+        try:
+            data = json.loads(extracted)
+        except json.JSONDecodeError:
+            return []
+
+    if isinstance(data, dict):
+        items: list[dict[str, object]] = [data]
+    elif isinstance(data, list):
+        items = [item for item in data if isinstance(item, dict)]
+    else:
+        return []
+
+    pairs: list[QAPair] = []
+    for item in items:
+        instruction = str(item.get("instruction", "")).strip()
+        output = str(item.get("output", "")).strip()
+        if not instruction or not output:
+            continue
+        input_text = str(item.get("input", "")).strip()
+        pairs.append(
+            QAPair(
+                instruction=instruction,
+                input=input_text,
+                output=output,
+                source_chunk_id=int(source_chunk_id),
+            )
+        )
+
+    return pairs
+
+
 __all__ = [
     "QAPair",
     "GenerationMode",
@@ -236,6 +330,7 @@ __all__ = [
     "is_refusal",
     "self_consistent",
     "build_prompt",
+    "parse_qa_response",
     "MIN_INSTRUCTION_CHARS",
     "MAX_INSTRUCTION_CHARS",
     "MIN_OUTPUT_CHARS",

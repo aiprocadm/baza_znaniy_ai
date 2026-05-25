@@ -251,3 +251,77 @@ def test_build_prompt_multi_hop_with_single_chunk_raises():
 
     with _pytest.raises(ValueError):
         build_prompt(GenerationMode.MULTI_HOP, ["only one"], chunk_ids=[1])
+
+
+def test_parse_response_clean_object():
+    from app.services.synthetic_qa import parse_qa_response
+
+    raw = '{"instruction": "Q?", "input": "", "output": "A. [doc_chunk:1]"}'
+    pairs = parse_qa_response(raw, source_chunk_id=1)
+
+    assert len(pairs) == 1
+    assert pairs[0].instruction == "Q?"
+    assert pairs[0].output == "A. [doc_chunk:1]"
+    assert pairs[0].source_chunk_id == 1
+
+
+def test_parse_response_clean_array():
+    from app.services.synthetic_qa import parse_qa_response
+
+    raw = (
+        '[{"instruction":"Q1","input":"","output":"A [doc_chunk:5]"},'
+        '{"instruction":"Q2","input":"","output":"A [doc_chunk:5]"}]'
+    )
+    pairs = parse_qa_response(raw, source_chunk_id=5)
+
+    assert len(pairs) == 2
+    assert pairs[0].instruction == "Q1"
+    assert pairs[1].instruction == "Q2"
+
+
+def test_parse_response_strips_markdown_fence():
+    from app.services.synthetic_qa import parse_qa_response
+
+    raw = (
+        "```json\n"
+        '{"instruction": "Q?", "input": "", "output": "A. [doc_chunk:2]"}\n'
+        "```"
+    )
+    pairs = parse_qa_response(raw, source_chunk_id=2)
+
+    assert len(pairs) == 1
+    assert pairs[0].instruction == "Q?"
+
+
+def test_parse_response_recovers_first_json_object():
+    from app.services.synthetic_qa import parse_qa_response
+
+    raw = (
+        "Вот результат:\n"
+        '{"instruction": "Q?", "input": "", "output": "A. [doc_chunk:3]"}\n'
+        "Надеюсь подойдёт!"
+    )
+    pairs = parse_qa_response(raw, source_chunk_id=3)
+
+    assert len(pairs) == 1
+
+
+def test_parse_response_returns_empty_on_malformed():
+    from app.services.synthetic_qa import parse_qa_response
+
+    pairs = parse_qa_response("This is not JSON at all", source_chunk_id=1)
+    assert pairs == []
+
+
+def test_parse_response_skips_items_missing_required_fields():
+    from app.services.synthetic_qa import parse_qa_response
+
+    raw = (
+        '[{"instruction":"Q1","input":"","output":"A"},'
+        '{"instruction":"Q2","input":""},'  # missing output
+        '{"output":"A only","input":""}]'  # missing instruction
+    )
+    pairs = parse_qa_response(raw, source_chunk_id=9)
+
+    assert len(pairs) == 1
+    assert pairs[0].instruction == "Q1"
