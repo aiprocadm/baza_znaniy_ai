@@ -813,6 +813,48 @@ Dev-зависимости включают парсеры `openpyxl` и `python
 
 ## Как обучить свой LoRA-адаптер
 
+### Автогенерация датасета через teacher-LLM
+
+Вместо ручного составления `data/dev.jsonl` можно сгенерировать обучающие
+пары вопрос-ответ автоматически из уже загруженного KB-корпуса:
+
+```bash
+# DeepSeek (дешёвый teacher, ~$0.50 за 1000 Q&A)
+export DEEPSEEK_API_KEY=sk-...
+python -m scripts.generate_synthetic_qa \
+    --corpus var/data/kb_mvp.sqlite \
+    --provider deepseek \
+    --mode single \
+    --output data/lora/synthetic.jsonl \
+    --max-budget-usd 2.0
+```
+
+Поддерживаемые режимы (`--mode`):
+
+| Режим | Описание |
+|------|----------|
+| `single` | Один Q&A на чанк (быстро, минимально) |
+| `paraphrase` | Три перефразирования одного вопроса (аугментация) |
+| `multi-hop` | Вопрос, требующий объединения 2-3 чанков (сложнее) |
+
+Полезные флаги:
+
+- `--resume` — продолжить с того места, где остановилась прошлая
+  запуск (читает уже записанный JSONL, пропускает обработанные чанки).
+- `--document-id N` — генерировать только по одному документу.
+- `--no-self-consistency` — отключить проверку повторной генерации
+  (быстрее, но качество ниже).
+- `--no-budget-guard` — снять ограничение по стоимости (use with care).
+
+Сгенерированный JSONL совместим с `scripts/validate_dataset.py` и
+`scripts/train_lora.py` без преобразований:
+
+```bash
+python scripts/validate_dataset.py \
+    --path data/lora/synthetic.jsonl \
+    --base-model meta-llama/Llama-3-8b-Instruct
+```
+
 Ниже — минимальный путь от данных до подключенного адаптера. Все команды
 рассчитаны на Linux/macOS; в PowerShell используйте эквиваленты.
 
