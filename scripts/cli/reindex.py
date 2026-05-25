@@ -111,9 +111,7 @@ def reindex(
             "text TEXT NOT NULL, "
             "embedding BLOB NOT NULL, "
             "embedder TEXT NOT NULL, "
-            "dim INTEGER NOT NULL"
-            + (", page_number INTEGER" if has_page else "")
-            + ")"
+            "dim INTEGER NOT NULL" + (", page_number INTEGER" if has_page else "") + ")"
         )
         conn.execute(create_sql)
 
@@ -147,9 +145,7 @@ def reindex(
         # Atomic swap of old → new chunks
         conn.execute("BEGIN")
         try:
-            conn.execute(
-                "DELETE FROM kb_chunks WHERE document_id >= ?", (from_document_id,)
-            )
+            conn.execute("DELETE FROM kb_chunks WHERE document_id >= ?", (from_document_id,))
             cols = "document_id, chunk_index, text, embedding, embedder, dim" + (
                 ", page_number" if has_page else ""
             )

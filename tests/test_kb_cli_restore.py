@@ -56,9 +56,7 @@ def test_restore_into_empty_target(runner: CliRunner, tmp_path: Path) -> None:
     assert (target / "kb_files" / "1.pdf").is_file()
 
 
-def test_restore_replace_requires_yes_when_non_empty(
-    runner: CliRunner, tmp_path: Path
-) -> None:
+def test_restore_replace_requires_yes_when_non_empty(runner: CliRunner, tmp_path: Path) -> None:
     """Non-empty target without --yes → aborts."""
     src = _make_kb(tmp_path / "src")
     archive = tmp_path / "out.tar.gz"
@@ -99,9 +97,7 @@ def test_restore_replace_with_yes_creates_backup_of_blobs(
     assert (siblings[0] / "old.pdf").is_file()
 
 
-def test_restore_merge_keeps_existing_files(
-    runner: CliRunner, tmp_path: Path
-) -> None:
+def test_restore_merge_keeps_existing_files(runner: CliRunner, tmp_path: Path) -> None:
     """--mode merge does not overwrite existing files; only adds new ones."""
     src = _make_kb(tmp_path / "src")
     archive = tmp_path / "out.tar.gz"
@@ -121,9 +117,7 @@ def test_restore_merge_keeps_existing_files(
     assert (target / "kb_files" / "1.pdf").is_file()
 
 
-def test_restore_warns_on_embedder_mismatch(
-    runner: CliRunner, tmp_path: Path
-) -> None:
+def test_restore_warns_on_embedder_mismatch(runner: CliRunner, tmp_path: Path) -> None:
     """Different embedder in source vs target → warning printed but proceed."""
     src = _make_kb(tmp_path / "src", embedder="ollama:nomic")
     archive = tmp_path / "out.tar.gz"

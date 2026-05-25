@@ -16,6 +16,7 @@ from app.services.kb_store import KnowledgeBaseStore
 def app_with_store(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
     from app.core import config as _cfg
+
     if hasattr(_cfg, "get_settings"):
         _cfg.get_settings.cache_clear()
 

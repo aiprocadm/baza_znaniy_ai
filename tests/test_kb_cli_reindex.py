@@ -40,9 +40,7 @@ def _count_chunks(db: Path) -> int:
 def _embedder_distribution(db: Path) -> dict[str, int]:
     conn = sqlite3.connect(str(db))
     try:
-        rows = conn.execute(
-            "SELECT embedder, COUNT(*) FROM kb_chunks GROUP BY embedder"
-        ).fetchall()
+        rows = conn.execute("SELECT embedder, COUNT(*) FROM kb_chunks GROUP BY embedder").fetchall()
         return {row[0]: row[1] for row in rows}
     finally:
         conn.close()
@@ -78,9 +76,7 @@ def test_reindex_swaps_embedder(runner: CliRunner, populated_db: Path):
     assert all(e.startswith("hash") for e in dist.keys()), dist
 
 
-def test_reindex_atomic_rollback_on_failure(
-    runner: CliRunner, populated_db: Path, monkeypatch
-):
+def test_reindex_atomic_rollback_on_failure(runner: CliRunner, populated_db: Path, monkeypatch):
     """If embedding fails midway, old kb_chunks survive unchanged."""
     before_count = _count_chunks(populated_db)
 
@@ -101,16 +97,17 @@ def test_reindex_atomic_rollback_on_failure(
     assert _count_chunks(populated_db) == before_count
 
 
-def test_reindex_resume_skips_done_documents(
-    runner: CliRunner, populated_db: Path
-):
+def test_reindex_resume_skips_done_documents(runner: CliRunner, populated_db: Path):
     """--from-document-id N processes only docs with id >= N."""
     result = runner.invoke(
         reindex_app,
         [
-            "--db-path", str(populated_db),
-            "--embedder", "hash",
-            "--from-document-id", "2",
+            "--db-path",
+            str(populated_db),
+            "--embedder",
+            "hash",
+            "--from-document-id",
+            "2",
             "--force-yes",
         ],
     )

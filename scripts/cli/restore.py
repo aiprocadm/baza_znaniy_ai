@@ -60,9 +60,7 @@ def _is_non_empty(data_dir: Path) -> bool:
 
 @restore_app.callback(invoke_without_command=True)
 def restore(
-    archive: Path = typer.Argument(
-        ..., help="Path to the .tar.gz produced by `kb-cli backup`."
-    ),
+    archive: Path = typer.Argument(..., help="Path to the .tar.gz produced by `kb-cli backup`."),
     data_dir: Path = typer.Option(
         Path("var/data"),
         "--data-dir",
@@ -102,11 +100,7 @@ def restore(
 
     src_embedder = manifest.get("embedder_used", "unknown")
     tgt_embedder = _detect_target_embedder(data_dir / "kb_mvp.sqlite")
-    if (
-        src_embedder != "unknown"
-        and tgt_embedder != "unknown"
-        and src_embedder != tgt_embedder
-    ):
+    if src_embedder != "unknown" and tgt_embedder != "unknown" and src_embedder != tgt_embedder:
         typer.echo(
             f"WARNING: embedder mismatch — archive was created with {src_embedder!r}, "
             f"target has {tgt_embedder!r}. Search may need reindex after restore."

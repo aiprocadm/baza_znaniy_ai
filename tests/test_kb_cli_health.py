@@ -54,11 +54,14 @@ def test_health_warn_low_disk(runner: CliRunner, monkeypatch):
             return {
                 "status": "ok",
                 "kb_stats": {
-                    "documents_count": 1, "chunks_count": 1,
-                    "db_size_bytes": 1, "disk_free_bytes": 50_000_000,
+                    "documents_count": 1,
+                    "chunks_count": 1,
+                    "db_size_bytes": 1,
+                    "disk_free_bytes": 50_000_000,
                     "last_indexed_at": None,
                 },
-                "compliance_mode": None, "compliance_implemented": False,
+                "compliance_mode": None,
+                "compliance_implemented": False,
                 "llm": {"selected": None},
             }
 
