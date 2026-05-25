@@ -11,12 +11,16 @@ from __future__ import annotations
 
 import typer
 
+from scripts.cli.backup import backup_app
+
 app = typer.Typer(
     name="kb-cli",
     help="Operations CLI for KB.AI (backup, restore, reindex, health).",
     add_completion=False,
     no_args_is_help=True,
 )
+
+app.add_typer(backup_app, name="backup")
 
 
 @app.callback()
