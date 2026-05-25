@@ -66,7 +66,7 @@ Vision-документ (2026-05-22) определил 6-месячный roadm
 ├── CONTRIBUTING.md                      ← NEW
 ├── SECURITY.md                          ← NEW
 ├── install.sh                           ← NEW (one-click для Linux/macOS)
-├── .github/workflows/ci.yml             ← NEW (lint + tests on PR)
+├── .github/workflows/ci.yml             ← EXISTS (verify covers kb-cli; add badge in README)
 ├── docs/screenshots/
 │   ├── chat-with-citations.png          ← NEW
 │   ├── pdf-viewer-modal.png             ← NEW
@@ -167,7 +167,7 @@ Vision-документ (2026-05-22) определил 6-месячный roadm
 | 3.2 | CONTRIBUTING.md | 1 | Dev-setup ≤5 строк; conventions (Conv. Commits, ruff/black, pytest); «Что НЕ принимаем» |
 | 3.3 | SECURITY.md | 0.5 | aiproc.adm@gmail.com; no bug bounty; 30-day grace; known limitations |
 | 3.4 | install.sh | 2 | Python 3.12+ check; idempotent `pip install .[runtime]`; copy `.env.example→.env`; финальный echo URL; `--dry-run` flag |
-| 3.5 | .github/workflows/ci.yml | 2 | ubuntu-latest + python-3.12; checkout/setup-python/install/lint/pytest; PR-only triggers; badge в README |
+| 3.5 | CI badge + verify ci.yml covers kb-cli | 1 | Existing `.github/workflows/ci.yml` job `python-ci` уже делает lint+pytest на PR. Тест-файлы `tests/test_kb_cli_*.py` автоматически попадают в `pytest -q`. Добавить badge `![CI](...)` в README; smoke-проверка что новый Typer-dep не ломает `python-ci`. |
 | 3.6 | ROADMAP.md | 1 | «KB.AI is a side-project; не startup»; Phase 2 vision'а deferred; compliance mode + env-flag mention |
 | 3.7 | .env.example + KB_COMPLIANCE_MODE | 0.5 | Секция «# Compliance Mode (Phase 2 заготовка)» + /health эхо |
 | 3.8 | release_checklist.md + .gitignore + tag v1.0.0 | 1 | `docs/release_checklist.md` — manual smoke шаги (clean Ubuntu VM, install.sh, upload PDF, ask, click citation); `.gitignore` добавляет `var/data/backups/`; CHANGELOG в GitHub Release; тег v1.0.0 на финальном коммите |
@@ -187,10 +187,10 @@ Vision-документ (2026-05-22) определил 6-месячный roadm
 |---|---|
 | 1 — Internal solidity | 12 |
 | 2 — Presentable | 10 |
-| 3 — OSS-ready | 8.5 |
+| 3 — OSS-ready | 7.5 |
 | 4 — Publication (opt) | 4 |
-| **Итого без Sprint 4** | **30.5** |
-| **Итого с Sprint 4** | **34.5** |
+| **Итого без Sprint 4** | **29.5** |
+| **Итого с Sprint 4** | **33.5** |
 
 Соответствует диапазону 30-40ч из Approach C ✓.
 
