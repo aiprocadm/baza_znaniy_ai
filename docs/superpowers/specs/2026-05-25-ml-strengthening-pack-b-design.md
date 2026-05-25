@@ -1,9 +1,9 @@
-# ML Strengthening — Pack B Design
+# ML Strengthening — Pack B+ Design
 
 **Date:** 2026-05-25
 **Author scope:** technical design for ML capability uplift in KB.AI
 **Status:** Design document. Subordinate to `2026-05-22-project-vision-design.md` (LoRA as main moat).
-**Decision context:** Technical analysis of existing ML stack identified 7 critical gaps and 11 secondary improvements. Pack B (8-10 weeks) bundles the 9 most valuable items into a coherent ML platform uplift.
+**Decision context:** Technical analysis of existing ML stack identified 7 critical gaps and 11 secondary improvements. Pack B+ bundles the 9 critical-gap workstreams (W1-W10) plus 4 commercially-valuable items from former Pack C (W11-W14: multi-adapter composition, structured outputs, model registry, knowledge distillation) into a coherent ML platform uplift. Items reserved for hypothetical future expansion (TIES/DARE merging, QAT, multi-node DeepSpeed) remain out of scope.
 
 > Этот документ описывает **технические доработки ML-стека**, не привязываясь к бизнес-срокам и финансам. Реализация может быть растянута/сжата под доступные ресурсы. Документ — это **что и как делать**, не **когда успеть**.
 
@@ -38,9 +38,9 @@ KB.AI уже имеет нетривиальный LoRA-пайплайн:
 | G6 | No continual / incremental fine-tuning | Each retrain starts from scratch — wasted effort |
 | G7 | No Auto-Train UI — only CLI | LoRA stays a dev-only feature, not productized |
 
-## 3. Pack B scope — 9 workstreams
+## 3. Pack B+ scope — 14 workstreams
 
-Pack B implements all 7 critical gaps plus 2 supporting items (MLflow tracking, Golden-set regression). Pack A (gaps G1, G4, G7 + regression test) is **strict subset** of Pack B.
+Pack B+ implements all 7 critical gaps (W1, W2, W3, W4, W5, W6, W7), 2 supporting items (W8 MLflow, W10 Golden-set regression), the Auto-Train UI orchestrator (W9), plus 4 commercially-valuable items lifted from former Pack C (W11 multi-adapter composition, W12 structured outputs, W13 model registry, W14 knowledge distillation). Pack A (gaps G1, G4, G7 + regression test) is **strict subset** of Pack B+.
 
 ### Workstream 1: Synthetic data generation (closes G1)
 
@@ -373,6 +373,181 @@ New flags:
 - Hot-load is rejected when synthetic regression is introduced (test: load adapter trained on irrelevant data, expect rejection)
 - Hot-load passes when adapter quality is preserved
 
+---
+
+### Workstream 11: Multi-adapter composition (Pack C item C1)
+
+**Goal:** activate 2-3 LoRA adapters simultaneously with independent scale factors, allowing combination of orthogonal skills (e.g. "company glossary" + "concise response style" + "legal terminology").
+
+**Architectural challenge:** `llama.cpp` supports hot-swap of a single adapter via `set_adapter()` but does NOT natively support multi-adapter composition with weights. Two paths:
+
+1. **Transformers/PEFT path** (training + experimentation):
+   - PEFT's `model.add_weighted_adapter([name_a, name_b], weights=[1.0, 0.6], adapter_name="composed")` produces a merged in-memory model
+   - Useful during training and CPU inference
+   - Slower than llama.cpp at runtime
+
+2. **Pre-merged GGUF path** (production inference):
+   - Compose adapters once via PEFT, then export the merged result as a single new adapter
+   - Convert to GGUF and load in llama.cpp normally
+   - Fast inference, but composition is "frozen" until next merge
+
+**Changes:**
+- New file: `app/llm/transformers_provider.py` — PEFT-based provider supporting `load_adapters(names, weights)`
+- Extension to `app/llm/lora_runtime.py`:
+  - `AdapterSlot` dataclass with `name`, `scale`, `path`
+  - `_ACTIVE_ADAPTERS: list[AdapterSlot]` replaces single `_ACTIVE_ADAPTER`
+  - `compose_adapters(slots)` — assembles via PEFT, optionally exports merged GGUF for llama.cpp
+- New file: `scripts/compose_adapters.py` — CLI for pre-merging adapters
+- New API: `POST /api/v1/lora/compose` with body `{"slots": [{"name": "glossary", "scale": 1.0}, {"name": "concise", "scale": 0.6}]}`
+- UI: in Auto-Train UI (W9), add "Compose adapters" step — multi-select adapters with scale sliders
+
+**Acceptance:**
+- Composing 2 adapters (glossary + style) produces a model that exhibits behaviour of both, verified via RAGAS faithfulness (must preserve glossary's domain accuracy) AND style metrics (response length distribution shifted toward concise)
+- Pre-merged GGUF export round-trips through llama.cpp with no functional regression
+
+---
+
+### Workstream 12: Structured outputs (Pack C item C2)
+
+**Goal:** force LLM to produce output strictly matching a user-specified JSON schema or grammar — critical for "AI fills our forms" use cases (Н-1 reports, SOUT cards, legal extracts).
+
+**Two implementation paths:**
+
+1. **`outlines` library (default, universal):**
+   - `outlines.generate.json(model, pydantic_or_schema)` → guaranteed valid JSON
+   - Works with both `transformers` and `llama.cpp` backends
+   - More flexible (regex, choice, format constraints)
+
+2. **`llama.cpp grammar.gbnf` (fast, native):**
+   - Define grammar file in GBNF (GGML BNF) syntax
+   - Pass as `grammar` parameter to `Llama.create_completion()`
+   - Lower overhead, llama.cpp-only
+
+**Changes:**
+- New file: `app/services/structured_outputs.py` — abstraction over both backends
+- New API: `POST /api/kb/ask/structured` with body:
+  ```json
+  {
+    "question": "Составь акт Н-1 по этому инциденту",
+    "context_filter": {"category": "incidents"},
+    "schema": {
+      "type": "object",
+      "properties": {
+        "actNumber": {"type": "string"},
+        "victim": {"type": "string"},
+        "date": {"type": "string", "format": "date"},
+        "circumstances": {"type": "string"},
+        "citations": {"type": "array", "items": {"type": "object", "properties": {"doc": {"type": "string"}, "page": {"type": "integer"}}}}
+      },
+      "required": ["actNumber", "victim", "date", "citations"]
+    }
+  }
+  ```
+- Response: validated JSON matching the schema
+- New file: `data/schemas/` — repository of pre-built schemas for common domains (incident reports, contract extracts, SOP summaries)
+- UI: "Schemas" tab in Operations Console — manage / preview / test schemas
+
+**Integration with RAG:** structured generation runs on the RAG-aware tuned model from W3 — the model uses retrieved context to fill the JSON, with citations as a required field.
+
+**Acceptance:**
+- 95%+ requests produce JSON that validates against the schema
+- Citation accuracy (faithfulness) preserved vs. free-text generation (RAGAS check)
+- Both `outlines` and `grammar.gbnf` paths work for the same schema
+
+---
+
+### Workstream 13: Model registry & hot-switch (Pack C item C3)
+
+**Goal:** support multiple base models on the same server with hot-switch between them, without process restart.
+
+**Current state:** `LLM_MODEL_PATH=./models/model.gguf` hardcoded in settings; switch requires editing env + restart.
+
+**Changes:**
+
+1. **Model registry structure** — analogous to existing LoRA registry:
+   ```
+   var/models/
+     saiga-llama3-8b/
+       manifest.json           # {"name", "format": "gguf", "base_arch": "llama", "ctx": 8192}
+       model.gguf
+     qwen2.5-7b-instruct/
+       manifest.json
+       model.gguf
+     tinyllama-1.1b/
+       manifest.json
+       model.gguf
+   ```
+
+2. **`app/llm/model_registry.py`** — new module:
+   - `list_models()` → list[ModelInfo]
+   - `activate_model(name)` → reload llama.cpp with new model_path
+   - Handles graceful shutdown of current model + reload + restore active adapter
+
+3. **API endpoints:**
+   - `GET /api/v1/models` — list available
+   - `POST /api/v1/models/{name}/activate` — hot-switch (blocks 10-30s during reload)
+   - `GET /api/v1/models/active` — current active model
+
+4. **Per-workspace default:** workspace can pin a preferred model (extends future workspace model from Pack B vision); falls back to global default if unset.
+
+5. **UI:** in Operations Console, replace static "model" display chip with dropdown selector showing all registered models, with active one highlighted.
+
+**Adapter compatibility:** during switch, the active LoRA adapter is unloaded if `adapter.base != new_model.name`. Auto-Train UI must validate base-model compatibility before allowing adapter activation.
+
+**Acceptance:**
+- Server reports 3 registered models via `GET /api/v1/models`
+- Switching from Saiga to Qwen takes <30s and the next `/api/kb/ask` request uses the new model
+- LoRA adapter trained on Saiga is rejected with HTTP 409 when active model is Qwen
+
+---
+
+### Workstream 14: Knowledge distillation (Pack C item C5)
+
+**Goal:** distill a large teacher model (DeepSeek-V3 or Llama-3-70B) into a smaller student (Saiga-3B or Phi-3-mini) on the customer's domain corpus, producing a fast on-premise-friendly model with teacher-level quality.
+
+**Two distillation modes:**
+
+1. **Hard distillation** (default, supported by all teacher APIs):
+   - Generate large-scale Q&A dataset from corpus using teacher (extends W1 scale: 50k+ examples)
+   - Train student via SFT on (input, teacher_output) pairs
+   - Loss: standard CrossEntropy
+
+2. **Soft distillation** (requires teacher with logits access — only some local teachers):
+   - Capture teacher's full logit distribution per token
+   - Train student with combined loss: `α * KL(student_logits, teacher_logits) + (1-α) * CrossEntropy(student, target)`
+   - Higher quality, requires teacher model running locally (not API)
+
+**Default implementation:** hard distillation, because public APIs (DeepSeek, Groq, OpenAI, OpenRouter) do not expose token logits. Soft distillation enabled when teacher is local llama.cpp model.
+
+**Changes:**
+
+1. **`scripts/distill_dataset.py`** — large-scale extension of W1's synthetic generator:
+   - Default: 50,000 Q&A pairs (vs. W1's typical 1000)
+   - Cost estimate: $25-50 via DeepSeek-V3 (~$0.0005-0.001 per example)
+   - Diversity boost: aggressive paraphrase modes, multi-hop questions, edge cases
+
+2. **`scripts/train_distillation.py`** — student training:
+   - Base model: configurable (Saiga-3B, Phi-3-mini, TinyLlama)
+   - Loss mode: `--mode hard` (default) or `--mode soft` (requires `--teacher-path`)
+   - LoRA OR full fine-tune (config flag)
+   - MLflow integration (W8)
+
+3. **Quality validation:**
+   - Student must achieve ≥85% of teacher's RAGAS faithfulness on held-out test
+   - Latency improvement: student inference 5-10x faster than teacher (target metric)
+
+4. **Integration with model registry (W13):**
+   - Distilled student lands in `var/models/<workspace>-distilled-saiga-3b/`
+   - Becomes available for activation alongside base models
+   - Manifest records `teacher` field for provenance
+
+**Practical constraint:** distillation works best for narrow domains (single workspace's corpus). Cross-workspace distillation is out of scope.
+
+**Acceptance:**
+- Distillation pipeline: 50k Q&A generation completes in <4h for ~$30
+- Student Saiga-3B trained on distilled data achieves RAGAS faithfulness ≥ 0.85 * teacher score
+- Student inference latency on CPU is <3s per question (vs. teacher >30s or API ~1-2s + network)
+
 ## 4. Data flow
 
 ```
@@ -402,7 +577,17 @@ New flags:
       │
       ├──> [W8: MLflow] ──> all runs tracked
       │
-      └──> [W9: Auto-Train UI] ──> orchestrates W1-W7 visually
+      ├──> [W11: compose_adapters.py] ──> merged composite adapter
+      │       │
+      │       └──> [W13: model_registry / hot-switch] ──> active model + adapter slots
+      │
+      ├──> [W12: structured_outputs.py] ──> /ask/structured endpoint
+      │
+      ├──> [W14: distill_dataset.py (50k scale)] ──> distilled_qa.jsonl
+      │       │
+      │       └──> [W14: train_distillation.py] ──> student model in registry
+      │
+      └──> [W9: Auto-Train UI] ──> orchestrates W1-W7, W11-W14 visually
 ```
 
 ## 5. Dependencies and order
@@ -417,12 +602,16 @@ Workstreams have explicit ordering due to data dependencies:
 6. **W4 (DPO)** — fifth; depends on W3 (DPO needs SFT base)
 7. **W7 (continual)** — sixth; depends on W4
 8. **W8 (MLflow)** — can be added anytime in parallel
-9. **W9 (Auto-Train UI)** — last; wraps everything; depends on W1-W7 being functional
-10. **W10 (regression)** — added in parallel with W5
+9. **W13 (model registry)** — seventh; needed before W11 multi-model composition; can also run in parallel after W2
+10. **W11 (multi-adapter composition)** — eighth; depends on W4 (DPO adapters available) and W13 (registry to source models)
+11. **W12 (structured outputs)** — ninth; depends on W3 (RAG-aware model) for citations field
+12. **W14 (knowledge distillation)** — tenth; depends on W1 (data generator), W5 (RAGAS for student validation), W13 (registry for student deployment)
+13. **W9 (Auto-Train UI)** — last UI-side; wraps W1-W7 + W11-W14; depends on all functional
+14. **W10 (regression)** — added in parallel with W5
 
 ## 6. Files to be created or modified
 
-**New files:**
+**New files (W1-W10):**
 - `scripts/generate_synthetic_qa.py`
 - `scripts/generate_rag_dataset.py`
 - `scripts/generate_dpo_pairs.py`
@@ -440,27 +629,40 @@ Workstreams have explicit ordering due to data dependencies:
 - Frontend: training wizard page (5 steps)
 - `accelerate_fsdp.yaml`
 
+**New files (W11-W14 from Pack C additions):**
+- `app/llm/transformers_provider.py` — PEFT-based provider for multi-adapter composition (W11)
+- `scripts/compose_adapters.py` — CLI for pre-merging adapter weights (W11)
+- `app/services/structured_outputs.py` — abstraction over outlines + grammar.gbnf (W12)
+- `data/schemas/` — pre-built JSON schemas for common domains (W12)
+- `app/llm/model_registry.py` — model registry + hot-switch logic (W13)
+- `scripts/distill_dataset.py` — large-scale Q&A generation for distillation (W14)
+- `scripts/train_distillation.py` — student model trainer with hard/soft modes (W14)
+- `var/models/` — directory for registered base models (W13, W14 student outputs)
+
 **Modified files:**
 - `scripts/train_lora.py` — auto chat template, architecture-aware target modules, `--resume-from-adapter`, `--ewc-lambda`, `--prompt-mode {generic, rag}`, MLflow integration
 - `scripts/eval_lora.py` — MLflow integration; mark EM/ROUGE as deprecated
 - `app/services/kb_embeddings.py` — `local` backend
-- `app/services/lora_manager.py` — regression check before activation
+- `app/services/lora_manager.py` — regression check before activation; multi-slot adapter activation (W11)
 - `app/services/reindex_service.py` — `--embedder-changed` flag
-- `app/api/kb_mvp.py` — `/messages/{id}/feedback`, `/feedback/export`
-- `requirements-train.txt` — add `trl`, `ragas`, `mlflow`, `sentence-transformers[train]`, `accelerate`
-- `requirements-runtime.txt` — add `mlflow-skinny` (for runtime logging only)
+- `app/api/kb_mvp.py` — `/messages/{id}/feedback`, `/feedback/export`, `/ask/structured` (W12)
+- `app/api/v1/routes_lora.py` — `/lora/compose` endpoint (W11)
+- `app/llm/lora_runtime.py` — `AdapterSlot` dataclass, `_ACTIVE_ADAPTERS` list (W11)
+- `app/llm/llama_cpp_provider.py` — graceful close + reload for hot-switch (W13)
+- `app/core/config.py` — replace single `LLM_MODEL_PATH` with registry-aware resolution (W13)
+- `requirements-train.txt` — add `trl`, `ragas`, `mlflow`, `sentence-transformers[train]`, `accelerate`, `outlines`, `mergekit` (W11 alternative), `peft[train]`
+- `requirements-runtime.txt` — add `mlflow-skinny` (for runtime logging only), `outlines` (W12)
 
-## 7. Out of scope (Pack C territory)
+## 7. Out of scope (future hypothetical packs)
 
-Explicitly excluded — to be addressed in a separate future spec:
+Explicitly excluded from Pack B+ — to be addressed in separate future specs only if customer demand emerges:
 
-- Multi-adapter composition (loading 2+ LoRAs with different scales simultaneously)
-- Structured outputs via `outlines` / llama.cpp grammar
-- Quantization-Aware Training (QAT)
-- Knowledge distillation from large teacher to small student
-- TIES / DARE adapter merging
-- Distributed training beyond FSDP (DeepSpeed ZeRO-3, multi-node)
-- Model registry with hot-swap base model
+- **TIES / DARE adapter merging** (`mergekit`) — internal optimisation, not customer-visible. May be revisited if multi-adapter composition (W11) hits performance limits.
+- **Quantization-Aware Training (QAT)** — +2-5% quality after Q4_K_M quantisation. Deep ML expertise required, low customer visibility.
+- **Distributed training beyond FSDP** (DeepSpeed ZeRO-3, multi-node) — most customers lack multi-node infrastructure. Pack B's FSDP (single-node multi-GPU) covers the realistic 99% case.
+- **Cross-workspace knowledge distillation** — Pack B+ supports per-workspace distillation (W14); cross-workspace transfer would require additional privacy guarantees and is out of scope.
+- **Reward modelling for RLHF** (full PPO/RLHF loop) — DPO (W4) is the modern replacement and is sufficient for production.
+- **Multi-modal extension** (images, audio) — KB.AI is text-focused; multi-modal would be a different product.
 
 ## 8. Risks and mitigation
 
@@ -473,6 +675,11 @@ Explicitly excluded — to be addressed in a separate future spec:
 | FSDP setup complexity for 70B | Document multi-GPU setup in dedicated runbook; provide reference `accelerate_fsdp.yaml` |
 | Auto-Train UI exposes hyperparameters that confuse non-ML users | Presets only ("Быстрый/Сбалансированный/Качественный/Максимум"); advanced mode hidden behind toggle |
 | MLflow remote server overhead | Default to local file backend `./var/mlflow`; remote optional |
+| Multi-adapter composition (W11) — llama.cpp limitations on simultaneous adapters | Pre-merge via PEFT + GGUF export (frozen composition for production); transformers backend for interactive experimentation |
+| Structured outputs (W12) — schema-constrained generation degrades quality | A/B test with/without schema on golden set; allow "soft" mode (validate but not enforce) for sensitive prompts |
+| Model hot-switch (W13) — 10-30s blocking reload disrupts users | Display reload progress in UI; queue incoming requests with timeout; document expected downtime per switch |
+| Knowledge distillation (W14) — student fails to match teacher quality | Validate via RAGAS BEFORE adding to registry; document achievable quality ceilings per student size (3B → 85%, 1.5B → 70%) |
+| Distillation API costs (W14) — unexpected spend | Budget cap in CLI (`--max-budget-usd`); cost preview before run; refuse if exceeds |
 
 ## 9. Success metrics (post Pack B)
 
