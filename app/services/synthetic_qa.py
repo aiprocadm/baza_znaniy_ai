@@ -8,7 +8,7 @@ import re
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Protocol
+from typing import Iterator, Protocol
 
 LOGGER = logging.getLogger(__name__)
 
@@ -504,6 +504,34 @@ def load_processed_chunk_ids(path: Path) -> set[int]:
     return processed
 
 
+def iter_chunks(store, *, document_id: int | None = None) -> Iterator[tuple[int, str]]:
+    """Yield ``(chunk_id, text)`` for every chunk stored in *store*.
+
+    ``store`` is a :class:`KnowledgeBaseStore` instance. We bypass the
+    higher-level ``search``/``list_documents`` APIs because we want
+    every chunk verbatim, not ranked or paginated. ``document_id``
+    restricts iteration to one document when set.
+    """
+
+    sql = "SELECT id, text FROM kb_chunks"
+    params: tuple = ()
+    if document_id is not None:
+        sql += " WHERE document_id = ?"
+        params = (int(document_id),)
+    sql += " ORDER BY id ASC"
+
+    # KnowledgeBaseStore exposes a private _connect helper used by all
+    # its query methods. We reuse it instead of opening a new sqlite3
+    # connection so locking and pragmas stay consistent.
+    with store._connect() as conn:  # noqa: SLF001 — intentional reuse of internal connection
+        for row in conn.execute(sql, params):
+            chunk_id = int(row[0])
+            text = str(row[1] or "").strip()
+            if not text:
+                continue
+            yield chunk_id, text
+
+
 __all__ = [
     "QAPair",
     "GenerationMode",
@@ -517,6 +545,7 @@ __all__ = [
     "estimate_chunk_cost_usd",
     "estimate_total_cost_usd",
     "load_processed_chunk_ids",
+    "iter_chunks",
     "MIN_INSTRUCTION_CHARS",
     "MAX_INSTRUCTION_CHARS",
     "MIN_OUTPUT_CHARS",

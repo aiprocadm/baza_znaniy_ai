@@ -602,3 +602,40 @@ def test_jsonl_output_is_consumed_by_validate_dataset(tmp_path):
     for i, example in enumerate(loaded, start=1):
         assert example.instruction == f"What is rule {i}?"
         assert example.output.startswith(f"Rule {i}")
+
+
+def test_iter_chunks_yields_all_rows_from_store(tmp_path):
+    """iter_chunks reads chunks directly via a KnowledgeBaseStore."""
+    from app.services.kb_store import KnowledgeBaseStore
+    from app.services.synthetic_qa import iter_chunks
+
+    db_path = tmp_path / "kb.sqlite"
+    store = KnowledgeBaseStore(db_path=db_path)
+    store.add_document(
+        title="Regulation A",
+        text="Section one talks about safety procedures. " * 20
+        + "Section two covers reporting. " * 20,
+    )
+
+    chunks = list(iter_chunks(store))
+
+    assert len(chunks) >= 2
+    for chunk_id, chunk_text in chunks:
+        assert isinstance(chunk_id, int)
+        assert isinstance(chunk_text, str)
+        assert chunk_text.strip()
+
+
+def test_iter_chunks_filter_by_document_id(tmp_path):
+    from app.services.kb_store import KnowledgeBaseStore
+    from app.services.synthetic_qa import iter_chunks
+
+    db_path = tmp_path / "kb.sqlite"
+    store = KnowledgeBaseStore(db_path=db_path)
+    doc_a = store.add_document(title="A", text="alpha " * 200)
+    store.add_document(title="B", text="beta " * 200)
+
+    chunks_a = list(iter_chunks(store, document_id=doc_a.id))
+
+    for chunk_id, chunk_text in chunks_a:
+        assert "alpha" in chunk_text
