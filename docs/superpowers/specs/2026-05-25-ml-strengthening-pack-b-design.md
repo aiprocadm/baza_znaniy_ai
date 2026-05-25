@@ -1,9 +1,11 @@
-# ML Strengthening — Pack B+ Design
+# ML Strengthening — Pack B++ Design
 
 **Date:** 2026-05-25
 **Author scope:** technical design for ML capability uplift in KB.AI
 **Status:** Design document. Subordinate to `2026-05-22-project-vision-design.md` (LoRA as main moat).
-**Decision context:** Technical analysis of existing ML stack identified 7 critical gaps and 11 secondary improvements. Pack B+ bundles the 9 critical-gap workstreams (W1-W10) plus 4 commercially-valuable items from former Pack C (W11-W14: multi-adapter composition, structured outputs, model registry, knowledge distillation) into a coherent ML platform uplift. Items reserved for hypothetical future expansion (TIES/DARE merging, QAT, multi-node DeepSpeed) remain out of scope.
+**Decision context:** Technical analysis of existing ML stack identified 7 critical gaps and 11 secondary improvements. Pack B++ bundles 15 workstreams: 9 critical-gap workstreams (W1-W10), 3 commercially-valuable items from former Pack C (W11-W13: multi-adapter composition, structured outputs, model registry), and **2 forward-looking workstreams** reflecting the state-of-the-art in 2026 RAG research (W15 Agentic RAG with Self-RAG/CRAG patterns, W16 Vision RAG for multi-modal corpora). Knowledge distillation (formerly W14) is deferred to post-customer-acquisition stage because it produces no customer-visible improvement in Managed Cloud deployments. TIES/DARE merging, QAT, and multi-node DeepSpeed remain out of scope.
+
+**Why this pack ships the product to a new level:** classical RAG (retrieve→answer) is now table stakes; competitors at parity. The two differentiating directions in 2026 are (1) agentic reasoning loops that iteratively retrieve and self-correct, and (2) multi-modal retrieval over visual content (schematics, charts, photos). Pack B++ ships both, on top of the production fundamentals from W1-W13.
 
 > Этот документ описывает **технические доработки ML-стека**, не привязываясь к бизнес-срокам и финансам. Реализация может быть растянута/сжата под доступные ресурсы. Документ — это **что и как делать**, не **когда успеть**.
 
@@ -38,9 +40,11 @@ KB.AI уже имеет нетривиальный LoRA-пайплайн:
 | G6 | No continual / incremental fine-tuning | Each retrain starts from scratch — wasted effort |
 | G7 | No Auto-Train UI — only CLI | LoRA stays a dev-only feature, not productized |
 
-## 3. Pack B+ scope — 14 workstreams
+## 3. Pack B++ scope — 15 workstreams
 
-Pack B+ implements all 7 critical gaps (W1, W2, W3, W4, W5, W6, W7), 2 supporting items (W8 MLflow, W10 Golden-set regression), the Auto-Train UI orchestrator (W9), plus 4 commercially-valuable items lifted from former Pack C (W11 multi-adapter composition, W12 structured outputs, W13 model registry, W14 knowledge distillation). Pack A (gaps G1, G4, G7 + regression test) is **strict subset** of Pack B+.
+Pack B++ implements all 7 critical gaps (W1, W2, W3, W4, W5, W6, W7), 2 supporting items (W8 MLflow, W10 Golden-set regression), the Auto-Train UI orchestrator (W9), 3 commercially-valuable items lifted from former Pack C (W11 multi-adapter composition, W12 structured outputs, W13 model registry), and 2 frontier 2026 capabilities (W15 Agentic RAG, W16 Vision RAG). Pack A (gaps G1, G4, G7 + regression test) is **strict subset** of Pack B++.
+
+**Numbering note:** W14 (Knowledge distillation) was originally proposed but moved to deferred items (see Section 7) — it produces no customer-visible improvement in the current Managed Cloud delivery model and can be revisited post-product-market-fit. The W14 number is retained as a placeholder for clarity; the active workstream count is 15.
 
 ### Workstream 1: Synthetic data generation (closes G1)
 
@@ -548,6 +552,161 @@ New flags:
 - Student Saiga-3B trained on distilled data achieves RAGAS faithfulness ≥ 0.85 * teacher score
 - Student inference latency on CPU is <3s per question (vs. teacher >30s or API ~1-2s + network)
 
+> **Status update (2026-05-25 review):** W14 deferred. Implementation postponed until at least one paying Managed Cloud customer requests it OR on-premise delivery becomes a primary revenue channel. Rationale: distillation invests heavy compute on a quality ceiling (~85% of teacher) for benefits the Managed Cloud customer never experiences (they hit the teacher directly). Worth revisiting when (a) latency cost becomes binding constraint, or (b) on-premise customers demand "small model, big quality".
+
+---
+
+### Workstream 15: Agentic RAG / Self-RAG / Corrective RAG (CRAG)
+
+**Goal:** elevate the answer pipeline from "single retrieve → answer" to an **iterative reasoning loop** that decides when to retrieve, evaluates retrieval quality, reformulates queries when relevance is low, and self-critiques the answer before returning it. This produces measurable quality gains on multi-hop questions, conditional queries, and ambiguous prompts — the categories where classical RAG fails.
+
+**Theoretical grounding:**
+- **Self-RAG** (Asai et al., 2023) — model emits special tokens (`[Retrieve]`, `[No Retrieve]`, `[Relevant]`, `[Irrelevant]`, `[Supported]`, `[Not Supported]`) that drive control flow
+- **CRAG** (Yan et al., 2024) — Corrective RAG with retrieval evaluator (lightweight classifier) that grades each retrieved chunk as Correct / Ambiguous / Incorrect, triggering corrective actions (rewrite query, expand search, fall back to web)
+- **ReAct** (Yao et al., 2022) — interleaved Reasoning + Acting; the model can call tools (search, calculator, code interpreter) within a chain of thought
+
+**Implementation choice:** start with **CRAG** (simplest, most measurable improvement); add Self-RAG-style retrieval gating as a second iteration; full agentic ReAct deferred to Pack C.
+
+**Changes:**
+
+1. **New file: `app/services/agentic_rag.py`** — orchestrates the reasoning loop:
+   ```python
+   class AgenticRagPipeline:
+       def __init__(self, retriever, evaluator, generator, max_iters=3):
+           ...
+       
+       async def answer(self, question: str, workspace: str) -> AnswerWithTrace:
+           # Step 1: Decide if retrieval needed (cheap LLM call)
+           if not self._retrieval_needed(question):
+               return await self._direct_answer(question)
+           
+           # Step 2: Initial retrieval
+           chunks = await self.retriever.search(question, top_k=10)
+           
+           # Step 3: Grade chunks via CRAG evaluator
+           grades = await self.evaluator.grade(question, chunks)
+           
+           # Step 4: Decide action based on grades
+           if grades.correct_count >= 3:
+               return await self._answer_from_chunks(question, grades.correct_chunks)
+           elif grades.ambiguous_count >= 2:
+               # Rewrite query and re-search
+               new_query = await self._rewrite_query(question, grades)
+               return await self.answer(new_query, workspace, _iter=current+1)
+           else:
+               # All incorrect — refuse with explanation
+               return AnswerWithTrace(
+                   answer="В базе знаний нет достаточной информации...",
+                   trace="CRAG: 0 correct, 1 ambiguous, 9 incorrect",
+                   refused=True,
+               )
+   ```
+
+2. **New file: `app/services/retrieval_evaluator.py`** — lightweight classifier:
+   - Default: small LLM (Phi-3-mini or local Saiga-1.5B) prompted to grade each (question, chunk) pair as Correct/Ambiguous/Incorrect
+   - Returns structured JSON via W12's structured outputs
+   - Cached aggressively (same question+chunk → same grade for 1 hour)
+
+3. **New endpoint:** `POST /api/kb/ask/agentic` — same contract as `/ask` but with `trace` field showing the reasoning steps:
+   ```json
+   {
+     "answer": "...",
+     "sources": [...],
+     "trace": {
+       "iterations": 2,
+       "actions": [
+         {"step": 1, "action": "retrieve", "query": "оригинал", "top_k": 10, "grades": {"correct": 1, "ambiguous": 4, "incorrect": 5}},
+         {"step": 2, "action": "rewrite", "new_query": "переформулированный"},
+         {"step": 3, "action": "retrieve", "query": "переформулированный", "top_k": 10, "grades": {"correct": 5, "ambiguous": 2, "incorrect": 3}},
+         {"step": 4, "action": "answer", "chunks_used": 5}
+       ],
+       "total_latency_ms": 4250,
+       "evaluator_calls": 20,
+       "rewrite_calls": 1
+     }
+   }
+   ```
+
+4. **Training data for CRAG evaluator:**
+   - Use W1's synthetic Q&A pairs plus their `[doc:X, page:Y]` annotations as ground truth
+   - For each pair, sample positive chunks (correct), partial-match chunks (ambiguous), random unrelated chunks (incorrect)
+   - Train via SFT on the small evaluator model (`scripts/train_crag_evaluator.py`)
+
+5. **Performance budget:**
+   - Evaluator: <300ms per chunk (batched: <2s for 10 chunks)
+   - Rewrite: <500ms (single LLM call)
+   - Total agentic flow: <5s for 95th percentile vs. <2s for classical RAG (3x latency budget)
+   - Mitigation: caching aggressive; "fast mode" toggle that skips evaluator for trivial questions
+
+**UI:** Auto-Train UI gets a sixth wizard step "Включить Agentic-режим" with explanation; chat tab gets a toggle "Показать ход мысли AI" that displays the trace.
+
+**Acceptance:**
+- On a held-out multi-hop test set (questions requiring combination of 2+ chunks), Agentic RAG improves RAGAS faithfulness by ≥15pp over classical RAG
+- Refusal rate on out-of-corpus questions improves to ≥90% (vs. ~80% from W3)
+- 95th percentile latency stays under 5s for typical workspace size
+
+---
+
+### Workstream 16: Vision RAG (multi-modal retrieval over images)
+
+**Goal:** extend the RAG pipeline to handle **visual content** in documents — diagrams, schematics, charts, photos, scanned forms. For the original target verticals (occupational health, engineering, legal), 30-50% of corpus value is locked in non-text elements that current text-only RAG ignores entirely.
+
+**Concrete scenarios this unlocks:**
+- "Покажи схему эвакуации со 2-го этажа" → finds floor plan PDF page, returns image + extracted markings
+- "Что изображено на фото с производственной площадки?" → describes safety violations visible in photos
+- "В каком пункте инструкции упоминается этот знак?" → reverse search by uploaded image
+
+**Architecture changes:**
+
+1. **Document parsing extension** — Docling already extracts images from PDF/DOCX; currently they're discarded. Modify `app/ingest/docling_backend.py`:
+   - For each image, generate **caption** via Vision-LLM (default: Qwen2-VL-7B or Llama-3.2-Vision-11B)
+   - Store: original image bytes + caption text + bbox in source page
+   - New table:
+     ```sql
+     CREATE TABLE kb_images (
+         id TEXT PRIMARY KEY,
+         document_id TEXT NOT NULL REFERENCES kb_documents(id) ON DELETE CASCADE,
+         page_number INTEGER,
+         bbox_json TEXT,
+         image_blob BLOB,
+         caption TEXT,
+         embedding_text TEXT,        -- text embedding of caption (for hybrid retrieval)
+         embedding_visual BLOB,       -- CLIP/SigLIP visual embedding (for image-image search)
+         mime_type TEXT,
+         created_at TEXT NOT NULL
+     );
+     ```
+
+2. **Hybrid retrieval** — extend `KnowledgeBaseStore.search()` to also search images:
+   - Text-to-image: query embedding compared to image caption embeddings + visual embeddings (cross-modal CLIP)
+   - Image-to-image: user uploads photo → CLIP visual embedding → similarity search
+   - Top results contain mixed: text chunks AND relevant images
+
+3. **Vision-aware generation** — when answering, if retrieved sources include images, the LLM receives both text chunks AND image references. Generator must support vision input (use Qwen2-VL or Llama-3.2-Vision as generator).
+
+4. **New endpoint:** `POST /api/kb/ask/visual` with optional `image` upload field — accepts an image as part of the question.
+
+5. **UI changes:**
+   - Document upload: preview shows extracted images count
+   - Chat: answers include thumbnail of cited images with click-to-zoom
+   - New search mode: "поиск по картинке" (drag-drop image)
+
+**Library choices:**
+- Vision-LLM: `Qwen2-VL-7B-Instruct` (best quality/size in 2026 for multilingual) OR `meta-llama/Llama-3.2-11B-Vision-Instruct` (Meta's official)
+- Visual embeddings: `openai/clip-vit-large-patch14` (strong baseline) OR `google/siglip-so400m-patch14-384` (SOTA in 2024)
+- All runnable on single 24GB GPU with quantisation
+
+**Cost considerations:**
+- Visual embedding generation is one-time per image (cheap on GPU)
+- Vision-LLM at runtime is 2-3x more expensive than text-only LLM
+- Mitigation: visual responses optional via per-workspace setting
+
+**Acceptance:**
+- Document ingestion extracts and indexes all images with captions
+- Text-to-image retrieval: at least one image is correctly retrieved in top-5 for 80% of visual-content questions on test set
+- Image-to-image retrieval: uploading a known image returns it as top-1 result with >0.95 similarity
+- Vision-aware answers cite both text chunks and images correctly
+
 ## 4. Data flow
 
 ```
@@ -583,11 +742,19 @@ New flags:
       │
       ├──> [W12: structured_outputs.py] ──> /ask/structured endpoint
       │
-      ├──> [W14: distill_dataset.py (50k scale)] ──> distilled_qa.jsonl
+      ├──> [W15: agentic_rag.py] ──> /ask/agentic endpoint with iterative CRAG loop
       │       │
-      │       └──> [W14: train_distillation.py] ──> student model in registry
+      │       └──> [W15: train_crag_evaluator.py] ──> chunk-grading classifier
       │
-      └──> [W9: Auto-Train UI] ──> orchestrates W1-W7, W11-W14 visually
+      ├──> [W16: docling_backend.py extended] ──> kb_images table
+      │       │
+      │       ├──> [W16: vision-LLM captioner] ──> caption per image
+      │       ├──> [W16: CLIP/SigLIP embedder] ──> visual embedding per image
+      │       └──> [W16: hybrid retrieval] ──> /ask/visual endpoint
+      │
+      ├──> [W14 DEFERRED] ──> not implemented in this pack
+      │
+      └──> [W9: Auto-Train UI] ──> orchestrates W1-W7, W11-W13, W15-W16 visually
 ```
 
 ## 5. Dependencies and order
@@ -605,9 +772,11 @@ Workstreams have explicit ordering due to data dependencies:
 9. **W13 (model registry)** — seventh; needed before W11 multi-model composition; can also run in parallel after W2
 10. **W11 (multi-adapter composition)** — eighth; depends on W4 (DPO adapters available) and W13 (registry to source models)
 11. **W12 (structured outputs)** — ninth; depends on W3 (RAG-aware model) for citations field
-12. **W14 (knowledge distillation)** — tenth; depends on W1 (data generator), W5 (RAGAS for student validation), W13 (registry for student deployment)
-13. **W9 (Auto-Train UI)** — last UI-side; wraps W1-W7 + W11-W14; depends on all functional
-14. **W10 (regression)** — added in parallel with W5
+12. **W15 (Agentic RAG / CRAG)** — tenth; depends on W3 (RAG-aware model serves as backbone), W12 (structured outputs for evaluator grades JSON), W1 (synthetic data for evaluator training)
+13. **W16 (Vision RAG)** — eleventh; can run in parallel with W3-W7 because it operates on a separate data type (images), but UI integration requires W9 to be near-complete
+14. **W14 (knowledge distillation)** — DEFERRED, not implemented in Pack B++
+15. **W9 (Auto-Train UI)** — last UI-side; wraps W1-W7 + W11-W13 + W15-W16; depends on all functional
+16. **W10 (regression)** — added in parallel with W5
 
 ## 6. Files to be created or modified
 
@@ -629,15 +798,26 @@ Workstreams have explicit ordering due to data dependencies:
 - Frontend: training wizard page (5 steps)
 - `accelerate_fsdp.yaml`
 
-**New files (W11-W14 from Pack C additions):**
+**New files (W11-W13 from Pack C additions):**
 - `app/llm/transformers_provider.py` — PEFT-based provider for multi-adapter composition (W11)
 - `scripts/compose_adapters.py` — CLI for pre-merging adapter weights (W11)
 - `app/services/structured_outputs.py` — abstraction over outlines + grammar.gbnf (W12)
 - `data/schemas/` — pre-built JSON schemas for common domains (W12)
 - `app/llm/model_registry.py` — model registry + hot-switch logic (W13)
-- `scripts/distill_dataset.py` — large-scale Q&A generation for distillation (W14)
-- `scripts/train_distillation.py` — student model trainer with hard/soft modes (W14)
-- `var/models/` — directory for registered base models (W13, W14 student outputs)
+- `var/models/` — directory for registered base models (W13)
+
+**New files (W15-W16 frontier capabilities):**
+- `app/services/agentic_rag.py` — CRAG orchestrator with iterative reasoning loop (W15)
+- `app/services/retrieval_evaluator.py` — chunk-grading classifier (W15)
+- `scripts/train_crag_evaluator.py` — train the evaluator on synthetic correct/ambiguous/incorrect chunk samples (W15)
+- `app/services/vision_captioner.py` — Vision-LLM caption generation pipeline (W16)
+- `app/services/visual_embeddings.py` — CLIP/SigLIP visual embedding service (W16)
+- `alembic/versions/XXXX_kb_images.py` — migration for kb_images table (W16)
+- `app/api/kb_mvp.py` extensions — `/api/kb/ask/agentic` (W15), `/api/kb/ask/visual` (W16)
+
+**Deferred (not implemented in Pack B++):**
+- `scripts/distill_dataset.py` — large-scale Q&A generation for distillation (W14, deferred)
+- `scripts/train_distillation.py` — student model trainer (W14, deferred)
 
 **Modified files:**
 - `scripts/train_lora.py` — auto chat template, architecture-aware target modules, `--resume-from-adapter`, `--ewc-lambda`, `--prompt-mode {generic, rag}`, MLflow integration
@@ -648,21 +828,31 @@ Workstreams have explicit ordering due to data dependencies:
 - `app/api/kb_mvp.py` — `/messages/{id}/feedback`, `/feedback/export`, `/ask/structured` (W12)
 - `app/api/v1/routes_lora.py` — `/lora/compose` endpoint (W11)
 - `app/llm/lora_runtime.py` — `AdapterSlot` dataclass, `_ACTIVE_ADAPTERS` list (W11)
-- `app/llm/llama_cpp_provider.py` — graceful close + reload for hot-switch (W13)
+- `app/llm/llama_cpp_provider.py` — graceful close + reload for hot-switch (W13); vision-LLM hooks (W16)
 - `app/core/config.py` — replace single `LLM_MODEL_PATH` with registry-aware resolution (W13)
-- `requirements-train.txt` — add `trl`, `ragas`, `mlflow`, `sentence-transformers[train]`, `accelerate`, `outlines`, `mergekit` (W11 alternative), `peft[train]`
-- `requirements-runtime.txt` — add `mlflow-skinny` (for runtime logging only), `outlines` (W12)
+- `app/ingest/docling_backend.py` — extract images, generate captions, store in kb_images (W16)
+- `app/services/kb_store.py` — hybrid retrieval over text chunks + images (W16)
+- `app/api/kb_mvp.py` — `/messages/{id}/feedback`, `/feedback/export`, `/ask/structured` (W12), `/ask/agentic` (W15), `/ask/visual` (W16)
+- `requirements-train.txt` — add `trl`, `ragas`, `mlflow`, `sentence-transformers[train]`, `accelerate`, `outlines`, `peft[train]`, `transformers[vision]`
+- `requirements-runtime.txt` — add `mlflow-skinny`, `outlines`, `Pillow`, `open_clip_torch` (W16 visual embeddings)
 
-## 7. Out of scope (future hypothetical packs)
+## 7. Out of scope (deferred or future hypothetical packs)
 
-Explicitly excluded from Pack B+ — to be addressed in separate future specs only if customer demand emerges:
+### 7.1 Deferred — revisit post-PMF
 
-- **TIES / DARE adapter merging** (`mergekit`) — internal optimisation, not customer-visible. May be revisited if multi-adapter composition (W11) hits performance limits.
-- **Quantization-Aware Training (QAT)** — +2-5% quality after Q4_K_M quantisation. Deep ML expertise required, low customer visibility.
+- **W14 Knowledge distillation (full pipeline)** — postponed until at least one paying customer requests it OR on-premise delivery becomes a primary revenue channel. Rationale: in Managed Cloud, customers get teacher-quality directly with no latency penalty. Distillation invests heavy compute (~$30/run + GPU hours) for a quality ceiling at ~85% of teacher, benefiting only on-premise CPU deployments. Revisit when: (a) inference cost becomes binding, OR (b) on-prem customer asks "we have an old GPU, give us strong AI on weak iron".
+
+- **Soft distillation with local teacher** — requires running a 70B+ model locally to capture logits. Out of typical workspace hardware budget. Bundled with W14 deferral.
+
+### 7.2 Out of scope — not in this product roadmap
+
+- **TIES / DARE adapter merging** (`mergekit`) — internal optimisation, not customer-visible. May be revisited if W11 multi-adapter composition hits performance limits at scale (8+ simultaneous adapters per request).
+- **Quantization-Aware Training (QAT)** — +2-5% quality after Q4_K_M quantisation. Deep ML expertise required, low customer visibility. Not justified for Pack B++ scope.
 - **Distributed training beyond FSDP** (DeepSpeed ZeRO-3, multi-node) — most customers lack multi-node infrastructure. Pack B's FSDP (single-node multi-GPU) covers the realistic 99% case.
-- **Cross-workspace knowledge distillation** — Pack B+ supports per-workspace distillation (W14); cross-workspace transfer would require additional privacy guarantees and is out of scope.
-- **Reward modelling for RLHF** (full PPO/RLHF loop) — DPO (W4) is the modern replacement and is sufficient for production.
-- **Multi-modal extension** (images, audio) — KB.AI is text-focused; multi-modal would be a different product.
+- **Full RLHF loop with reward modelling** — DPO (W4) is the modern industry replacement; PPO-based RLHF is more complex and rarely outperforms DPO in production.
+- **Audio modality** — KB.AI corpus is currently text+visual. Audio extension (transcripts of meetings, voice messages, video) is a different product surface and would warrant a Pack D.
+- **Tool-use agents** beyond CRAG — full ReAct loops with arbitrary tool calling (web search, calculator, code interpreter) deferred. CRAG (W15) is the bounded form of agentic reasoning we ship in Pack B++.
+- **Continuous online learning** — incremental learning per request (live model updates). Pack B++ supports batched continual learning (W7), but per-request weight updates are a research-grade feature.
 
 ## 8. Risks and mitigation
 
@@ -678,8 +868,12 @@ Explicitly excluded from Pack B+ — to be addressed in separate future specs on
 | Multi-adapter composition (W11) — llama.cpp limitations on simultaneous adapters | Pre-merge via PEFT + GGUF export (frozen composition for production); transformers backend for interactive experimentation |
 | Structured outputs (W12) — schema-constrained generation degrades quality | A/B test with/without schema on golden set; allow "soft" mode (validate but not enforce) for sensitive prompts |
 | Model hot-switch (W13) — 10-30s blocking reload disrupts users | Display reload progress in UI; queue incoming requests with timeout; document expected downtime per switch |
-| Knowledge distillation (W14) — student fails to match teacher quality | Validate via RAGAS BEFORE adding to registry; document achievable quality ceilings per student size (3B → 85%, 1.5B → 70%) |
-| Distillation API costs (W14) — unexpected spend | Budget cap in CLI (`--max-budget-usd`); cost preview before run; refuse if exceeds |
+| Knowledge distillation (W14) — risk inapplicable since W14 deferred | n/a — W14 not implemented in Pack B++ |
+| Agentic RAG (W15) — 3x latency for typical question | Fast-mode toggle skips evaluator for trivial questions; aggressive caching of evaluator grades; "fast classical RAG" remains available as a parallel endpoint |
+| Agentic RAG (W15) — evaluator gives bad grades, degrades quality | Train evaluator on ≥5000 supervised samples from synthetic generator; A/B compare classical vs. agentic on golden set; rollback to classical if regression detected |
+| Vision RAG (W16) — vision-LLM is slow and expensive | Pre-compute captions at ingestion time (not at query time); vision generation only triggered when retrieval includes image; cache aggressively |
+| Vision RAG (W16) — Qwen2-VL/Llama-Vision quality on Russian text in images | Validate on Russian corpus before shipping; fall back to OCR (Tesseract) + text-only RAG for text-heavy images if vision-LLM accuracy <80% |
+| Vision storage cost — image blobs balloon SQLite size | Store images as references to filesystem (`var/data/kb_images/<doc_id>/`), keep only metadata + caption in SQLite; document storage budget per workspace |
 
 ## 9. Success metrics (post Pack B)
 
