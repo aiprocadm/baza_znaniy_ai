@@ -95,6 +95,12 @@ kb-cli health                                    # health-check для cron
 
 ## Архитектура
 
+- **Source-of-truth backend entrypoint:** `app/api/main.py` (инициализирует
+  `app/core/app.py:create_app`). Контейнеры/CI пинят `uvicorn app.api.main:app`.
+- **Source-of-truth runtime path:** `app/` (API, ingestion, worker, retrieval, LLM, встроенный UI).
+- **UI active branch:** `frontend/` — primary web UI. `data/www/` — встроенная
+  диагностическая Operations Console.
+
 См. [`docs/architecture.md`](docs/architecture.md) — два HTTP-пути (`/api/kb/*` MVP
 single-tenant и `/api/v1/*` mature multi-tenant), почему они параллельны, и когда
 их объединять.
