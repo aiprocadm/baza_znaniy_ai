@@ -7,6 +7,7 @@ import logging
 import re
 from dataclasses import dataclass
 from enum import Enum
+from typing import Protocol
 
 LOGGER = logging.getLogger(__name__)
 
@@ -394,9 +395,86 @@ def estimate_total_cost_usd(
     return total
 
 
+class LLMProvider(Protocol):
+    """Subset of ``OpenAICompatibleProvider`` used by the generator."""
+
+    @property
+    def name(self) -> str: ...
+
+    @property
+    def model(self) -> str: ...
+
+    def generate(
+        self,
+        prompt: str,
+        *,
+        system: str | None = None,
+        max_tokens: int | None = None,
+        temperature: float | None = None,
+    ): ...
+
+
+@dataclass(slots=True)
+class SyntheticQAGenerator:
+    """Pipeline: prompt → teacher → parse → filter → optional self-check.
+
+    The generator stays pure: no file I/O, no env reads, no global
+    state. All side effects belong in the CLI wrapper.
+    """
+
+    provider: LLMProvider
+    check_self_consistency: bool = True
+    consistency_threshold: float = DEFAULT_CONSISTENCY_THRESHOLD
+    max_output_tokens: int = 800
+    temperature: float = 0.4
+
+    def generate_for_chunk(
+        self,
+        *,
+        chunks: list[str],
+        chunk_ids: list[int],
+        mode: GenerationMode,
+    ) -> list[QAPair]:
+        prompt = build_prompt(mode, chunks, chunk_ids=chunk_ids)
+        first = self._call_provider(prompt)
+        candidates = parse_qa_response(first, source_chunk_id=chunk_ids[0])
+        candidates = [p for p in candidates if not is_refusal(p.output)]
+        candidates = [p for p in candidates if length_ok(p)]
+
+        if not self.check_self_consistency or not candidates:
+            return candidates
+
+        second = self._call_provider(prompt)
+        second_candidates = parse_qa_response(second, source_chunk_id=chunk_ids[0])
+        if not second_candidates:
+            return []
+
+        kept: list[QAPair] = []
+        for pair in candidates:
+            for other in second_candidates:
+                if self_consistent(
+                    pair.output,
+                    other.output,
+                    threshold=self.consistency_threshold,
+                ):
+                    kept.append(pair)
+                    break
+        return kept
+
+    def _call_provider(self, prompt: str) -> str:
+        response = self.provider.generate(
+            prompt,
+            max_tokens=self.max_output_tokens,
+            temperature=self.temperature,
+        )
+        return getattr(response, "text", "") or ""
+
+
 __all__ = [
     "QAPair",
     "GenerationMode",
+    "LLMProvider",
+    "SyntheticQAGenerator",
     "length_ok",
     "is_refusal",
     "self_consistent",

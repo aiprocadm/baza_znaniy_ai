@@ -372,3 +372,139 @@ def test_estimate_total_cost_sums_chunks():
 
     assert total is not None
     assert total > 0
+
+
+class _FakeProvider:
+    """Test double matching the protocol used by SyntheticQAGenerator."""
+
+    def __init__(self, responses):
+        self._responses = list(responses)
+        self.calls = []
+
+    @property
+    def name(self) -> str:
+        return "fake"
+
+    @property
+    def model(self) -> str:
+        return "fake-model"
+
+    def generate(self, prompt, *, system=None, max_tokens=None, temperature=None):
+        from app.services.kb_llm import LLMResponse
+
+        self.calls.append({"prompt": prompt, "system": system, "temperature": temperature})
+        text = self._responses.pop(0)
+        return LLMResponse(text=text, provider="fake", model="fake-model", elapsed_ms=1.0)
+
+
+def test_generator_single_mode_returns_one_pair():
+    from app.services.synthetic_qa import (
+        GenerationMode,
+        SyntheticQAGenerator,
+    )
+
+    provider = _FakeProvider(
+        responses=[
+            '{"instruction":"What is the rule about Y?","input":"",'
+            '"output":"The rule states that Y must follow X procedure with care taken to verify compliance. [doc_chunk:7]"}',
+            # Second call for self-consistency
+            '{"instruction":"What does the rule say about Y?","input":"",'
+            '"output":"Y must follow X procedure with verification of compliance. [doc_chunk:7]"}',
+        ]
+    )
+    generator = SyntheticQAGenerator(provider=provider)
+
+    pairs = generator.generate_for_chunk(
+        chunks=["The rule says Y must follow X procedure with compliance check."],
+        chunk_ids=[7],
+        mode=GenerationMode.SINGLE,
+    )
+
+    assert len(pairs) == 1
+    assert pairs[0].source_chunk_id == 7
+
+
+def test_generator_skips_refusal_response():
+    from app.services.synthetic_qa import (
+        GenerationMode,
+        SyntheticQAGenerator,
+    )
+
+    provider = _FakeProvider(
+        responses=['{"instruction":"Q?","input":"","output":"I cannot answer this question, sorry."}']
+    )
+    generator = SyntheticQAGenerator(provider=provider)
+
+    pairs = generator.generate_for_chunk(
+        chunks=["some text"], chunk_ids=[1], mode=GenerationMode.SINGLE
+    )
+
+    assert pairs == []
+
+
+def test_generator_drops_pairs_failing_length_filter():
+    from app.services.synthetic_qa import (
+        GenerationMode,
+        SyntheticQAGenerator,
+    )
+
+    provider = _FakeProvider(
+        responses=['{"instruction":"Q?","input":"","output":"too short"}']  # output 9 chars < 30
+    )
+    generator = SyntheticQAGenerator(provider=provider)
+
+    pairs = generator.generate_for_chunk(
+        chunks=["some text"], chunk_ids=[1], mode=GenerationMode.SINGLE
+    )
+
+    assert pairs == []
+
+
+def test_generator_drops_pairs_failing_self_consistency():
+    from app.services.synthetic_qa import (
+        GenerationMode,
+        SyntheticQAGenerator,
+    )
+
+    provider = _FakeProvider(
+        responses=[
+            # First generation
+            '{"instruction":"What is the rule about safety in the workplace?","input":"",'
+            '"output":"The rule requires safety helmets at all times in production areas. [doc_chunk:1]"}',
+            # Second generation - completely unrelated content
+            '{"instruction":"What is the kitchen schedule?","input":"",'
+            '"output":"Lunch is served between twelve and one thirty in the canteen building. [doc_chunk:1]"}',
+        ]
+    )
+    generator = SyntheticQAGenerator(provider=provider)
+
+    pairs = generator.generate_for_chunk(
+        chunks=["chunk text"], chunk_ids=[1], mode=GenerationMode.SINGLE
+    )
+
+    assert pairs == []
+
+
+def test_generator_can_disable_self_consistency():
+    from app.services.synthetic_qa import (
+        GenerationMode,
+        SyntheticQAGenerator,
+    )
+
+    provider = _FakeProvider(
+        responses=[
+            '{"instruction":"What is the rule about Y?","input":"",'
+            '"output":"The rule states Y must follow procedure X with verification. [doc_chunk:1]"}',
+        ]
+    )
+    generator = SyntheticQAGenerator(
+        provider=provider, check_self_consistency=False
+    )
+
+    pairs = generator.generate_for_chunk(
+        chunks=["text"], chunk_ids=[1], mode=GenerationMode.SINGLE
+    )
+
+    # Without self-consistency, only one provider call happens
+    assert len(provider.calls) == 1
+    assert len(pairs) == 1
