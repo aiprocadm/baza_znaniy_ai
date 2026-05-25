@@ -203,3 +203,51 @@ def test_self_consistency_threshold_can_be_overridden():
 
     assert self_consistent(a, b, threshold=0.5) is False
     assert self_consistent(a, b, threshold=0.3) is True
+
+
+def test_generation_mode_has_three_values():
+    from app.services.synthetic_qa import GenerationMode
+
+    assert GenerationMode.SINGLE.value == "single"
+    assert GenerationMode.PARAPHRASE.value == "paraphrase"
+    assert GenerationMode.MULTI_HOP.value == "multi-hop"
+
+
+def test_build_prompt_single_includes_chunk_text():
+    from app.services.synthetic_qa import GenerationMode, build_prompt
+
+    chunk_text = "The safety regulation requires a daily inspection."
+    prompt = build_prompt(GenerationMode.SINGLE, [chunk_text], chunk_ids=[1])
+
+    assert chunk_text in prompt
+    assert "JSON" in prompt
+    assert "instruction" in prompt
+    assert "output" in prompt
+
+
+def test_build_prompt_paraphrase_requests_variants():
+    from app.services.synthetic_qa import GenerationMode, build_prompt
+
+    prompt = build_prompt(GenerationMode.PARAPHRASE, ["abc"], chunk_ids=[1])
+
+    assert "3" in prompt or "три" in prompt.lower()
+    assert "paraphr" in prompt.lower() or "перефраз" in prompt.lower()
+
+
+def test_build_prompt_multi_hop_requires_multiple_chunks():
+    from app.services.synthetic_qa import GenerationMode, build_prompt
+
+    chunks = ["alpha section", "beta section", "gamma section"]
+    prompt = build_prompt(GenerationMode.MULTI_HOP, chunks, chunk_ids=[1, 2, 3])
+
+    for chunk in chunks:
+        assert chunk in prompt
+    assert "multi" in prompt.lower() or "несколько" in prompt.lower()
+
+
+def test_build_prompt_multi_hop_with_single_chunk_raises():
+    import pytest as _pytest
+    from app.services.synthetic_qa import GenerationMode, build_prompt
+
+    with _pytest.raises(ValueError):
+        build_prompt(GenerationMode.MULTI_HOP, ["only one"], chunk_ids=[1])

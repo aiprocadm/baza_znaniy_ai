@@ -6,6 +6,7 @@ import json
 import logging
 import re
 from dataclasses import dataclass
+from enum import Enum
 
 LOGGER = logging.getLogger(__name__)
 
@@ -135,11 +136,106 @@ def self_consistent(
     return similarity >= threshold
 
 
+class GenerationMode(str, Enum):
+    SINGLE = "single"
+    PARAPHRASE = "paraphrase"
+    MULTI_HOP = "multi-hop"
+
+
+_PROMPT_SINGLE = (
+    "Ты — эксперт по составлению обучающих примеров для AI-помощника по "
+    "корпоративным документам. На основе фрагмента документа сгенерируй "
+    "ОДИН вопрос, который мог бы задать сотрудник компании, и точный "
+    "ответ. Ответ должен опираться только на фрагмент и заканчиваться "
+    "указанием источника в формате [doc_chunk:{chunk_id}]."
+    "\n\n"
+    "Фрагмент [doc_chunk:{chunk_id}]:\n{chunk_text}\n\n"
+    "Верни строго JSON без дополнительного текста:\n"
+    '{{"instruction": "<вопрос>", "input": "", '
+    '"output": "<ответ> [doc_chunk:{chunk_id}]"}}'
+)
+
+_PROMPT_PARAPHRASE = (
+    "Ты — эксперт по составлению обучающих примеров. На основе "
+    "фрагмента документа сгенерируй ТРИ разных перефразирования одного "
+    "и того же вопроса и общий ответ, опирающийся на фрагмент. Вопросы "
+    "должны различаться по формулировке, но иметь один и тот же смысл."
+    "\n\n"
+    "Фрагмент [doc_chunk:{chunk_id}]:\n{chunk_text}\n\n"
+    "Верни строго JSON-массив без дополнительного текста:\n"
+    "[\n"
+    '  {{"instruction": "<вопрос 1>", "input": "", '
+    '"output": "<общий ответ> [doc_chunk:{chunk_id}]"}},\n'
+    '  {{"instruction": "<вопрос 2 — paraphrase>", "input": "", '
+    '"output": "<тот же ответ> [doc_chunk:{chunk_id}]"}},\n'
+    '  {{"instruction": "<вопрос 3 — paraphrase>", "input": "", '
+    '"output": "<тот же ответ> [doc_chunk:{chunk_id}]"}}\n'
+    "]"
+)
+
+_PROMPT_MULTI_HOP = (
+    "Ты — эксперт по составлению обучающих примеров. Тебе даны "
+    "{n_chunks} фрагментов из разных мест документа. Сгенерируй ОДИН "
+    "вопрос, ответ на который требует объединения информации из всех "
+    "приведённых фрагментов (multi-hop). Ответ должен опираться на "
+    "комбинацию фрагментов и перечислить источники."
+    "\n\n"
+    "{chunks_block}\n"
+    "Верни строго JSON без дополнительного текста:\n"
+    '{{"instruction": "<вопрос, требующий объединения>", "input": "", '
+    '"output": "<ответ с указанием [doc_chunk:X] для каждого использованного фрагмента>"}}'
+)
+
+
+def build_prompt(
+    mode: GenerationMode,
+    chunks: list[str],
+    *,
+    chunk_ids: list[int],
+) -> str:
+    """Return the teacher prompt for *mode*.
+
+    ``chunks`` and ``chunk_ids`` must align (same length, same order).
+    ``MULTI_HOP`` requires at least 2 chunks; raises ``ValueError``
+    otherwise.
+    """
+
+    if len(chunks) != len(chunk_ids):
+        raise ValueError("chunks and chunk_ids must have equal length")
+    if not chunks:
+        raise ValueError("at least one chunk is required")
+
+    if mode is GenerationMode.SINGLE:
+        return _PROMPT_SINGLE.format(
+            chunk_text=chunks[0], chunk_id=chunk_ids[0]
+        )
+
+    if mode is GenerationMode.PARAPHRASE:
+        return _PROMPT_PARAPHRASE.format(
+            chunk_text=chunks[0], chunk_id=chunk_ids[0]
+        )
+
+    if mode is GenerationMode.MULTI_HOP:
+        if len(chunks) < 2:
+            raise ValueError("multi-hop mode requires at least 2 chunks")
+        block = "\n\n".join(
+            f"Фрагмент [doc_chunk:{cid}]:\n{text}"
+            for text, cid in zip(chunks, chunk_ids)
+        )
+        return _PROMPT_MULTI_HOP.format(
+            n_chunks=len(chunks), chunks_block=block
+        )
+
+    raise ValueError(f"Unsupported generation mode: {mode!r}")
+
+
 __all__ = [
     "QAPair",
+    "GenerationMode",
     "length_ok",
     "is_refusal",
     "self_consistent",
+    "build_prompt",
     "MIN_INSTRUCTION_CHARS",
     "MAX_INSTRUCTION_CHARS",
     "MIN_OUTPUT_CHARS",
