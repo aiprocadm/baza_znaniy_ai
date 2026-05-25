@@ -561,3 +561,44 @@ def test_load_processed_chunk_ids_tolerates_malformed_lines(tmp_path):
 
     processed = load_processed_chunk_ids(path)
     assert processed == {99}
+
+
+def test_jsonl_output_is_consumed_by_validate_dataset(tmp_path):
+    """End-to-end: QAPair JSONL must parse via validate_dataset.load_examples."""
+    import sys
+    import types
+
+    # ``scripts.validate_dataset`` imports ``transformers`` at module load time
+    # for its tokenizer-based validation step.  ``load_examples`` itself does
+    # not touch the tokenizer, so we install a lightweight stub when the real
+    # package is unavailable to keep the test hermetic.
+    if "transformers" not in sys.modules:
+        try:  # pragma: no cover - exercised only when real package is present
+            import transformers  # noqa: F401
+        except ModuleNotFoundError:
+            stub = types.ModuleType("transformers")
+            stub.AutoTokenizer = type("AutoTokenizer", (), {})
+            sys.modules["transformers"] = stub
+
+    from app.services.synthetic_qa import QAPair
+    from scripts import validate_dataset as vd
+
+    pairs = [
+        QAPair(
+            instruction=f"What is rule {i}?",
+            input="",
+            output=f"Rule {i} states that the corresponding procedure must be followed. [doc_chunk:{i}]",
+            source_chunk_id=i,
+        )
+        for i in range(1, 6)
+    ]
+    path = tmp_path / "dataset.jsonl"
+    with path.open("w", encoding="utf-8") as handle:
+        for pair in pairs:
+            handle.write(pair.to_jsonl_line())
+
+    loaded = vd.load_examples(path)
+    assert len(loaded) == 5
+    for i, example in enumerate(loaded, start=1):
+        assert example.instruction == f"What is rule {i}?"
+        assert example.output.startswith(f"Rule {i}")
