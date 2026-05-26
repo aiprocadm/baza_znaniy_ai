@@ -16,9 +16,15 @@ from pathlib import Path
 from typing import Any, Iterable, Iterator, Mapping
 from urllib import error as url_error, request as url_request
 
+_HF_IMPORT_ERROR: Exception | None = None
 try:  # pragma: no cover - optional dependency resolved at runtime
     from huggingface_hub import HfHubHTTPError, hf_hub_download, model_info
-except Exception:  # pragma: no cover - fallback when the dependency is missing
+except Exception as _hf_exc:  # pragma: no cover - fallback when the dependency is missing
+    # Capture the real reason so it surfaces in logs the first time we need
+    # the Hub path. A bare ``except`` previously swallowed everything and made
+    # "huggingface_hub is not installed" the only visible message, even when
+    # the package was installed but a transitive import had failed.
+    _HF_IMPORT_ERROR = _hf_exc
     HfHubHTTPError = Exception  # type: ignore[assignment]
     hf_hub_download = None  # type: ignore[assignment]
     model_info = None  # type: ignore[assignment]
@@ -214,7 +220,12 @@ def download_via_hub(
     """Download the model using the Hugging Face Hub client."""
 
     if hf_hub_download is None or model_info is None:
-        raise DownloadError("huggingface_hub is not installed; cannot download from the Hub")
+        detail = (
+            f" (import error: {_HF_IMPORT_ERROR})" if _HF_IMPORT_ERROR is not None else ""
+        )
+        raise DownloadError(
+            f"huggingface_hub is not importable; cannot download from the Hub{detail}"
+        )
 
     if descriptor.model_id is None or descriptor.filename is None:
         raise DownloadError("Both 'model_id' and 'filename' are required for Hub downloads")
@@ -420,6 +431,16 @@ def apply_overrides(descriptor: ModelDescriptor, args: argparse.Namespace) -> Mo
         if descriptor.sha256:
             _LOGGER.info(
                 "Both URL and Hugging Face model ID provided; using direct URL because checksum is available."
+            )
+            descriptor.model_id = None
+            descriptor.filename = None
+        elif hf_hub_download is None:
+            # Without huggingface_hub we can't fetch the SHA from the Hub, but
+            # the direct URL is still downloadable — keep it. CI typically
+            # passes ``--allow-missing-hash`` to accept the unverified blob.
+            _LOGGER.info(
+                "Direct URL configured without checksum and huggingface_hub is "
+                "unavailable; using direct URL."
             )
             descriptor.model_id = None
             descriptor.filename = None
