@@ -27,6 +27,7 @@ var/*
 !var/data/
 var/data/*
 !var/data/.gitkeep
+var/data/backups/
 models/*
 !models/.gitkeep
 !models/model_manifest.json

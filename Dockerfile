@@ -17,10 +17,14 @@ ENV HUGGINGFACE_HUB_TOKEN=${HUGGINGFACE_HUB_TOKEN}
 
 COPY requirements-runtime.txt requirements-llm.txt requirements-train.txt requirements-dev.txt pyproject.toml ./
 
+# apt versions in -slim images change too often to pin reliably; security updates would break the build.
+# hadolint ignore=DL3008
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates curl tini \
     && rm -rf /var/lib/apt/lists/*
 
+# pip+setuptools+wheel are build tooling; runtime deps are pinned via requirements*.txt.
+# hadolint ignore=DL3013
 RUN python -m pip install --upgrade pip setuptools wheel \
     && pip install --index-url https://download.pytorch.org/whl/cpu torch==2.4.1 \
     && pip install -r requirements-runtime.txt -r requirements-llm.txt \

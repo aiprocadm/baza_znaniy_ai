@@ -75,9 +75,9 @@ def _flatten_aliases(source: object) -> list[str]:
     if isinstance(source, AliasChoices):
         items: list[str] = []
         iterable: Iterable[object]
-        try:
-            iterable = source  # ``AliasChoices`` behaves like a tuple of options.
-        except TypeError:  # pragma: no cover - defensive compatibility guard
+        if isinstance(source, Iterable):
+            iterable = source  # older Pydantic — AliasChoices was Iterable
+        else:  # Pydantic >=2.9 — AliasChoices exposes only ``.choices``
             iterable = getattr(source, "choices", ())  # type: ignore[attr-defined]
         for choice in iterable:
             items.extend(_flatten_aliases(choice))

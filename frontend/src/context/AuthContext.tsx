@@ -23,7 +23,7 @@ export type Session = {
   token_expires_at: string;
   access_token?: string;
   refresh_token?: string;
-export type { Role };
+};
 
 type StoredTokens = TokenResponse & {
   issued_at: number;
