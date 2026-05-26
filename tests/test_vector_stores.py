@@ -51,11 +51,34 @@ if "qdrant_client" not in sys.modules:
     class Distance:
         COSINE = "cosine"
 
+    class MatchValue:
+        def __init__(self, value: object):
+            self.value = value
+
+    class MatchText:
+        def __init__(self, text: str):
+            self.text = text
+
+    class FieldCondition:
+        def __init__(self, key: str, match: object):
+            self.key = key
+            self.match = match
+
+    class Filter:
+        def __init__(self, must: object = None, should: object = None, must_not: object = None):
+            self.must = must
+            self.should = should
+            self.must_not = must_not
+
     models_module.VectorParams = VectorParams
     models_module.HnswConfigDiff = HnswConfigDiff
     models_module.PayloadSchemaType = PayloadSchemaType
     models_module.PointStruct = PointStruct
     models_module.Distance = Distance
+    models_module.MatchValue = MatchValue
+    models_module.MatchText = MatchText
+    models_module.FieldCondition = FieldCondition
+    models_module.Filter = Filter
     exceptions_module.UnexpectedResponse = UnexpectedResponse
 
     qdrant_module.http = http_module
@@ -288,7 +311,11 @@ def test_faiss_search_returns_payload(tmp_path: Path, monkeypatch: pytest.Monkey
     ]
 
     store.upsert(chunks)
-    hits = store.search("query", top_k=1)
+    hits = store.search(
+        "query",
+        top_k=1,
+        filters=vs.SearchFilters.from_input(tenant_id="test-tenant"),
+    )
 
     assert hits
     assert hits[0]["sha256"] in {"a", "b"}
