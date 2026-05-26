@@ -131,13 +131,42 @@ class _MetricChild:
     def inc(self, amount: float = 1.0) -> None:
         self._metric._samples[self._label_values] += float(amount)
 
+    def dec(self, amount: float = 1.0) -> None:
+        self._metric._samples[self._label_values] -= float(amount)
+
     def observe(self, value: float) -> None:
         self._metric._samples[self._label_values] += float(value)
 
 
-class Counter(_MetricBase):
+class _DefaultChildMixin:
+    """Forward unlabeled ``.inc()``/``.dec()``/``.set()``/``.observe()`` calls
+    to the implicit empty-labels child.
+
+    The real :mod:`prometheus_client` treats a metric declared without
+    ``labelnames`` as having a single default sample with an empty label
+    tuple. Callers may then bypass ``.labels()`` entirely — see
+    ``API_REQUESTS_IN_FLIGHT.inc()`` in :mod:`app.core.app`. Mirroring
+    that contract here keeps the stub honest for ~30 API tests.
+    """
+
+    _child_type: type["_MetricChild"]
+    _labelnames: tuple[str, ...]
+
+    def _default_child(self) -> "_MetricChild":
+        if self._labelnames:
+            raise RuntimeError(
+                "Direct .inc()/.dec()/.set()/.observe() requires a metric "
+                "without labelnames; use .labels(...) first."
+            )
+        return self._child_type(self, ())  # type: ignore[arg-type]
+
+
+class Counter(_MetricBase, _DefaultChildMixin):
     _type = "counter"
     _child_type = _MetricChild
+
+    def inc(self, amount: float = 1.0) -> None:
+        self._default_child().inc(amount)
 
 
 class _GaugeChild(_MetricChild):
@@ -145,9 +174,18 @@ class _GaugeChild(_MetricChild):
         self._metric._samples[self._label_values] = float(value)
 
 
-class Gauge(_MetricBase):
+class Gauge(_MetricBase, _DefaultChildMixin):
     _type = "gauge"
     _child_type = _GaugeChild
+
+    def inc(self, amount: float = 1.0) -> None:
+        self._default_child().inc(amount)
+
+    def dec(self, amount: float = 1.0) -> None:
+        self._default_child().dec(amount)
+
+    def set(self, value: float) -> None:
+        self._default_child().set(value)  # type: ignore[attr-defined]
 
 
 class _HistogramChild(_MetricChild):
@@ -159,9 +197,12 @@ class _HistogramChild(_MetricChild):
         metric._samples[self._label_values] = metric._counts[self._label_values]
 
 
-class Histogram(_MetricBase):
+class Histogram(_MetricBase, _DefaultChildMixin):
     _type = "histogram"
     _child_type = _HistogramChild
+
+    def observe(self, value: float) -> None:
+        self._default_child().observe(value)
 
     def __init__(
         self,

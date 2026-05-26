@@ -167,13 +167,27 @@ class _PrometheusMetric:
     def inc(self, *_: object, **__: object) -> None:
         return None
 
+    def dec(self, *_: object, **__: object) -> None:
+        return None
+
+    def set(self, *_: object, **__: object) -> None:
+        return None
+
     def observe(self, *_: object, **__: object) -> None:
         return None
 
 
 if "prometheus_client" not in sys.modules:
+    # Mirror the surface the production code consumes:
+    # ``app/observability/metrics.py`` imports ``Counter``, ``Gauge``,
+    # ``Histogram`` together, so an inline stub that omits ``Gauge`` (or
+    # ``dec``/``set`` on the metric child) breaks the upload test's
+    # transitive imports with the cryptic "cannot import name 'Gauge' from
+    # '<unknown module name>'" — ``<unknown module name>`` because
+    # ``SimpleNamespace`` has no ``__name__``.
     sys.modules["prometheus_client"] = SimpleNamespace(
         Counter=lambda *args, **kwargs: _PrometheusMetric(),
+        Gauge=lambda *args, **kwargs: _PrometheusMetric(),
         Histogram=lambda *args, **kwargs: _PrometheusMetric(),
         CONTENT_TYPE_LATEST="text/plain",
         generate_latest=lambda: b"",

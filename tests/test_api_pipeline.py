@@ -47,8 +47,8 @@ def api_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Test
     reload(app_main)
     app = app_main.app
 
-    import app.api.v1.chat as chat_module
     import app.api.v1.search as search_module
+    import app.services.chat_orchestrator as chat_orchestrator_module
 
     assert any(route.path == "/api/v1/upload" for route in app.routes)
 
@@ -85,8 +85,15 @@ def api_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Test
         return len(parsed)
 
     monkeypatch.setattr(vectorstore_module, "index_chunks", fake_index)
-    monkeypatch.setattr(search_module, "search", lambda query, top_k=5: chunks[:top_k])
-    monkeypatch.setattr(chat_module, "search", lambda query, top_k=10: chunks[:top_k])
+
+    def fake_search(query, top_k=5, **_kwargs):
+        # ``app.services.vectorstore.search`` now accepts many keyword filters
+        # (owner/tags/act_type/...). Tests only care about deterministic chunk
+        # return, so swallow extras with **kwargs to keep the fake simple.
+        return chunks[:top_k]
+
+    monkeypatch.setattr(search_module, "search", fake_search)
+    monkeypatch.setattr(chat_orchestrator_module, "search", fake_search)
 
     class DummyProvider:
         name = "dummy-provider"

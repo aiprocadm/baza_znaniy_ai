@@ -12,8 +12,12 @@ import { fetchAuthSession, type AuthSession, type Role, type TokenResponse } fro
 
 /**
  * AuthContext encapsulates token management and role-based access control.
+ *
+ * ``Role`` is the canonical role enum defined in ``../api``. We re-export it
+ * here so existing consumers (e.g. ``ProtectedRoute``) keep working without
+ * having to know that the source of truth moved to the API layer.
  */
-export type Role = 'user' | 'admin';
+export type { Role };
 
 export type Session = {
   user_id: string;

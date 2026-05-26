@@ -25,6 +25,10 @@ class HnswConfigDiff:
 class PayloadSchemaType:
     KEYWORD = "keyword"
     INTEGER = "integer"
+    BOOL = "bool"
+    FLOAT = "float"
+    GEO = "geo"
+    TEXT = "text"
 
 
 @dataclass
@@ -42,6 +46,37 @@ class ScoredPoint:
     vector: Iterable[float] | None = None
 
 
+@dataclass
+class MatchValue:
+    """Mirror of qdrant ``models.MatchValue`` — exact-value matching."""
+
+    value: Any
+
+
+@dataclass
+class MatchText:
+    """Mirror of qdrant ``models.MatchText`` — full-text matching."""
+
+    text: str
+
+
+@dataclass
+class FieldCondition:
+    """Mirror of qdrant ``models.FieldCondition`` — single payload predicate."""
+
+    key: str
+    match: Any
+
+
+@dataclass
+class Filter:
+    """Mirror of qdrant ``models.Filter`` — boolean composition of conditions."""
+
+    must: Any = None
+    should: Any = None
+    must_not: Any = None
+
+
 __all__ = [
     "Distance",
     "VectorParams",
@@ -49,4 +84,8 @@ __all__ = [
     "PayloadSchemaType",
     "PointStruct",
     "ScoredPoint",
+    "MatchValue",
+    "MatchText",
+    "FieldCondition",
+    "Filter",
 ]

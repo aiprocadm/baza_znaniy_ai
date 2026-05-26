@@ -10,7 +10,20 @@ from uuid import uuid4
 from sqlalchemy import select
 
 from backend.app.db.session import session_scope
-from backend.app.models.ingestion import IngestionEvent, IngestionJob
+
+# ``backend.app.models.ingestion`` was removed during the schema realignment
+# in commit 6eb22ff but this legacy KBRuntimeStore still references it.
+# Tolerate the missing module so importing this file (transitively required
+# by ``backend.app.main:create_app``) does not crash conftest. Any method
+# below that actually constructs an IngestionJob / IngestionEvent at call
+# time will raise ``TypeError: 'NoneType' object is not callable`` — loud
+# enough to surface "legacy code path, model not restored".
+try:  # pragma: no cover - dependency-driven import path
+    from backend.app.models.ingestion import IngestionEvent, IngestionJob
+except ImportError:  # pragma: no cover - exercised once the model is gone
+    IngestionEvent = None  # type: ignore[assignment]
+    IngestionJob = None  # type: ignore[assignment]
+
 from backend.app.schemas.knowledge_base import (
     ActivityItem,
     ApiKey,
