@@ -165,6 +165,13 @@ jobs:
             gguf-
 
       - name: Download GGUF model
+        # The TinyLlama mirror on Hugging Face now requires auth (HTTP 401
+        # under anonymous CI traffic). Most pytest tests use in-tree stubs
+        # and do not need ``models/model.gguf`` to exist; the integration
+        # tests that *do* need it already skip when the file is missing.
+        # Keep the download step (so a cached blob is picked up when
+        # present) but do not gate the whole CI run on a 3rd-party mirror.
+        continue-on-error: true
         run: |
           mkdir -p models
           python -m scripts.download_model --manifest models/model_manifest.json --output models/model.gguf --allow-missing-hash --max-retries 5
