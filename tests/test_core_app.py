@@ -12,6 +12,13 @@ from importlib.machinery import ModuleSpec
 def core_app(monkeypatch):
     """Import ``app.core.app`` with router dependencies stubbed out."""
 
+    # NOTE: monkeypatch.delitem preserves the original sys.modules entry and
+    # restores it during teardown. A bare ``sys.modules.pop`` here leaks: the
+    # subsequent ``monkeypatch.setitem`` snapshots "not present" as the
+    # original state, so after teardown the real modules stay evicted from
+    # sys.modules — which then breaks downstream tests (e.g.
+    # test_kb_mvp_file_endpoint) that depend on a fully loaded ``app.ingest``
+    # with its ``chunking`` submodule attribute intact.
     for name in [
         "app.core.app",
         "app.core.config",
@@ -31,7 +38,7 @@ def core_app(monkeypatch):
         "app.models.lora",
         "app.services.files",
     ]:
-        sys.modules.pop(name, None)
+        monkeypatch.delitem(sys.modules, name, raising=False)
 
     config_module = types.ModuleType("app.core.config")
     config_module.__spec__ = ModuleSpec("app.core.config", loader=None)
