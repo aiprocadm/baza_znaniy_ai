@@ -10,8 +10,16 @@ from sqlalchemy import func, select
 from backend.app.core.config import get_settings
 from backend.app.db.session import session_scope
 from backend.app.domains.templating.renderer import render_docx
-from backend.app.models import Document, DocumentVersion, Template
+from backend.app.models import Document, DocumentVersion
 from backend.app.services.storage import S3DocumentStorage
+
+# ``Template`` was removed from ``backend.app.models`` during the schema
+# realignment in commit 6eb22ff but the celery task body below still depends
+# on it. Lazy-import inside the task so that *importing this module* — which
+# every backend test conftest does via ``from backend.app.tasks import
+# celery_app`` — does not blow up with ``ImportError: cannot import name
+# 'Template'``. The task itself will raise a clearer error if invoked while
+# Template is missing.
 
 settings = get_settings()
 
@@ -38,6 +46,20 @@ def generate_document_task(
     context: dict[str, Any],
     document_name: str | None = None,
 ) -> dict[str, Any]:
+    # Local import: ``Template`` model was removed from
+    # ``backend.app.models`` during the schema realignment in 6eb22ff. The
+    # task currently has no replacement; importing here keeps module-level
+    # imports working while making the failure mode explicit if anyone
+    # invokes ``generate_document_task`` before the model is restored.
+    try:
+        from backend.app.models import Template  # type: ignore[attr-defined]
+    except ImportError as exc:  # pragma: no cover - hard failure path
+        raise RuntimeError(
+            "generate_document_task is unavailable: backend.app.models.Template "
+            "was removed during the data-model realignment and has not been "
+            "restored. Restore the Template model or retire this task."
+        ) from exc
+
     storage = S3DocumentStorage.from_settings()
     with session_scope() as session:
         template = session.get(Template, template_id)
