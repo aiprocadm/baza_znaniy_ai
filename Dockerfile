@@ -18,9 +18,14 @@ ENV HUGGINGFACE_HUB_TOKEN=${HUGGINGFACE_HUB_TOKEN}
 COPY requirements-runtime.txt requirements-llm.txt requirements-train.txt requirements-dev.txt pyproject.toml ./
 
 # apt versions in -slim images change too often to pin reliably; security updates would break the build.
+# build-essential is needed because llama-cpp-python (requirements-llm.txt) ships no
+# cpython-3.12 manylinux wheel and has to be compiled from source. cmake itself
+# arrives via the pip build env, but gcc/g++ do not. Trade-off: image grows by
+# ~250 MB. A multi-stage build that drops these from the runtime layer is a
+# follow-up if the image size becomes a concern.
 # hadolint ignore=DL3008
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates curl tini \
+    && apt-get install -y --no-install-recommends ca-certificates curl tini build-essential \
     && rm -rf /var/lib/apt/lists/*
 
 # pip+setuptools+wheel are build tooling; runtime deps are pinned via requirements*.txt.
