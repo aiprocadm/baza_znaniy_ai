@@ -4,9 +4,18 @@ import json
 from datetime import datetime, timezone
 from typing import Any, AsyncIterator, Literal
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
-from sse_starlette.sse import EventSourceResponse
+
+# ``sse_starlette`` is not pinned in any ``requirements*.txt`` of this repo,
+# so a fresh CI environment cannot import it. The only place it is used
+# here is inside ``rag_query_stream``; deferring the import keeps this
+# module loadable so the rest of the legacy ``backend.app.api.v1.router``
+# (and therefore ``backend/tests/conftest.py``) can run.
+try:  # pragma: no cover - dependency-driven import path
+    from sse_starlette.sse import EventSourceResponse
+except ImportError:  # pragma: no cover - exercised when sse_starlette absent
+    EventSourceResponse = None  # type: ignore[assignment,misc]
 
 from backend.app.api.deps import get_tenant_context
 from backend.app.schemas.knowledge_base import SearchRequest, SearchResponse
@@ -77,6 +86,14 @@ def rag_query(payload: RagQueryRequest, tenant_ctx: tuple[str, str] = Depends(ge
 
 @router.post("/query/stream")
 async def rag_query_stream(payload: RagQueryRequest, tenant_ctx: tuple[str, str] = Depends(get_tenant_context)) -> EventSourceResponse:
+    if EventSourceResponse is None:
+        # The sse_starlette package is not installed in this deployment;
+        # surface a clear 503 instead of an unrelated AttributeError.
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Streaming RAG endpoint requires the optional sse-starlette dependency.",
+        )
+
     _, tenant_slug = tenant_ctx
 
     async def _event_gen() -> AsyncIterator[dict[str, str]]:
