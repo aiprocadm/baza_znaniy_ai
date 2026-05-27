@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
+from app.core.datetime_utils import utc_now_naive
 from app.models.audit import AuditLog
 
 
@@ -29,7 +30,7 @@ def test_audit_log_instantiation() -> None:
 def test_audit_log_minimal_fields() -> None:
     """AuditLog requires only event and timestamp."""
     entry = AuditLog(
-        timestamp=datetime.utcnow(),
+        timestamp=utc_now_naive(),
         event="api_request",
     )
     assert entry.user_id is None
