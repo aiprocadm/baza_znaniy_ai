@@ -100,7 +100,9 @@ def _load_adapter(base_model: str, adapter_path: Path) -> tuple[PeftModel, AutoT
     if adapter_path.is_file():
         adapter_dir = adapter_path.parent
     base = AutoModelForCausalLM.from_pretrained(base_model)
-    model = PeftModel.from_pretrained(base, adapter_dir)
+    # PeftModel.from_pretrained delegates to huggingface_hub which raises
+    # HFValidationError for non-string repo IDs; coerce the local Path to str.
+    model = PeftModel.from_pretrained(base, str(adapter_dir))
     model.eval()
     return model, tokenizer
 
