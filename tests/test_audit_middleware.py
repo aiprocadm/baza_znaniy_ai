@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import timedelta
 
 import pytest
 from fastapi import FastAPI
@@ -11,6 +11,7 @@ from sqlalchemy.pool import StaticPool
 from sqlmodel import Session, SQLModel, create_engine, select
 
 from app.core.audit_middleware import AuditMiddleware
+from app.core.datetime_utils import utc_now_naive
 from app.models.audit import AuditLog
 
 
@@ -50,7 +51,7 @@ def app(engine):
 
 def test_middleware_logs_kb_request(app, engine):
     client = TestClient(app)
-    before = datetime.utcnow() - timedelta(seconds=1)
+    before = utc_now_naive() - timedelta(seconds=1)
     resp = client.get("/api/kb/health")
     assert resp.status_code == 200
 

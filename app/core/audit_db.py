@@ -8,6 +8,7 @@ from typing import Any, Optional
 
 from sqlmodel import Session, select
 
+from app.core.datetime_utils import utc_now_naive
 from app.models.audit import AuditLog
 
 
@@ -27,7 +28,7 @@ def persist_audit_event(
 ) -> AuditLog:
     """Write one row to audit_log. Commits immediately."""
     entry = AuditLog(
-        timestamp=timestamp or datetime.utcnow(),
+        timestamp=timestamp or utc_now_naive(),
         event=event,
         user_id=user_id,
         tenant=tenant,
