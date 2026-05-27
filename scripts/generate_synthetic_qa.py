@@ -39,13 +39,16 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         description="Generate a synthetic Q&A dataset from a KB corpus via a teacher LLM."
     )
     parser.add_argument(
-        "--corpus", required=True, type=Path,
+        "--corpus",
+        required=True,
+        type=Path,
         help="Path to KB SQLite file (e.g. var/data/kb_mvp.sqlite).",
     )
     parser.add_argument(
-        "--provider", default=None,
+        "--provider",
+        default=None,
         help="Teacher LLM provider name (deepseek, groq, openrouter, openai, ollama, custom). "
-             "Defaults to KB_LLM_PROVIDER env or auto-selection.",
+        "Defaults to KB_LLM_PROVIDER env or auto-selection.",
     )
     parser.add_argument(
         "--mode",
@@ -54,35 +57,47 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help="Generation strategy (default: single).",
     )
     parser.add_argument(
-        "--output", required=True, type=Path,
+        "--output",
+        required=True,
+        type=Path,
         help="Output JSONL file (created or appended to).",
     )
     parser.add_argument(
-        "--document-id", type=int, default=None,
+        "--document-id",
+        type=int,
+        default=None,
         help="Restrict generation to one document id (default: all chunks).",
     )
     parser.add_argument(
-        "--multi-hop-chunks", type=int, default=3,
+        "--multi-hop-chunks",
+        type=int,
+        default=3,
         help="How many chunks to combine when mode=multi-hop (default 3).",
     )
     parser.add_argument(
-        "--max-budget-usd", type=float, default=5.0,
+        "--max-budget-usd",
+        type=float,
+        default=5.0,
         help="Abort if estimated cost exceeds this many USD (default 5.0).",
     )
     parser.add_argument(
-        "--no-budget-guard", action="store_true",
+        "--no-budget-guard",
+        action="store_true",
         help="Disable the budget guard entirely (use with care).",
     )
     parser.add_argument(
-        "--no-self-consistency", action="store_true",
+        "--no-self-consistency",
+        action="store_true",
         help="Disable the second-generation self-consistency check.",
     )
     parser.add_argument(
-        "--resume", action="store_true",
+        "--resume",
+        action="store_true",
         help="Skip chunks already represented in the output JSONL.",
     )
     parser.add_argument(
-        "--log-level", default="INFO",
+        "--log-level",
+        default="INFO",
         choices=["DEBUG", "INFO", "WARNING", "ERROR"],
     )
     return parser.parse_args(list(argv) if argv is not None else None)
@@ -139,7 +154,8 @@ def _enforce_budget(
     if estimate is None:
         LOGGER.warning(
             "No pricing data for (%s, %s); budget guard disabled.",
-            provider.name, provider.model,
+            provider.name,
+            provider.model,
         )
         return
 
@@ -177,7 +193,9 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     LOGGER.info(
         "Generator config: provider=%s model=%s mode=%s",
-        provider.name, provider.model, mode.value,
+        provider.name,
+        provider.model,
+        mode.value,
     )
 
     all_chunks = list(iter_chunks(store, document_id=args.document_id))
@@ -229,7 +247,9 @@ def main(argv: Sequence[str] | None = None) -> int:
 
             LOGGER.info(
                 "Batch chunks=%s kept=%d total=%d",
-                chunk_ids, len(pairs), written,
+                chunk_ids,
+                len(pairs),
+                written,
             )
 
     LOGGER.info("Done: %d Q&A pairs written to %s", written, args.output)

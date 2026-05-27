@@ -283,9 +283,7 @@ def test_cross_process_worker_flow(sqlite_db: str, sample_file: Path) -> None:
         await worker._process(job)
 
         with Session(worker_service.engine) as session:
-            file_obj = session.exec(
-                select(FileRecord).where(FileRecord.id == record.id)
-            ).one()
+            file_obj = session.exec(select(FileRecord).where(FileRecord.id == record.id)).one()
             assert file_obj.status == file_models.FileStatus.COMPLETED
             jobs = session.exec(select(JobRecord).order_by(JobRecord.created_at)).all()
             assert jobs[-1].status == JobStatus.COMPLETED
@@ -547,7 +545,9 @@ def test_dequeue_recovers_stuck_processing_job(
             stale_started = utc_now() - timedelta(seconds=30)
             stale_naive = stale_started.replace(tzinfo=None)
             with Session(service.engine) as session:
-                job_record = session.exec(select(JobRecord).where(JobRecord.resource_id == str(record.id))).one()
+                job_record = session.exec(
+                    select(JobRecord).where(JobRecord.resource_id == str(record.id))
+                ).one()
                 job_record.status = JobStatus.PROCESSING
                 job_record.started_at = stale_naive
                 job_record.updated_at = stale_naive

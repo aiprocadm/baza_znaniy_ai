@@ -75,13 +75,10 @@ def compute_file_stats(session: Session, tenant_id: str) -> FileStats:
         total_size_bytes += size_int
         total_chunks += chunks_int
 
-    timestamp_stmt = (
-        select(
-            func.min(FileRecord.created_at),
-            func.max(FileRecord.created_at),
-        )
-        .where(FileRecord.tenant_id == tenant_id)
-    )
+    timestamp_stmt = select(
+        func.min(FileRecord.created_at),
+        func.max(FileRecord.created_at),
+    ).where(FileRecord.tenant_id == tenant_id)
     timestamp_row = session.exec(timestamp_stmt).first()
     if timestamp_row:
         oldest_raw, newest_raw = timestamp_row

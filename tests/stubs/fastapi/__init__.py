@@ -67,7 +67,6 @@ class UploadFile:
         self,
         filename: str | None = None,
         file: IO[bytes] | None = None,
-
         *,
         content: bytes | None = None,
         content_type: str | None = None,
@@ -206,13 +205,19 @@ class _RouterBase:
     def put(self, path: str, **options: Any) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
         return self._add_route("PUT", path, **options)
 
-    def patch(self, path: str, **options: Any) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+    def patch(
+        self, path: str, **options: Any
+    ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
         return self._add_route("PATCH", path, **options)
 
-    def delete(self, path: str, **options: Any) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+    def delete(
+        self, path: str, **options: Any
+    ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
         return self._add_route("DELETE", path, **options)
 
-    def options(self, path: str, **options: Any) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+    def options(
+        self, path: str, **options: Any
+    ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
         return self._add_route("OPTIONS", path, **options)
 
     def head(self, path: str, **options: Any) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
@@ -241,7 +246,9 @@ class _RouterBase:
 
         return decorator
 
-    def _find_route(self, method: str, path: str) -> tuple[_Route, Dict[str, str]] | tuple[None, None]:
+    def _find_route(
+        self, method: str, path: str
+    ) -> tuple[_Route, Dict[str, str]] | tuple[None, None]:
         for route in self._routes:
             if route.method != method:
                 continue
@@ -286,13 +293,13 @@ def _serialise(data: Any) -> Any:
     return data
 
 
-def _resolve_dependency(
-    dependency: Callable[..., Any] | Any, app: "FastAPI"
-) -> Any:
+def _resolve_dependency(dependency: Callable[..., Any] | Any, app: "FastAPI") -> Any:
     if not callable(dependency):
         return dependency
 
-    override = app.dependency_overrides.get(dependency) if hasattr(app, "dependency_overrides") else None
+    override = (
+        app.dependency_overrides.get(dependency) if hasattr(app, "dependency_overrides") else None
+    )
     target = override or dependency
 
     signature = inspect.signature(target)

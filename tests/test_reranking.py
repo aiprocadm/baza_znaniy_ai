@@ -223,7 +223,9 @@ def test_chat_skips_reranker_when_disabled(sample_hits: List[dict[str, Any]]) ->
     assert [item.file for item in response.citations] == expected_files
 
 
-def test_chat_falls_back_to_legacy_when_langchain_disabled(sample_hits: List[dict[str, Any]]) -> None:
+def test_chat_falls_back_to_legacy_when_langchain_disabled(
+    sample_hits: List[dict[str, Any]]
+) -> None:
     settings = Settings().model_copy(
         update={
             "langchain_enabled": False,

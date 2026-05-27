@@ -20,7 +20,9 @@ def _build_docx(paragraphs: List[str]) -> bytes:
         <w:p>
             <w:r><w:t>{text}</w:t></w:r>
         </w:p>
-        """.format(text=escape(paragraph))
+        """.format(
+            text=escape(paragraph)
+        )
         for paragraph in paragraphs
     )
     document_xml = (

@@ -8,9 +8,7 @@ from http import HTTPStatus
 import pytest
 
 
-pytestmark = pytest.mark.filterwarnings(
-    "ignore:'HTTP_422_UNPROCESSABLE_ENTITY' is deprecated"
-)
+pytestmark = pytest.mark.filterwarnings("ignore:'HTTP_422_UNPROCESSABLE_ENTITY' is deprecated")
 
 
 @pytest.fixture
@@ -50,4 +48,3 @@ def test_constants_fall_back_when_names_missing(monkeypatch, status_module):
     status_codes = importlib.reload(importlib.import_module("app.api.status_codes"))
 
     assert status_codes.HTTP_UNPROCESSABLE_CONTENT == int(HTTPStatus.UNPROCESSABLE_ENTITY)
-

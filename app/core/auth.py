@@ -45,14 +45,11 @@ class SubjectAttribution:
 class IdentityProvider(Protocol):
     """Interface for pluggable identity providers."""
 
-    def verify_token(self, token: str) -> dict[str, Any]:
-        ...
+    def verify_token(self, token: str) -> dict[str, Any]: ...
 
-    def extract_tenant(self, claims: dict[str, Any]) -> str:
-        ...
+    def extract_tenant(self, claims: dict[str, Any]) -> str: ...
 
-    def extract_roles(self, claims: dict[str, Any]) -> tuple[str, ...]:
-        ...
+    def extract_roles(self, claims: dict[str, Any]) -> tuple[str, ...]: ...
 
 
 class LocalJwtProvider:
@@ -62,7 +59,9 @@ class LocalJwtProvider:
         try:
             payload = decode_token(token)
         except InvalidTokenError as exc:
-            raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="INVALID_ACCESS_TOKEN") from exc
+            raise HTTPException(
+                status.HTTP_401_UNAUTHORIZED, detail="INVALID_ACCESS_TOKEN"
+            ) from exc
         if payload.get("type") != "access":
             raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="INVALID_ACCESS_TOKEN")
         issuer = os.getenv("JWT_ISSUER", "baza-znaniy-ai")
@@ -91,7 +90,6 @@ class KeycloakOidcProvider(LocalJwtProvider):
 
 class SupabaseAuthProvider(LocalJwtProvider):
     """Placeholder provider for Supabase Auth integration."""
-
 
 
 _AUTH_DISABLED_ENV_KEYS = (
@@ -199,12 +197,16 @@ def _resolve_api_key_subject(request: Request, session: Session) -> SubjectAttri
     return SubjectAttribution(subject_type="api_key", subject_id=str(record.id), tenant=tenant)
 
 
-def get_subject_attribution(request: Request, session: Session = Depends(get_ingest_session)) -> SubjectAttribution:
+def get_subject_attribution(
+    request: Request, session: Session = Depends(get_ingest_session)
+) -> SubjectAttribution:
     api_key_subject = _resolve_api_key_subject(request, session)
     if api_key_subject is not None:
         return api_key_subject
     user = get_current_active_user(get_current_user(request, session))
-    return SubjectAttribution(subject_type="user", subject_id=str(getattr(user, "id", "unknown")), tenant=user.tenant_slug)
+    return SubjectAttribution(
+        subject_type="user", subject_id=str(getattr(user, "id", "unknown")), tenant=user.tenant_slug
+    )
 
 
 @dataclass
@@ -286,7 +288,9 @@ def issue_tokens(
     return TokenPair(access_token=access_token, refresh_token=refresh_token, expires_in=expires_in)
 
 
-def decode_refresh_token(token: str, *, registry: TokenRegistry, allow_revoked: bool = False) -> dict:
+def decode_refresh_token(
+    token: str, *, registry: TokenRegistry, allow_revoked: bool = False
+) -> dict:
     try:
         payload = decode_token(token)
     except InvalidTokenError as exc:
@@ -398,7 +402,10 @@ def authorize_tenant_and_roles(
     if token:
         try:
             claims = provider.verify_token(token)
-            if provider.extract_tenant(claims) and provider.extract_tenant(claims) != user.tenant_slug:
+            if (
+                provider.extract_tenant(claims)
+                and provider.extract_tenant(claims) != user.tenant_slug
+            ):
                 raise HTTPException(status.HTTP_403_FORBIDDEN, detail="TENANT_ACCESS_DENIED")
             roles_from_token = provider.extract_roles(claims)
         except HTTPException:

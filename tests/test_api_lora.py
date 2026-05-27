@@ -386,7 +386,9 @@ def test_load_and_unload_cycle(lora_client: TestClient) -> None:
     assert unload.json()["loaded"] is False
 
 
-def test_admin_routes_error_mapping(monkeypatch: pytest.MonkeyPatch, lora_client: TestClient) -> None:
+def test_admin_routes_error_mapping(
+    monkeypatch: pytest.MonkeyPatch, lora_client: TestClient
+) -> None:
     def _fake_list() -> list[AdapterInfo]:
         return [
             AdapterInfo.from_path(
@@ -429,7 +431,11 @@ def test_admin_routes_error_mapping(monkeypatch: pytest.MonkeyPatch, lora_client
     assert payload["message"] == "bad"
     assert payload["status"] == HTTP_UNPROCESSABLE_CONTENT
 
-    monkeypatch.setattr(routes_lora_module, "load_adapter", lambda name: (_ for _ in ()).throw(RuntimeError("broken")))
+    monkeypatch.setattr(
+        routes_lora_module,
+        "load_adapter",
+        lambda name: (_ for _ in ()).throw(RuntimeError("broken")),
+    )
     generic = lora_client.post("/admin/lora/load", json={"name": "broken"})
     assert generic.status_code == status.HTTP_400_BAD_REQUEST
     payload = generic.json()
@@ -448,7 +454,9 @@ def test_admin_routes_error_mapping(monkeypatch: pytest.MonkeyPatch, lora_client
     assert payload["status"] == status.HTTP_400_BAD_REQUEST
 
 
-def test_lora_runtime_manager_handles_provider(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_lora_runtime_manager_handles_provider(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     provider = StubProvider()
     monkeypatch.setattr(cache_module, "get_cached_provider", lambda settings=None: provider)
     monkeypatch.setattr(lora_runtime, "get_cached_provider", lambda settings=None: provider)
@@ -538,10 +546,14 @@ def test_lora_runtime_manager_compatibility_errors(
             return None
 
     class NoPeftProvider(StubProvider):
-        def load_lora(self, path: Path, *, scaling: float | None = None) -> None:  # pragma: no cover
+        def load_lora(
+            self, path: Path, *, scaling: float | None = None
+        ) -> None:  # pragma: no cover
             raise AssertionError("Should not be called")
 
-    monkeypatch.setattr(lora_manager_service, "get_cached_provider", lambda settings=None: NoLoraProvider())
+    monkeypatch.setattr(
+        lora_manager_service, "get_cached_provider", lambda settings=None: NoLoraProvider()
+    )
     monkeypatch.setattr(lora_runtime, "get_cached_provider", lambda settings=None: NoLoraProvider())
     monkeypatch.setenv("LLM_MODEL_NAME", "meta-llama/Llama-3-8b-Instruct")
     config_module.get_settings.cache_clear()
@@ -550,7 +562,9 @@ def test_lora_runtime_manager_compatibility_errors(
     with pytest.raises(lora_runtime.AdapterCompatibilityError):
         asyncio.run(manager.load_adapter(gguf_path, 0.5))
 
-    monkeypatch.setattr(lora_manager_service, "get_cached_provider", lambda settings=None: NoPeftProvider())
+    monkeypatch.setattr(
+        lora_manager_service, "get_cached_provider", lambda settings=None: NoPeftProvider()
+    )
     monkeypatch.setattr(lora_runtime, "get_cached_provider", lambda settings=None: NoPeftProvider())
     config_module.get_settings.cache_clear()
     manager = lora_module.get_lora_manager()

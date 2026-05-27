@@ -61,7 +61,11 @@ def test_get_engine_with_sqlmodel_stub(monkeypatch, tmp_path: Path) -> None:
             sys.modules["sqlmodel"] = original_sqlmodel
             if original_file_module is not None and hasattr(original_file_module, "get_engine"):
                 original_file_module.get_engine.cache_clear()
-        if original_file_module is None and app_models_pkg is not None and hasattr(app_models_pkg, "file"):
+        if (
+            original_file_module is None
+            and app_models_pkg is not None
+            and hasattr(app_models_pkg, "file")
+        ):
             delattr(app_models_pkg, "file")
         monkeypatch.delenv("DB_URL", raising=False)
 
@@ -111,7 +115,11 @@ def test_get_engine_sqlite_aiosqlite_with_sqlalchemy_stub(monkeypatch) -> None:
         if file_module is not None:
             file_module.get_engine.cache_clear()
         _restore_module("app.models.file", original_file_module)
-        if app_models_pkg is not None and hasattr(app_models_pkg, "file") and original_file_module is None:
+        if (
+            app_models_pkg is not None
+            and hasattr(app_models_pkg, "file")
+            and original_file_module is None
+        ):
             delattr(app_models_pkg, "file")
         _restore_module("sqlalchemy", original_sqlalchemy)
         _restore_module("sqlmodel", original_sqlmodel)

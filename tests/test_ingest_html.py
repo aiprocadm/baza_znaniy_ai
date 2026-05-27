@@ -107,7 +107,9 @@ def test_html_to_text_sections_configures_html2text(monkeypatch: pytest.MonkeyPa
     assert converter.unicode_snob is True
 
 
-def test_html_to_text_sections_excludes_links_when_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_html_to_text_sections_excludes_links_when_disabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     instances: List[object] = []
 
     class DummyHTML2Text:

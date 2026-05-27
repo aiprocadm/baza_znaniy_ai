@@ -1,4 +1,5 @@
 """Test the audit_db persistence helpers."""
+
 from __future__ import annotations
 
 import pytest

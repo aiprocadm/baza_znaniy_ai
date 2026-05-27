@@ -41,7 +41,9 @@ def upload_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient
     app = FastAPI()
     app.include_router(upload_module.router, prefix="/api/v1")
 
-    app.dependency_overrides[upload_module.get_current_active_user] = lambda: SimpleNamespace(id="user")
+    app.dependency_overrides[upload_module.get_current_active_user] = lambda: SimpleNamespace(
+        id="user"
+    )
     app.dependency_overrides[upload_module.ensure_tenant_access] = lambda: "tenant"
     app.dependency_overrides[upload_module.get_data_dir] = lambda: tmp_path
     app.dependency_overrides[upload_module.get_ingest_service] = lambda: _StubIngestService()
@@ -53,7 +55,9 @@ def upload_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient
     return TestClient(app)
 
 
-def test_upload_rate_limit_returns_429(upload_client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_upload_rate_limit_returns_429(
+    upload_client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setattr(upload_module, "_RATE_LIMIT", 1)
     monkeypatch.setattr(upload_module, "_RATE_WINDOW", 3600.0)
 

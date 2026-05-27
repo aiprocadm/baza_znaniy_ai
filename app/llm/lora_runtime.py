@@ -65,10 +65,7 @@ class AdapterInfo:
         elif adapter_type in {"safetensors", "peft", "adapter_model", "bin"}:
             adapter_type = "peft"
         created_at = (
-            datetime.now(timezone.utc)
-            .replace(microsecond=0)
-            .isoformat()
-            .replace("+00:00", "Z")
+            datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
         )
         return cls(
             name=path.stem,

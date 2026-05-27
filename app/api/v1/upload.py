@@ -32,7 +32,12 @@ from app.api.upload_policies import (
     evaluate_content_type,
 )
 from app.api.upload_utils import create_upload_file, validate_upload_request
-from app.core.auth import SubjectAttribution, ensure_tenant_access, get_current_active_user, get_subject_attribution
+from app.core.auth import (
+    SubjectAttribution,
+    ensure_tenant_access,
+    get_current_active_user,
+    get_subject_attribution,
+)
 from app.core import deps as core_deps
 from app.models.user import UserRecord
 from app.models import UploadResponse
@@ -80,15 +85,11 @@ if _auth_module is not None:
         pass
 
     _auth_module.TokenPair = getattr(_auth_module, "TokenPair", _TokenPair)
-    _auth_module.bearer_scheme = getattr(
-        _auth_module, "bearer_scheme", lambda: None
-    )
+    _auth_module.bearer_scheme = getattr(_auth_module, "bearer_scheme", lambda: None)
     _auth_module.decode_refresh_token = getattr(
         _auth_module, "decode_refresh_token", lambda *_: None
     )
-    _auth_module.get_token_registry = getattr(
-        _auth_module, "get_token_registry", lambda: None
-    )
+    _auth_module.get_token_registry = getattr(_auth_module, "get_token_registry", lambda: None)
     _auth_module.issue_tokens = getattr(_auth_module, "issue_tokens", lambda *_: None)
 
 
@@ -226,7 +227,9 @@ def _ensure_fastapi_test_helpers() -> None:
 
                 async def _resolve_async():
                     if AsyncExitStack is None:
-                        raise RuntimeError("AsyncExitStack is required for FastAPI dependency resolution")
+                        raise RuntimeError(
+                            "AsyncExitStack is required for FastAPI dependency resolution"
+                        )
                     async with AsyncExitStack() as stack:
                         kwargs = dict(base_kwargs)
                         kwargs["async_exit_stack"] = stack
@@ -598,9 +601,7 @@ def _extract_disposition_filename(source: object) -> str | None:
 def _coerce_upload_argument(item: object) -> UploadFile:
     if isinstance(item, FastAPIUploadFile):
         filename = (
-            getattr(item, "filename", None)
-            or _extract_disposition_filename(item)
-            or "uploaded"
+            getattr(item, "filename", None) or _extract_disposition_filename(item) or "uploaded"
         )
         file_obj = getattr(item, "file", None)
         seek = getattr(file_obj, "seek", None)
@@ -628,12 +629,8 @@ def _coerce_upload_argument(item: object) -> UploadFile:
         original_content_type = getattr(item, "content_type", None)
         desired_content_type = original_content_type or header_content_type
 
-        if (
-            original_filename == filename
-            and (
-                desired_content_type is None
-                or desired_content_type == original_content_type
-            )
+        if original_filename == filename and (
+            desired_content_type is None or desired_content_type == original_content_type
         ):
             return item
 
@@ -641,7 +638,9 @@ def _coerce_upload_argument(item: object) -> UploadFile:
         return create_upload_file(filename, payload, desired_content_type)
 
     if StarletteUploadFile is not None and isinstance(item, StarletteUploadFile):
-        filename = getattr(item, "filename", None) or _extract_disposition_filename(item) or "uploaded"
+        filename = (
+            getattr(item, "filename", None) or _extract_disposition_filename(item) or "uploaded"
+        )
         content_type = getattr(item, "content_type", None)
         file_obj = getattr(item, "file", item)
         return create_upload_file(filename, file_obj, content_type)

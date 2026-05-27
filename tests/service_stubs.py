@@ -20,7 +20,9 @@ def install_service_stubs() -> None:
             self.adapters: dict[str, dict[str, Any]] = {}
             self.active_adapter: str | None = None
 
-        def load_adapter(self, path: str, adapter_name: str | None = None, scale: float | None = None) -> None:
+        def load_adapter(
+            self, path: str, adapter_name: str | None = None, scale: float | None = None
+        ) -> None:
             name = adapter_name or Path(path).stem or "adapter"
             self.adapters[name] = {"path": path, "scale": scale}
             self.active_adapter = name
@@ -52,7 +54,9 @@ def install_service_stubs() -> None:
             def get_collection(self, *_: Any, **__: Any) -> None:
                 raise UnexpectedResponse()
 
-            def recreate_collection(self, *args: Any, **kwargs: Any) -> None:  # pragma: no cover - noop
+            def recreate_collection(
+                self, *args: Any, **kwargs: Any
+            ) -> None:  # pragma: no cover - noop
                 return None
 
             def create_payload_index(self, *args: Any, **kwargs: Any) -> None:  # pragma: no cover
@@ -203,7 +207,9 @@ def install_service_stubs() -> None:
 
     if "apscheduler.triggers.cron" not in sys.modules:
         apscheduler_module = sys.modules.setdefault("apscheduler", types.ModuleType("apscheduler"))
-        triggers_module = sys.modules.setdefault("apscheduler.triggers", types.ModuleType("apscheduler.triggers"))
+        triggers_module = sys.modules.setdefault(
+            "apscheduler.triggers", types.ModuleType("apscheduler.triggers")
+        )
         cron_module = types.ModuleType("apscheduler.triggers.cron")
 
         class CronTrigger:
@@ -217,7 +223,9 @@ def install_service_stubs() -> None:
         setattr(apscheduler_module, "triggers", triggers_module)
 
     if "apscheduler.triggers.interval" not in sys.modules:
-        triggers_module = sys.modules.setdefault("apscheduler.triggers", types.ModuleType("apscheduler.triggers"))
+        triggers_module = sys.modules.setdefault(
+            "apscheduler.triggers", types.ModuleType("apscheduler.triggers")
+        )
         interval_module = types.ModuleType("apscheduler.triggers.interval")
 
         class IntervalTrigger:

@@ -1,4 +1,5 @@
 """Verify the i18n loader JS and ru.json are well-formed and consistent."""
+
 from __future__ import annotations
 
 import json
@@ -69,6 +70,6 @@ def test_loader_supports_interpolation():
     content = (I18N / "_loader.js").read_text(encoding="utf-8")
     assert "t(" in content or "window.t" in content
     # The substitution pattern uses simple {key} braces — verify it's wired
-    assert "{" in content and "replace" in content, (
-        "_loader.js should support {var}-style interpolation in t()"
-    )
+    assert (
+        "{" in content and "replace" in content
+    ), "_loader.js should support {var}-style interpolation in t()"

@@ -92,7 +92,9 @@ def upgrade() -> None:
         sa.Column("sha256", sa.String(), nullable=False),
         sa.Column("slug", sa.String(), nullable=True),
         sa.Column("title", sa.String(), nullable=True),
-        sa.Column("mime_type", sa.String(), nullable=False, server_default="application/octet-stream"),
+        sa.Column(
+            "mime_type", sa.String(), nullable=False, server_default="application/octet-stream"
+        ),
         sa.Column("status", sa.String(), nullable=False, server_default="queued"),
         sa.Column("error", sa.String(), nullable=True),
         sa.Column("chunks", sa.Integer(), nullable=True),

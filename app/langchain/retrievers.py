@@ -10,6 +10,7 @@ from app.retriever.vector_store import SearchFilters
 try:  # pragma: no cover - optional dependency
     from langchain_core.documents import Document
 except Exception:  # pragma: no cover
+
     class Document:  # type: ignore[override]
         def __init__(self, page_content: str, metadata: dict[str, object] | None = None) -> None:
             self.page_content = page_content
@@ -42,7 +43,9 @@ class TenantFilteredQdrantRetriever:
             is_active=metadata.get("is_active"),  # type: ignore[arg-type]
             revision_mode=metadata.get("revision", "current"),  # type: ignore[arg-type]
         )
-        return self.store.as_retriever(query=query, top_k=int(kwargs.get("k", self.k)), filters=filters)
+        return self.store.as_retriever(
+            query=query, top_k=int(kwargs.get("k", self.k)), filters=filters
+        )
 
     def invoke(self, query: str, **kwargs: object) -> list[Document]:
         return self.get_relevant_documents(query, **kwargs)

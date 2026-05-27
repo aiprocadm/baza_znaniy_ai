@@ -1,4 +1,5 @@
 """Test that page and has_original propagate through search/ask responses."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -63,9 +64,9 @@ def test_ask_response_has_page_and_has_original(app_with_store, store):
     data = resp.json()
     assert data["sources"], "expected sources"
     # At least one source should match page 1
-    assert any(s["page"] is not None for s in data["sources"]), (
-        f"no page info in sources: {data['sources']}"
-    )
+    assert any(
+        s["page"] is not None for s in data["sources"]
+    ), f"no page info in sources: {data['sources']}"
     assert all(s["has_original"] is True for s in data["sources"])
 
 
@@ -110,7 +111,7 @@ def test_ask_stream_meta_has_page_and_has_original(app_with_store, store):
         if line.strip() == "event: meta" and i + 1 < len(lines):
             data_line = lines[i + 1]
             if data_line.startswith("data: "):
-                meta_data = json.loads(data_line[len("data: "):])
+                meta_data = json.loads(data_line[len("data: ") :])
                 break
     assert meta_data is not None, f"meta event not found in SSE stream:\n{text}"
 

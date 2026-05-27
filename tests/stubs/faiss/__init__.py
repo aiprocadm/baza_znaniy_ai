@@ -43,4 +43,3 @@ def read_index(path: str) -> IndexFlatIP:  # pragma: no cover - minimal loader
 
 
 __all__ = ["IndexFlatIP", "read_index", "write_index"]
-

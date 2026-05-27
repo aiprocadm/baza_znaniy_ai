@@ -133,7 +133,12 @@ def test_configurable_fallback_storage(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_fallback_search_filters() -> None:
     vectorstore.index_chunks(
         [
-            {"id": 1, "text": "Replication setup", "owner": "alice@kb.ai", "tags": ["prod", "runbook"]},
+            {
+                "id": 1,
+                "text": "Replication setup",
+                "owner": "alice@kb.ai",
+                "tags": ["prod", "runbook"],
+            },
             {"id": 2, "text": "Replication setup", "owner": "bob@kb.ai", "tags": ["dev"]},
             {"id": 3, "text": "Replication setup", "owner": "alice@kb.ai", "tags": ["prod"]},
         ]

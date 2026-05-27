@@ -66,4 +66,3 @@ def evaluate_content_type(extension: str, content_type: str | None) -> UploadCon
         content_type=normalised,
         requires_logging=requires_logging,
     )
-

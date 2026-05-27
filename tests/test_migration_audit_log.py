@@ -6,6 +6,7 @@ cannot run on SQLite. We stamp the DB at the immediate predecessor revision
 new audit_log migration. The audit_log table has no FK dependencies, so no
 predecessor tables need to exist.
 """
+
 from __future__ import annotations
 
 import sqlite3
@@ -20,6 +21,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 
 def _alembic(args: list[str], db_url: str) -> subprocess.CompletedProcess:
     import os
+
     env = {**os.environ, "DB_URL": db_url}
     return subprocess.run(
         [sys.executable, "-m", "alembic"] + args,
@@ -47,17 +49,23 @@ def test_audit_log_table_created_by_migration(tmp_path: Path) -> None:
 
     # Verify the table and columns exist.
     conn = sqlite3.connect(str(db_path))
-    cursor = conn.execute(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name='audit_log'"
-    )
+    cursor = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='audit_log'")
     assert cursor.fetchone() is not None, "audit_log table missing"
 
     cursor = conn.execute("PRAGMA table_info(audit_log)")
     columns = {row[1] for row in cursor.fetchall()}
     expected = {
-        "id", "timestamp", "event", "user_id", "tenant",
-        "ip", "request_path", "request_method", "status_code",
-        "payload_json", "correlation_id",
+        "id",
+        "timestamp",
+        "event",
+        "user_id",
+        "tenant",
+        "ip",
+        "request_path",
+        "request_method",
+        "status_code",
+        "payload_json",
+        "correlation_id",
     }
     assert expected.issubset(columns), f"missing columns: {expected - columns}"
 

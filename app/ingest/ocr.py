@@ -174,4 +174,3 @@ def iter_pdf_pages_with_ocr(
 
 
 __all__ = ["OCRConfig", "OCRError", "iter_pdf_pages_with_ocr"]
-

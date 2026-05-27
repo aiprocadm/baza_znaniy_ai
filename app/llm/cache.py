@@ -1,4 +1,5 @@
 """Caching helpers for language model providers."""
+
 from __future__ import annotations
 
 import importlib
@@ -81,6 +82,7 @@ class _CompatProvider:
 
     def __getattr__(self, attribute: str) -> Any:  # pragma: no cover - passthrough
         return getattr(self._inner, attribute)
+
 
 def _ensure_provider_interface(provider: LLMProvider, settings: SettingsType) -> LLMProvider:
     """Ensure the resolved provider exposes the expected llama.cpp interface."""
@@ -226,7 +228,11 @@ def set_provider_factory_override(
 
 
 def _is_external_factory(candidate: object) -> bool:
-    return callable(candidate) and not getattr(candidate, _DEFAULT_MARKER, False) and getattr(candidate, "__module__", None) != __name__
+    return (
+        callable(candidate)
+        and not getattr(candidate, _DEFAULT_MARKER, False)
+        and getattr(candidate, "__module__", None) != __name__
+    )
 
 
 def _sync_external_factory(candidate: object) -> None:

@@ -20,7 +20,9 @@ class FakeCursor:
         self.fetchone_result: Optional[Dict[str, Any]] = None
         self.fetchall_result: Iterable[Dict[str, Any]] = ()
 
-    def execute(self, query: Any, params: Any = None) -> None:  # noqa: ANN401 - matches psycopg signature
+    def execute(
+        self, query: Any, params: Any = None
+    ) -> None:  # noqa: ANN401 - matches psycopg signature
         self.connection.log.append(("execute", query, params))
 
     def fetchone(self) -> Optional[Dict[str, Any]]:
@@ -39,7 +41,9 @@ class FakeCursor:
 class FakeConnection:
     """A connection object that mimics psycopg behaviour for tests."""
 
-    def __init__(self, cursor_factory: Optional[Callable[["FakeConnection"], FakeCursor]] = None) -> None:
+    def __init__(
+        self, cursor_factory: Optional[Callable[["FakeConnection"], FakeCursor]] = None
+    ) -> None:
         self.cursor_factory = cursor_factory or (lambda conn: FakeCursor(conn))
         self.log: List[tuple[Any, Any, Any]] = []
         self.commit_calls = 0

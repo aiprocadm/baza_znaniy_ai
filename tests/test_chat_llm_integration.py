@@ -44,9 +44,11 @@ def _prepare_app(tmp_path, provider) -> tuple[Request, Settings]:
     app.state.chat_store = type(app.state.chat_store)(str(tmp_path / "chat.sqlite3"))
     fallback_index = vectorstore.get_fallback_storage()
     fallback_index.clear()
-    fallback_index.extend([
-        {"file": "doc.txt", "page": 1, "text": "пример", "score": 0.42},
-    ])
+    fallback_index.extend(
+        [
+            {"file": "doc.txt", "page": 1, "text": "пример", "score": 0.42},
+        ]
+    )
     app.state.fallback_index = fallback_index
     app.state.vector_store = None
     app.state.rerank_enabled = False

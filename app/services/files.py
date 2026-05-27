@@ -10,6 +10,7 @@ from typing import Dict, Iterable, List, Optional
 
 from app.core.datetime_utils import utc_now
 
+
 class IngestStatus(str):
     """String-based status enum used in API responses."""
 

@@ -77,4 +77,3 @@ def test_lora_adapter_name_validation() -> None:
 
     with pytest.raises(ValidationError):
         LoraAdapterName(name="  ")
-

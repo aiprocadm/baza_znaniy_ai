@@ -47,7 +47,9 @@ async def load_registered_adapter(payload: LoraAdapterNamePayload) -> LoraStatus
 
 
 @router.post("/unload", response_model=LoraStatusResponse)
-async def unload_current_adapter(payload: LoraAdapterNamePayload | None = None) -> LoraStatusResponse:
+async def unload_current_adapter(
+    payload: LoraAdapterNamePayload | None = None,
+) -> LoraStatusResponse:
     try:
         unload_adapter(payload.name if payload else None)
     except RegistryError as exc:

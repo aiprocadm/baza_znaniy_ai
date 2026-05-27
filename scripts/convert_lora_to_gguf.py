@@ -15,8 +15,12 @@ LOGGER = logging.getLogger(__name__)
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Convert LoRA adapter to GGUF")
-    parser.add_argument("--base-model", required=True, help="Base GGUF model used during conversion")
-    parser.add_argument("--adapter", required=True, type=Path, help="Path to adapter directory or safetensors file")
+    parser.add_argument(
+        "--base-model", required=True, help="Base GGUF model used during conversion"
+    )
+    parser.add_argument(
+        "--adapter", required=True, type=Path, help="Path to adapter directory or safetensors file"
+    )
     parser.add_argument("--out", required=True, type=Path, help="Output GGUF file path")
     parser.add_argument(
         "--script",

@@ -18,8 +18,7 @@ logger = logging.getLogger(__name__)
 class _SupportsAddJob(Protocol):
     """Typed protocol for the subset of APScheduler we depend on."""
 
-    def add_job(self, func, trigger, *, seconds: float, id: str, replace_existing: bool):
-        ...
+    def add_job(self, func, trigger, *, seconds: float, id: str, replace_existing: bool): ...
 
 
 _DEFAULT_INTERVAL_SECONDS = 15.0
@@ -35,9 +34,7 @@ def check_sqlmodel_metadata(*, origin: str = "metadata_guard") -> bool:
         return True
 
     record_sqlmodel_metadata_alert(origin=origin, reason=reason)
-    logger.warning(
-        "SQLModel metadata integrity check failed", extra={"reason": reason}
-    )
+    logger.warning("SQLModel metadata integrity check failed", extra={"reason": reason})
     return False
 
 

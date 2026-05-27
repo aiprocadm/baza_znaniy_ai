@@ -22,9 +22,7 @@ def test_get_engine_creates_schema(tmp_path, monkeypatch) -> None:
 
         with engine.connect() as connection:
             result = connection.execute(
-                text(
-                    "SELECT name FROM sqlite_master WHERE type='table' AND name='documents'"
-                )
+                text("SELECT name FROM sqlite_master WHERE type='table' AND name='documents'")
             )
             assert result.scalar() == "documents"
     finally:

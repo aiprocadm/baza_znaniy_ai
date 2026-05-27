@@ -1,4 +1,5 @@
 """Test _parse_file_bytes_with_pages helper."""
+
 from __future__ import annotations
 
 import pytest
@@ -26,6 +27,7 @@ def test_parse_empty_extension_falls_back_to_text():
 
 def test_parse_rich_format_returns_multiple_pages(monkeypatch):
     """When parse_document yields pages, helper preserves them."""
+
     class FakeResult:
         pages = [(1, "page 1 text"), (2, "page 2 text")]
         metadata = {"document": {"mime_type": "application/pdf"}}
@@ -51,13 +53,17 @@ def test_parse_rich_format_drops_empty_pages(monkeypatch):
     assert mime == "application/pdf"
 
 
-@pytest.mark.parametrize("filename,expected_mime_default", [
-    ("report.docx", "application/octet-stream"),
-    ("deck.pptx", "application/octet-stream"),
-    ("data.xlsx", "application/octet-stream"),
-])
+@pytest.mark.parametrize(
+    "filename,expected_mime_default",
+    [
+        ("report.docx", "application/octet-stream"),
+        ("deck.pptx", "application/octet-stream"),
+        ("data.xlsx", "application/octet-stream"),
+    ],
+)
 def test_parse_rich_formats_reach_parse_document(monkeypatch, filename, expected_mime_default):
     """Non-PDF rich formats route through parse_document (not the txt branch)."""
+
     class FakeResult:
         pages = [(1, "sheet content")]
         metadata = {"document": {}}  # no mime → fallback to octet-stream

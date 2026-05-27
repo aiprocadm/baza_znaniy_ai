@@ -72,7 +72,9 @@ def _qualify(local: str, namespace: str | None) -> str:
 
 
 def _extract_paragraph_text(element: ET.Element, namespace: str | None) -> str:
-    text_nodes = element.findall(".//" + _qualify("t", namespace)) if namespace else element.findall(".//t")
+    text_nodes = (
+        element.findall(".//" + _qualify("t", namespace)) if namespace else element.findall(".//t")
+    )
     parts: List[str] = []
     for node in text_nodes:
         content = node.text

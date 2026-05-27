@@ -120,9 +120,7 @@ KNOWN_PRESETS: dict[str, dict[str, Any]] = {
 _AUTO_ORDER = ("deepseek", "groq", "openrouter", "openai", "custom")
 
 
-def _build_config(
-    provider: str, env: Mapping[str, str] | None = None
-) -> LLMConfig:
+def _build_config(provider: str, env: Mapping[str, str] | None = None) -> LLMConfig:
     preset = KNOWN_PRESETS.get(provider)
     if preset is None:
         raise LLMUnavailable(f"Unknown LLM provider: {provider}")
@@ -148,9 +146,7 @@ def _build_config(
     if key_env:
         api_key = _env(key_env, env)
     if preset.get("needs_key") and not api_key:
-        raise LLMUnavailable(
-            f"Provider {provider!r} requires an API key in {key_env}"
-        )
+        raise LLMUnavailable(f"Provider {provider!r} requires an API key in {key_env}")
 
     extra_headers: dict[str, str] = {}
     extra_env = preset.get("extra_headers_env", {}) or {}
@@ -275,9 +271,7 @@ class OpenAICompatibleProvider:
 
         text = _extract_text(data)
         if not text:
-            raise LLMTransportError(
-                f"{self.config.provider} returned an empty completion"
-            )
+            raise LLMTransportError(f"{self.config.provider} returned an empty completion")
 
         usage = data.get("usage") if isinstance(data, dict) else None
 
@@ -427,9 +421,7 @@ def _extract_text(data: Any) -> str:
     return str(text) if isinstance(text, str) else ""
 
 
-def build_provider(
-    provider: str, env: Mapping[str, str] | None = None
-) -> OpenAICompatibleProvider:
+def build_provider(provider: str, env: Mapping[str, str] | None = None) -> OpenAICompatibleProvider:
     """Construct a provider by short name, raising :class:`LLMUnavailable`.
 
     ``provider`` is a key of :data:`KNOWN_PRESETS` (``"deepseek"``, …).
@@ -439,9 +431,7 @@ def build_provider(
     config = _build_config(provider, env=env)
     provider_obj = OpenAICompatibleProvider(config)
     if not provider_obj.is_available():
-        raise LLMUnavailable(
-            f"Provider {provider!r} is configured but not usable"
-        )
+        raise LLMUnavailable(f"Provider {provider!r} is configured but not usable")
     return provider_obj
 
 

@@ -71,7 +71,9 @@ class _FakeTesseract:
         return str(image.payload.get("text", ""))
 
 
-def test_iter_pdf_pages_with_ocr_handles_page_errors_and_limits(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_iter_pdf_pages_with_ocr_handles_page_errors_and_limits(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     pages = [
         {"text": "First\npage"},
         {"load_error": True},
@@ -85,7 +87,9 @@ def test_iter_pdf_pages_with_ocr_handles_page_errors_and_limits(monkeypatch: pyt
     monkeypatch.setattr(ocr, "pytesseract", fake_tesseract)
     monkeypatch.setattr(ocr, "Image", SimpleNamespace())
 
-    config = ocr.OCRConfig(tesseract_cmd="/usr/bin/tesseract", dpi=150, page_limit=2, timeout_seconds=None)
+    config = ocr.OCRConfig(
+        tesseract_cmd="/usr/bin/tesseract", dpi=150, page_limit=2, timeout_seconds=None
+    )
 
     results = list(ocr.iter_pdf_pages_with_ocr(b"%PDF-1.4", config=config))
 
@@ -107,7 +111,9 @@ def test_parse_and_chunk_streams_pdf_with_ocr(monkeypatch: pytest.MonkeyPatch) -
 
     monkeypatch.setattr(chunking, "iter_pdf_pages_with_ocr", _fake_iter_pdf_pages)
     monkeypatch.setattr(chunking, "_iter_pdf_text", lambda _: iter(()))
-    monkeypatch.setattr(chunking, "_ocr_config", lambda: ocr.OCRConfig(dpi=200, timeout_seconds=None))
+    monkeypatch.setattr(
+        chunking, "_ocr_config", lambda: ocr.OCRConfig(dpi=200, timeout_seconds=None)
+    )
 
     pdf_payload = io.BytesIO(b"fake-pdf")
     chunks = chunking.parse_and_chunk("demo.pdf", pdf_payload)

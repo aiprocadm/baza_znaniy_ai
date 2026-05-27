@@ -17,9 +17,9 @@ def test_readme_starts_with_h1_and_tagline():
 
 def test_readme_contains_quickstart_section():
     text = README.read_text(encoding="utf-8")
-    assert re.search(r"^## .*Quickstart|## .*Быстрый старт", text, re.MULTILINE), (
-        "expected an H2 like '## Quickstart' or '## Быстрый старт'"
-    )
+    assert re.search(
+        r"^## .*Quickstart|## .*Быстрый старт", text, re.MULTILINE
+    ), "expected an H2 like '## Quickstart' or '## Быстрый старт'"
 
 
 def test_readme_contains_what_inside_section():
@@ -46,9 +46,9 @@ def test_readme_references_screenshots():
 
 def test_readme_links_to_legacy():
     text = README.read_text(encoding="utf-8")
-    assert "docs/legacy_README.md" in text, (
-        "README should link to docs/legacy_README.md for developer details"
-    )
+    assert (
+        "docs/legacy_README.md" in text
+    ), "README should link to docs/legacy_README.md for developer details"
 
 
 def test_readme_mentions_apache_license():
@@ -58,16 +58,15 @@ def test_readme_mentions_apache_license():
 
 def test_readme_has_ci_badge():
     text = README.read_text(encoding="utf-8")
-    assert re.search(r"!\[CI\]\(.*workflows.*\)", text), (
-        "expected a CI badge image link"
-    )
+    assert re.search(r"!\[CI\]\(.*workflows.*\)", text), "expected a CI badge image link"
 
 
 def test_readme_quickstart_is_short():
     """The quickstart block (≤30 lines) keeps the 5-min promise honest."""
     text = README.read_text(encoding="utf-8")
     match = re.search(
-        r"## .*(Quickstart|Быстрый старт)\n(.*?)(?=^## )", text,
+        r"## .*(Quickstart|Быстрый старт)\n(.*?)(?=^## )",
+        text,
         re.DOTALL | re.MULTILINE,
     )
     assert match, "Quickstart section missing"

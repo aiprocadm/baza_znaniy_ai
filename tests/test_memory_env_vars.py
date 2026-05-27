@@ -67,7 +67,9 @@ def clear_chat_env(monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv(key, raising=False)
 
 
-def test_init_memory_store_uses_chat_memory_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_init_memory_store_uses_chat_memory_env(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     captured: dict[str, object] = {}
 
     class DummyMemoryStore:
@@ -101,7 +103,9 @@ def test_init_memory_store_uses_chat_memory_env(monkeypatch: pytest.MonkeyPatch,
     assert settings.chat_memory_max_tokens == 1234
 
 
-def test_init_memory_store_accepts_bare_filename(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_init_memory_store_accepts_bare_filename(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     captured: dict[str, object] = {}
 
     class DummyMemoryStore:
@@ -181,4 +185,3 @@ def test_memory_alias_env_vars_override_defaults(
     settings = app_main.get_settings()
 
     assert settings.chat_memory_max_tokens == int(value)
-

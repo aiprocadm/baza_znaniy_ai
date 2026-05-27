@@ -1,4 +1,5 @@
 """Test per-page chunking and Document/SearchHit page_number propagation."""
+
 from __future__ import annotations
 
 from pathlib import Path

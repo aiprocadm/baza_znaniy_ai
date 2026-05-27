@@ -1,4 +1,5 @@
 """Verify citation buttons are present in chat rendering of index.html."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -26,7 +27,6 @@ def test_citation_uses_i18n_keys_for_label():
     citation.with_page/citation.no_page/citation.text_doc keys."""
     text = HTML.read_text(encoding="utf-8")
     keys_found = sum(
-        1 for k in ("citation.with_page", "citation.no_page", "citation.text_doc")
-        if k in text
+        1 for k in ("citation.with_page", "citation.no_page", "citation.text_doc") if k in text
     )
     assert keys_found >= 1, "citation.* i18n keys not used in index.html"

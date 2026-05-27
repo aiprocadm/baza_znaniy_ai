@@ -35,10 +35,13 @@ except Exception:  # pragma: no cover - lightweight fallback used in tests
                 vector = raw.astype(np.float32)
                 norm = np.linalg.norm(vector) or 1.0
                 vectors.append(vector / norm)
-            array = np.vstack(vectors) if vectors else np.zeros((0, self._dimension), dtype=np.float32)
+            array = (
+                np.vstack(vectors) if vectors else np.zeros((0, self._dimension), dtype=np.float32)
+            )
             if convert_to_numpy:
                 return array
             return array.tolist()
+
 
 from app.core.config import Settings, get_settings
 from app.retriever.embedding_protocol import EmbedderProtocol
@@ -130,8 +133,7 @@ class FaissVectorStore:
 
     def _persist_payloads(self) -> None:
         payload_items = [
-            {"id": identifier, "payload": payload}
-            for identifier, payload in self._payloads.items()
+            {"id": identifier, "payload": payload} for identifier, payload in self._payloads.items()
         ]
         self._payloads_path.write_text(json.dumps(payload_items), encoding="utf-8")
         self._mapping_path.write_text(json.dumps(self._ordered_ids), encoding="utf-8")
@@ -228,7 +230,9 @@ class FaissVectorStore:
         if not len(query_vector):
             return []
 
-        LOGGER.warning("FAISS backend uses post-filtering; filters are applied after ANN candidate retrieval")
+        LOGGER.warning(
+            "FAISS backend uses post-filtering; filters are applied after ANN candidate retrieval"
+        )
         candidate_limit = max(top_k, top_k * 20)
         scores, indices = self._index.search(query_vector, candidate_limit)
         normalized_owner = (filters.owner or "").strip().lower()
@@ -240,7 +244,9 @@ class FaissVectorStore:
                 continue
             identifier = self._ordered_ids[idx]
             payload = dict(self._payloads.get(identifier, {}))
-            payload_tenant = str(payload.get("tenant_id") or payload.get("owner") or "").strip().lower()
+            payload_tenant = (
+                str(payload.get("tenant_id") or payload.get("owner") or "").strip().lower()
+            )
             if payload_tenant != normalized_tenant:
                 continue
             if normalized_owner:
@@ -257,13 +263,25 @@ class FaissVectorStore:
                 if not normalized_tags.issubset(payload_tag_set):
                     continue
             meta = payload.get("meta") if isinstance(payload.get("meta"), dict) else {}
-            if filters.act_type and str(meta.get("act_type", "")).strip().lower() != filters.act_type.lower():
+            if (
+                filters.act_type
+                and str(meta.get("act_type", "")).strip().lower() != filters.act_type.lower()
+            ):
                 continue
-            if filters.issuer and filters.issuer.lower() not in str(meta.get("issuer", "")).strip().lower():
+            if (
+                filters.issuer
+                and filters.issuer.lower() not in str(meta.get("issuer", "")).strip().lower()
+            ):
                 continue
-            if filters.reg_number and filters.reg_number.lower() != str(meta.get("reg_number", "")).strip().lower():
+            if (
+                filters.reg_number
+                and filters.reg_number.lower() != str(meta.get("reg_number", "")).strip().lower()
+            ):
                 continue
-            if filters.is_active is not None and bool(meta.get("is_active", True)) is not filters.is_active:
+            if (
+                filters.is_active is not None
+                and bool(meta.get("is_active", True)) is not filters.is_active
+            ):
                 continue
             if filters.revision_mode == "current" and meta.get("is_active") is False:
                 continue

@@ -68,4 +68,3 @@ def test_get_upload_limits_allows_required_extensions(
     limits = deps_module.get_upload_limits()
 
     assert extension in limits.allowed_extensions
-

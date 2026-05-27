@@ -92,6 +92,7 @@ except ModuleNotFoundError as exc:  # pragma: no cover - triggered in minimal te
     def get_settings():  # type: ignore[override]
         return _missing_get_settings()
 
+
 from app.ingest.ocr import OCRError, OCRConfig, iter_pdf_pages_with_ocr
 
 
@@ -106,6 +107,7 @@ try:  # pragma: no cover - metrics are optional during lightweight testing
         record_document_ocr_pages,
     )
 except ModuleNotFoundError:  # pragma: no cover - executed when metrics deps missing
+
     def record_document_parse(*args, **kwargs):  # type: ignore[override]
         return None
 
@@ -131,13 +133,10 @@ class ParseResult:
     metadata: dict[str, Any]
 
 
-
 class _Tokenizer(Protocol):
-    def encode(self, text: str) -> List[int]:
-        ...
+    def encode(self, text: str) -> List[int]: ...
 
-    def decode(self, tokens: List[int]) -> str:
-        ...
+    def decode(self, tokens: List[int]) -> str: ...
 
 
 class _CharTokenizer:
@@ -159,7 +158,7 @@ def _resolve_parser_backend(explicit_backend: str | None = None) -> str:
     """Resolve parser backend with safe fallback to legacy."""
 
     settings = get_settings()
-    raw = (explicit_backend or getattr(settings, "document_parser_backend", "legacy") or "legacy")
+    raw = explicit_backend or getattr(settings, "document_parser_backend", "legacy") or "legacy"
     backend = str(raw).strip().lower()
     if backend not in {"legacy", "docling", "auto"}:
         LOGGER.warning("Unknown parser backend %s; falling back to legacy", backend)
@@ -174,6 +173,7 @@ def _resolve_parser_backend(explicit_backend: str | None = None) -> str:
 
     try:
         import docling  # type: ignore # noqa: F401
+
         return "docling"
     except Exception as exc:
         if backend == "docling":
@@ -384,9 +384,7 @@ def _handle_small_token_window(
     if window <= 1:
         fallback_text = decoded_text or text
         char_tokenizer = _CharTokenizer()
-        char_token_ids = (
-            char_tokenizer.encode(fallback_text) if fallback_text else []
-        )
+        char_token_ids = char_tokenizer.encode(fallback_text) if fallback_text else []
         return _WindowPlan(char_token_ids, char_tokenizer)
 
     if len(token_ids) > window:
@@ -802,13 +800,32 @@ def parse_document(filename: str, data: Union[bytes, bytearray, BinaryIO]) -> Pa
         return ParseResult([], "legacy", None, False, {"document": {}, "pages": [], "chunks": []})
 
     ext = name.rsplit(".", 1)[-1].lower()
-    mime_by_ext = {"pdf": "application/pdf", "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation", "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "txt": "text/plain", "md": "text/markdown", "markdown": "text/markdown", "html": "text/html", "htm": "text/html"}
+    mime_by_ext = {
+        "pdf": "application/pdf",
+        "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "txt": "text/plain",
+        "md": "text/markdown",
+        "markdown": "text/markdown",
+        "html": "text/html",
+        "htm": "text/html",
+    }
     mime = mime_by_ext.get(ext, "application/octet-stream")
     stream = _ensure_binary_stream(data)
     raw_bytes = _read_stream_to_bytes(stream)
 
     backend = _resolve_parser_backend()
-    LOGGER.info("Document parser backend selected", extra={"backend_selected": backend, "mime": mime, "tenant": os.getenv("TENANT", "unknown"), "document_id": os.getenv("DOCUMENT_ID", "unknown"), "document_name": name})
+    LOGGER.info(
+        "Document parser backend selected",
+        extra={
+            "backend_selected": backend,
+            "mime": mime,
+            "tenant": os.getenv("TENANT", "unknown"),
+            "document_id": os.getenv("DOCUMENT_ID", "unknown"),
+            "document_name": name,
+        },
+    )
     parser_backend_used = "legacy"
     fallback_reason = None
     pages: list[tuple[int, str]] = []
@@ -826,8 +843,10 @@ def parse_document(filename: str, data: Union[bytes, bytearray, BinaryIO]) -> Pa
             LOGGER.warning("Docling parse failed for %s: %s. Fallback to legacy.", name, exc)
 
     if not pages:
+
         def _buffer() -> BinaryIO:
             return io.BytesIO(raw_bytes)
+
         if ext == "pdf":
             pages = list(_iter_pdf_pages(bytes(raw_bytes)))
         elif ext == "docx":
@@ -844,7 +863,11 @@ def parse_document(filename: str, data: Union[bytes, bytearray, BinaryIO]) -> Pa
             pages = list(_iter_xlsx_text(_buffer()))
         parser_backend_used = "legacy" if parser_backend_used != "docling" else parser_backend_used
 
-    metadata = {"document": {"file": name, "mime_type": mime}, "pages": [{"page": p, "text_length": len(t)} for p,t in pages], "chunks": []}
+    metadata = {
+        "document": {"file": name, "mime_type": mime},
+        "pages": [{"page": p, "text_length": len(t)} for p, t in pages],
+        "chunks": [],
+    }
     ocr_used = ext == "pdf" and parser_backend_used == "legacy"
     LOGGER.info(
         "document_parse_backend_selected",
@@ -860,11 +883,15 @@ def parse_document(filename: str, data: Union[bytes, bytearray, BinaryIO]) -> Pa
     return ParseResult(pages, parser_backend_used, fallback_reason, ocr_used, metadata)
 
 
-def iter_document_pages(filename: str, data: Union[bytes, bytearray, BinaryIO]) -> Iterator[tuple[int, str]]:
+def iter_document_pages(
+    filename: str, data: Union[bytes, bytearray, BinaryIO]
+) -> Iterator[tuple[int, str]]:
     return iter(parse_document(filename, data).pages)
 
 
-def parse_and_chunk(filename: str, data: Union[bytes, bytearray, BinaryIO]) -> List[dict[str, object]]:
+def parse_and_chunk(
+    filename: str, data: Union[bytes, bytearray, BinaryIO]
+) -> List[dict[str, object]]:
     """Parse ``data`` according to ``filename`` extension and chunk the text."""
 
     name = (filename or "").strip()

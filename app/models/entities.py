@@ -172,9 +172,7 @@ class JobRecord(SQLModel, table=True):
     error: Optional[str] = Field(default=None)
     resource_id: Optional[str] = Field(default=None, index=True)
     attempt: int = Field(default=0, ge=0)
-    payload: Optional[dict[str, Any]] = Field(
-        default=None, sa_column=Column(JSON, nullable=True)
-    )
+    payload: Optional[dict[str, Any]] = Field(default=None, sa_column=Column(JSON, nullable=True))
     created_at: datetime = Field(default_factory=utc_now, nullable=False)
     updated_at: datetime = Field(default_factory=utc_now, nullable=False)
     started_at: Optional[datetime] = Field(default=None)
@@ -185,16 +183,12 @@ class SettingRecord(SQLModel, table=True):
     """Tenant specific configuration stored in the database."""
 
     __tablename__ = "settings"
-    __table_args__ = (
-        UniqueConstraint("tenant_id", "name", name="uq_settings_tenant_name"),
-    )
+    __table_args__ = (UniqueConstraint("tenant_id", "name", name="uq_settings_tenant_name"),)
 
     id: Optional[int] = Field(default=None, primary_key=True)
     tenant_id: str = Field(foreign_key="tenants.tenant_id", index=True)
     name: str = Field(index=True)
-    value: Optional[dict[str, Any]] = Field(
-        default=None, sa_column=Column(JSON, nullable=True)
-    )
+    value: Optional[dict[str, Any]] = Field(default=None, sa_column=Column(JSON, nullable=True))
     status: str = Field(default="active", index=True)
     error: Optional[str] = Field(default=None)
     created_at: datetime = Field(default_factory=utc_now, nullable=False)

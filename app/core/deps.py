@@ -73,9 +73,7 @@ class UploadLimits:
 
         allowed = candidates & ALLOWED_EXTENSION_WHITELIST
         if not allowed:
-            raise ValueError(
-                "allowed_extensions must contain at least one supported extension"
-            )
+            raise ValueError("allowed_extensions must contain at least one supported extension")
         return allowed
 
 
@@ -113,7 +111,9 @@ def get_upload_limits() -> UploadLimits:
 def get_tenant(request: Request = None) -> str:
     """Resolve tenant identifier from headers (defaulting to ``"default"``)."""
 
-    header_value = request.headers.get("x-tenant") if request and hasattr(request, "headers") else None
+    header_value = (
+        request.headers.get("x-tenant") if request and hasattr(request, "headers") else None
+    )
     tenant = (header_value or os.getenv("DEFAULT_TENANT", "default")).strip()
     return tenant or "default"
 
@@ -167,28 +167,28 @@ def get_lora_manager(request: Request = None) -> LlamaLoraManager:
 
     app_state = None
     if request is not None:
-        app = getattr(request, 'app', None)
-        if app is None and hasattr(request, 'scope'):
-            app = request.scope.get('app')
+        app = getattr(request, "app", None)
+        if app is None and hasattr(request, "scope"):
+            app = request.scope.get("app")
         if app is not None:
-            app_state = getattr(app, 'state', None)
+            app_state = getattr(app, "state", None)
     if app_state is None:
         try:  # pragma: no cover - fallback path for stubbed requests
             from app.main import app as main_app  # type: ignore
         except Exception:  # pragma: no cover - defensive
             main_app = None
         if main_app is not None:
-            app_state = getattr(main_app, 'state', None)
+            app_state = getattr(main_app, "state", None)
     if app_state is None:
-        raise RuntimeError('LoRA manager is not configured')
-    manager = getattr(app_state, 'lora_manager', None)
+        raise RuntimeError("LoRA manager is not configured")
+    manager = getattr(app_state, "lora_manager", None)
     if isinstance(manager, LlamaLoraManager):
         return manager
 
     if manager is None or not all(
         hasattr(manager, attr) for attr in ("load_adapter", "unload_adapter")
     ):
-        raise RuntimeError('LoRA manager is not configured')
+        raise RuntimeError("LoRA manager is not configured")
 
     return manager  # type: ignore[return-value]
 

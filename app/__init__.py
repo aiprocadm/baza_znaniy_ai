@@ -1,4 +1,5 @@
 """Application package initialisation helpers."""
+
 from __future__ import annotations
 
 import warnings

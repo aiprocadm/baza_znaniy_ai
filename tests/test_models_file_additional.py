@@ -54,5 +54,3 @@ def test_collect_sqlmodel_tables_includes_declared_models():
     tables = file_module._collect_sqlmodel_tables()
 
     assert (TempModel, temp_table) in tables
-
-

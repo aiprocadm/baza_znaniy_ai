@@ -161,7 +161,9 @@ def logout(
     )
     registry.revoke(refresh_payload.get("jti"))
     registry.mark_inactive(refresh_payload.get("sub"))
-    log_security_event("logout", user_id=refresh_payload.get("sub"), revoked_jti=refresh_payload.get("jti"))
+    log_security_event(
+        "logout", user_id=refresh_payload.get("sub"), revoked_jti=refresh_payload.get("jti")
+    )
 
     token = _extract_bearer_token(request)
 

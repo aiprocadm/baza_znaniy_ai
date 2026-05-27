@@ -44,7 +44,9 @@ class HTTPBearer:
     def __init__(self, *, auto_error: bool = True) -> None:
         self.auto_error = auto_error
 
-    async def __call__(self, *args: Any, **kwargs: Any) -> Optional[HTTPAuthorizationCredentials]:  # pragma: no cover - not used in tests
+    async def __call__(
+        self, *args: Any, **kwargs: Any
+    ) -> Optional[HTTPAuthorizationCredentials]:  # pragma: no cover - not used in tests
         if self.auto_error:
             raise RuntimeError("HTTPBearer stub does not handle requests")
         return None

@@ -113,7 +113,9 @@ class ApiProvider:
                         "External LLM API returned invalid JSON payload",
                         extra={"endpoint": url, "attempt": attempt},
                     )
-                    raise NonRetryableProviderError("External LLM API returned invalid JSON") from exc
+                    raise NonRetryableProviderError(
+                        "External LLM API returned invalid JSON"
+                    ) from exc
                 break
             except httpx.TimeoutException as exc:
                 last_retryable_exc = exc

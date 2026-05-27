@@ -101,14 +101,10 @@ async def _run_worker() -> None:
             logger.exception("Failed to start ingest scheduler")
             scheduler = None
     else:
-        logger.warning(
-            "APScheduler is not installed; falling back to manual ingest polling"
-        )
+        logger.warning("APScheduler is not installed; falling back to manual ingest polling")
 
     if scheduler is None:
-        await _manual_poll_loop(
-            ingest_worker, max(0.5, settings.ingest_worker_interval_seconds)
-        )
+        await _manual_poll_loop(ingest_worker, max(0.5, settings.ingest_worker_interval_seconds))
     else:
         await ingest_worker.drain()
         await _shutdown_event.wait()

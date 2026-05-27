@@ -116,7 +116,17 @@ class _StubClient:
 
     def recreate_collection(self, **kwargs: object) -> None:
         self.collections[kwargs["collection_name"]] = {
-            "config": type("cfg", (), {"params": type("params", (), {"vectors": type("vec", (), {"size": kwargs["vectors_config"].size})()})()})()
+            "config": type(
+                "cfg",
+                (),
+                {
+                    "params": type(
+                        "params",
+                        (),
+                        {"vectors": type("vec", (), {"size": kwargs["vectors_config"].size})()},
+                    )()
+                },
+            )()
         }
 
     def create_payload_index(self, **_: object) -> None:
@@ -322,7 +332,9 @@ def test_faiss_search_returns_payload(tmp_path: Path, monkeypatch: pytest.Monkey
     assert "score" in hits[0]
 
 
-def test_qdrant_search_builds_filter_parity(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_qdrant_search_builds_filter_parity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     settings = _make_settings(tmp_path, backend="qdrant")
 
     class _FieldCondition:
@@ -354,7 +366,20 @@ def test_qdrant_search_builds_filter_parity(tmp_path: Path, monkeypatch: pytest.
         client_factory=lambda **_: client,
     )
 
-    store.search("query", 3, filters=vs.SearchFilters.from_input(tenant_id="tenant-a", owner="tenant-a", tags=["a", "b"], act_type="law", issuer="минюст", reg_number="123", is_active=False, revision_mode="historical"))
+    store.search(
+        "query",
+        3,
+        filters=vs.SearchFilters.from_input(
+            tenant_id="tenant-a",
+            owner="tenant-a",
+            tags=["a", "b"],
+            act_type="law",
+            issuer="минюст",
+            reg_number="123",
+            is_active=False,
+            revision_mode="historical",
+        ),
+    )
 
     sent_filter = client.search_queries[-1]["query_filter"]
     keys = [condition.key for condition in sent_filter.must]
@@ -371,13 +396,63 @@ def test_qdrant_search_builds_filter_parity(tmp_path: Path, monkeypatch: pytest.
     ]
     assert isinstance(sent_filter.must[4].match, _MatchText)
 
+
 def test_qdrant_and_faiss_apply_same_filters(tmp_path: Path) -> None:
     chunks = [
-        {"sha256": "1", "text": "alpha law", "file": "f", "page": 1, "owner": "tenant-a", "tenant_id": "tenant-a", "tags": ["prod"], "meta": {"act_type": "law", "issuer": "MinJust", "reg_number": "123", "is_active": True}},
-        {"sha256": "2", "text": "alpha law old", "file": "f", "page": 2, "owner": "tenant-a", "tenant_id": "tenant-a", "tags": ["prod"], "meta": {"act_type": "law", "issuer": "MinJust", "reg_number": "123", "is_active": False}},
-        {"sha256": "3", "text": "alpha other", "file": "f", "page": 3, "owner": "tenant-b", "tenant_id": "tenant-b", "tags": ["prod"], "meta": {"act_type": "law", "issuer": "MinJust", "reg_number": "123", "is_active": True}},
+        {
+            "sha256": "1",
+            "text": "alpha law",
+            "file": "f",
+            "page": 1,
+            "owner": "tenant-a",
+            "tenant_id": "tenant-a",
+            "tags": ["prod"],
+            "meta": {
+                "act_type": "law",
+                "issuer": "MinJust",
+                "reg_number": "123",
+                "is_active": True,
+            },
+        },
+        {
+            "sha256": "2",
+            "text": "alpha law old",
+            "file": "f",
+            "page": 2,
+            "owner": "tenant-a",
+            "tenant_id": "tenant-a",
+            "tags": ["prod"],
+            "meta": {
+                "act_type": "law",
+                "issuer": "MinJust",
+                "reg_number": "123",
+                "is_active": False,
+            },
+        },
+        {
+            "sha256": "3",
+            "text": "alpha other",
+            "file": "f",
+            "page": 3,
+            "owner": "tenant-b",
+            "tenant_id": "tenant-b",
+            "tags": ["prod"],
+            "meta": {
+                "act_type": "law",
+                "issuer": "MinJust",
+                "reg_number": "123",
+                "is_active": True,
+            },
+        },
     ]
-    filters = vs.SearchFilters.from_input(tenant_id="tenant-a", tags=["prod"], act_type="law", issuer="min", reg_number="123", revision_mode="current")
+    filters = vs.SearchFilters.from_input(
+        tenant_id="tenant-a",
+        tags=["prod"],
+        act_type="law",
+        issuer="min",
+        reg_number="123",
+        revision_mode="current",
+    )
 
     fsettings = _make_settings(tmp_path / "fa", backend="faiss")
     fstore = FaissVectorStore(settings=fsettings, embedder_factory=lambda _: _StubEmbedder("stub"))
@@ -386,7 +461,11 @@ def test_qdrant_and_faiss_apply_same_filters(tmp_path: Path) -> None:
 
     client = _StubClient()
     qsettings = _make_settings(tmp_path / "qd", backend="qdrant")
-    qstore = QdrantVectorStore(settings=qsettings, embedder_factory=lambda _: _StubEmbedder("stub"), client_factory=lambda **_: client)
+    qstore = QdrantVectorStore(
+        settings=qsettings,
+        embedder_factory=lambda _: _StubEmbedder("stub"),
+        client_factory=lambda **_: client,
+    )
     qstore.upsert(chunks)
     qstore.search("alpha", top_k=5, filters=filters)
 

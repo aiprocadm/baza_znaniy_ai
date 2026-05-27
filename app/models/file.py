@@ -16,17 +16,21 @@ from urllib.parse import unquote, urlparse
 from sqlalchemy import Column, JSON, MetaData, Text, UniqueConstraint, text
 from sqlalchemy.engine import Engine, make_url
 from sqlalchemy.ext.asyncio import create_async_engine
+
 try:  # pragma: no cover - optional dependency during lightweight test runs
     from sqlalchemy.exc import NoSuchModuleError as _SQLAlchemyNoSuchModuleError
 except Exception:  # pragma: no cover - fallback when SQLAlchemy is stubbed
+
     class _SQLAlchemyNoSuchModuleError(Exception):
         """Placeholder exception when SQLAlchemy is unavailable."""
 
         pass
 
+
 try:  # pragma: no cover - optional dependency during lightweight test runs
     from sqlalchemy.util import FacadeDict as _SQLAlchemyFacadeDict
 except Exception:  # pragma: no cover - exercised when SQLAlchemy is stubbed out
+
     class _SQLAlchemyFacadeDict(dict):
         """Fallback mapping used when ``sqlalchemy.util.FacadeDict`` is unavailable."""
 
@@ -65,9 +69,8 @@ if getattr(SQLModel, "metadata", None) is None:
     try:
         SQLModel.metadata = MetaData()  # type: ignore[assignment]
     except Exception:  # pragma: no cover - defensive fallback when assignment fails
-        logger.warning(
-            "SQLModel.metadata is unavailable; schema creation may be skipped"
-        )
+        logger.warning("SQLModel.metadata is unavailable; schema creation may be skipped")
+
 
 def _record_sqlmodel_metadata_health(metadata: Any | None, *, origin: str) -> None:
     """Update Prometheus metrics describing the SQLModel metadata state."""
@@ -84,9 +87,7 @@ def _record_sqlmodel_metadata_health(metadata: Any | None, *, origin: str) -> No
     try:
         record_sqlmodel_metadata_alert(origin=origin, reason=reason)
     except Exception:  # pragma: no cover - best-effort alerting
-        logger.debug(
-            "Failed to increment SQLModel metadata alert counter", exc_info=True
-        )
+        logger.debug("Failed to increment SQLModel metadata alert counter", exc_info=True)
 
 
 def _sanitize_metadata_tables(metadata: MetaData) -> MetaData:
@@ -95,9 +96,7 @@ def _sanitize_metadata_tables(metadata: MetaData) -> MetaData:
     tables_attr = getattr(metadata, "tables", None)
 
     if not isinstance(tables_attr, FacadeDict):
-        logger.warning(
-            "SQLModel metadata tables registry is corrupt; rebuilding metadata"
-        )
+        logger.warning("SQLModel metadata tables registry is corrupt; rebuilding metadata")
         return _rebuild_sqlmodel_metadata()
 
     invalid_keys: list[str] = []
@@ -112,9 +111,7 @@ def _sanitize_metadata_tables(metadata: MetaData) -> MetaData:
         tables_attr.pop(table_name, None)
 
     if invalid_keys:
-        logger.warning(
-            "Removed %s invalid table entries from SQLModel metadata", len(invalid_keys)
-        )
+        logger.warning("Removed %s invalid table entries from SQLModel metadata", len(invalid_keys))
 
     if not tables_attr:
         snapshot = collect_sqlmodel_tables()
@@ -137,9 +134,7 @@ def _rebuild_sqlmodel_metadata(
     try:
         setattr(SQLModel, "metadata", new_metadata)
     except Exception:  # pragma: no cover - defensive best-effort assignment
-        logger.warning(
-            "Failed to assign rebuilt metadata to SQLModel; using local instance"
-        )
+        logger.warning("Failed to assign rebuilt metadata to SQLModel; using local instance")
 
     for model_cls, table in snapshot:
         migrate = getattr(table, "to_metadata", None)
@@ -188,9 +183,7 @@ def _ensure_metadata_with_recovery(metadata: Any | None, *, reason: str) -> Meta
     try:
         return _ensure_sqlmodel_metadata(metadata)
     except RuntimeError:
-        logger.debug(
-            "SQLModel metadata validation failed during %s; attempting recovery", reason
-        )
+        logger.debug("SQLModel metadata validation failed during %s; attempting recovery", reason)
         return _recover_sqlmodel_metadata(reason=reason)
 
 
@@ -204,16 +197,12 @@ def _ensure_sqlmodel_metadata(metadata: Any | None) -> MetaData:
     if candidate is not None and not isinstance(candidate, MetaData):
         create_all_attr = getattr(candidate, "create_all", None)
         if create_all_attr is not None and not callable(create_all_attr):
-            logger.error(
-                "SQLModel.metadata.create_all is not callable; refusing schema creation"
-            )
+            logger.error("SQLModel.metadata.create_all is not callable; refusing schema creation")
             raise RuntimeError(
                 "SQLModel metadata initialisation failed: metadata.create_all is not callable"
             )
 
-        logger.error(
-            "SQLModel metadata object is not an instance of sqlalchemy.MetaData"
-        )
+        logger.error("SQLModel metadata object is not an instance of sqlalchemy.MetaData")
         raise RuntimeError(
             "SQLModel metadata initialisation failed: metadata must be an instance of sqlalchemy.MetaData"
         )
@@ -226,9 +215,7 @@ def _ensure_sqlmodel_metadata(metadata: Any | None) -> MetaData:
     try:
         setattr(SQLModel, "metadata", fallback)
     except Exception:  # pragma: no cover - best-effort assignment
-        logger.warning(
-            "Unable to attach fallback SQLModel metadata; schema creation may fail"
-        )
+        logger.warning("Unable to attach fallback SQLModel metadata; schema creation may fail")
     return _sanitize_metadata_tables(fallback)
 
 
@@ -308,9 +295,7 @@ class DocumentRecord(SQLModel, table=True):
 
 class FileRecord(SQLModel, table=True):
     __tablename__ = "files"
-    __table_args__ = (
-        UniqueConstraint("tenant_id", "sha256", name="uq_files_tenant_sha"),
-    )
+    __table_args__ = (UniqueConstraint("tenant_id", "sha256", name="uq_files_tenant_sha"),)
 
     id: Optional[int] = Field(default=None, primary_key=True)
     tenant_id: str = Field(foreign_key="tenants.tenant_id", index=True)
@@ -479,11 +464,7 @@ def _maybe_configure_sqlite_engine(engine: Engine, url: str) -> None:
 
     database: str | None = None
 
-    if (
-        dialect is not None
-        and not isinstance(dialect, str)
-        and hasattr(dialect, "database")
-    ):
+    if dialect is not None and not isinstance(dialect, str) and hasattr(dialect, "database"):
         database = getattr(dialect, "database", None)
 
     raw_url = str(url)
@@ -600,9 +581,7 @@ def _synthesise_dialect(url: str) -> Any:
         try:
             driver = get_driver() or backend
         except (_SQLAlchemyNoSuchModuleError, ModuleNotFoundError):
-            logger.debug(
-                "Unable to resolve SQLAlchemy driver for %s; defaulting to backend", url
-            )
+            logger.debug("Unable to resolve SQLAlchemy driver for %s; defaulting to backend", url)
             driver = backend
     else:
         scheme = str(parsed).split(":", 1)[0]
@@ -793,9 +772,7 @@ def _create_schema_if_possible(engine: Engine, metadata: Any | None) -> MetaData
 
         if meta is None:
             tables_snapshot = collect_sqlmodel_tables()
-        logger.warning(
-            "SQLModel.metadata is missing or invalid; reinitialising metadata"
-        )
+        logger.warning("SQLModel.metadata is missing or invalid; reinitialising metadata")
         try:
             meta = MetaData()
             setattr(SQLModel, "metadata", meta)
@@ -831,9 +808,7 @@ def _create_schema_if_possible(engine: Engine, metadata: Any | None) -> MetaData
 
     create_all = getattr(meta, "create_all", None)
     if not callable(create_all):
-        logger.error(
-            "SQLModel.metadata.create_all is not callable; skipping schema creation"
-        )
+        logger.error("SQLModel.metadata.create_all is not callable; skipping schema creation")
         return None
 
     try:
@@ -921,9 +896,7 @@ def get_engine(url: Optional[str] = None, *, create_schema: bool = True) -> Engi
                 )
 
         try:
-            engine = create_engine(
-                engine_url, echo=False, connect_args=_connect_args(engine_url)
-            )
+            engine = create_engine(engine_url, echo=False, connect_args=_connect_args(engine_url))
         except (_SQLAlchemyNoSuchModuleError, ModuleNotFoundError):
             logger.error(
                 "SQLAlchemy is missing the '%s' dialect; falling back to stub engine",
@@ -933,9 +906,7 @@ def get_engine(url: Optional[str] = None, *, create_schema: bool = True) -> Engi
             engine = _build_engine_fallback(engine_url)
     else:
         try:
-            engine = create_engine(
-                db_url, echo=False, connect_args=_connect_args(db_url_str)
-            )
+            engine = create_engine(db_url, echo=False, connect_args=_connect_args(db_url_str))
         except (_SQLAlchemyNoSuchModuleError, ModuleNotFoundError):
             logger.error(
                 "SQLAlchemy is missing the '%s' dialect; falling back to stub engine",
@@ -970,7 +941,6 @@ def get_engine(url: Optional[str] = None, *, create_schema: bool = True) -> Engi
     return engine
 
 
-
 def get_session(url: Optional[str] = None, *, engine: Engine | None = None):
     """Create a SQLModel-compatible session bound to the configured engine."""
 
@@ -993,9 +963,7 @@ def get_session(url: Optional[str] = None, *, engine: Engine | None = None):
         except Exception:  # pragma: no cover - defensive best-effort cleanup
             pass
 
-    logger.warning(
-        "sqlmodel.Session lacks 'exec'; falling back to SQLAlchemy session adapter"
-    )
+    logger.warning("sqlmodel.Session lacks 'exec'; falling back to SQLAlchemy session adapter")
     return _SQLAlchemySessionAdapter(target_engine)
 
 

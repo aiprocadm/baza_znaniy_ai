@@ -1,4 +1,5 @@
 """Test the extended audit helpers (log + optional DB persistence)."""
+
 from __future__ import annotations
 
 import logging
@@ -23,8 +24,7 @@ def test_log_security_event_emits_log_record(caplog: pytest.LogCaptureFixture) -
     with caplog.at_level(logging.INFO, logger="security.audit"):
         log_security_event("login_success", user_id="alice")
     assert any(
-        record.name == "security.audit"
-        and getattr(record, "security_event", None) is not None
+        record.name == "security.audit" and getattr(record, "security_event", None) is not None
         for record in caplog.records
     )
 

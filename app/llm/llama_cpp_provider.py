@@ -27,6 +27,8 @@ else:
         llm_top_p: float
         llm_top_k: int
         llm_max_tokens: int
+
+
 from app.llm.exceptions import (
     LLMProviderError,
     LoRAAdapterNotFoundError,
@@ -37,9 +39,11 @@ from app.llm.exceptions import (
 try:  # pragma: no cover - optional dependency may be missing in tests
     from llama_cpp import Llama
 except Exception:  # pragma: no cover - fall back to a stub for type checking
+
     class Llama:  # type: ignore[too-many-ancestors]
         def __init__(self, *args: object, **kwargs: object) -> None:  # noqa: D401 - stub
             raise ModelNotReadyError("llama_cpp is not installed")
+
 else:
     try:  # pragma: no cover - optional cleanup for third-party helper module
         import llama_cpp._utils as _llama_utils
@@ -160,9 +164,7 @@ class LlamaCppProvider:
             with model_path.open("rb") as handle:
                 magic = handle.read(4)
         except OSError as exc:  # pragma: no cover - unlikely on readable file
-            raise ModelNotReadyError(
-                f"Failed to read LLM model file at {model_path!s}"
-            ) from exc
+            raise ModelNotReadyError(f"Failed to read LLM model file at {model_path!s}") from exc
 
         if len(magic) < 4 or magic != b"GGUF":
             raise ModelNotReadyError(

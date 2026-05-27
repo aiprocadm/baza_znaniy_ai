@@ -115,5 +115,3 @@ def test_coerce_uploads_builds_uploadfile_instances() -> None:
 def test_build_upload_file_preserves_uploadfile_instance() -> None:
     original = UploadFile(filename="existing.txt")
     assert build_upload_file(original) is original
-
-

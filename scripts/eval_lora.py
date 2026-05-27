@@ -37,15 +37,29 @@ class EvalResult:
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Evaluate a LoRA adapter")
     parser.add_argument("--base-model", required=True, help="Base model identifier or local path")
-    parser.add_argument("--adapter", required=True, type=Path, help="Path to adapter directory or safetensors file")
-    parser.add_argument("--dataset", required=True, type=Path, help="Evaluation dataset in JSONL format")
-    parser.add_argument("--output", type=Path, default=Path("./data/lora/eval"), help="Directory for evaluation reports")
+    parser.add_argument(
+        "--adapter", required=True, type=Path, help="Path to adapter directory or safetensors file"
+    )
+    parser.add_argument(
+        "--dataset", required=True, type=Path, help="Evaluation dataset in JSONL format"
+    )
+    parser.add_argument(
+        "--output",
+        type=Path,
+        default=Path("./data/lora/eval"),
+        help="Directory for evaluation reports",
+    )
     parser.add_argument("--max-new-tokens", type=int, default=256)
     parser.add_argument("--temperature", type=float, default=0.0)
     parser.add_argument("--top-p", type=float, default=0.9)
     parser.add_argument("--min-em", type=float, default=0.0)
     parser.add_argument("--min-rouge", type=float, default=0.0)
-    parser.add_argument("--no-answer-pattern", type=str, default=None, help="Regex indicating model returned no answer")
+    parser.add_argument(
+        "--no-answer-pattern",
+        type=str,
+        default=None,
+        help="Regex indicating model returned no answer",
+    )
     return parser.parse_args(list(argv) if argv is not None else None)
 
 
@@ -91,7 +105,15 @@ def _load_adapter(base_model: str, adapter_path: Path) -> tuple[PeftModel, AutoT
     return model, tokenizer
 
 
-def _generate_prediction(model: PeftModel, tokenizer: AutoTokenizer, prompt: str, *, max_new_tokens: int, temperature: float, top_p: float) -> str:
+def _generate_prediction(
+    model: PeftModel,
+    tokenizer: AutoTokenizer,
+    prompt: str,
+    *,
+    max_new_tokens: int,
+    temperature: float,
+    top_p: float,
+) -> str:
     inputs = tokenizer(prompt, return_tensors="pt", truncation=True)
     input_ids = inputs["input_ids"].to(model.device)
     attention_mask = inputs.get("attention_mask")

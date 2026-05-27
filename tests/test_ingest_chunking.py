@@ -381,7 +381,6 @@ def _make_pptx_bytes(slides: List[str]) -> bytes:
     return stream.getvalue()
 
 
-
 def _make_xlsx_bytes(sheets: List[List[List[str]]]) -> bytes:
     workbook = Workbook()
     first = True
@@ -583,7 +582,9 @@ def test_iter_document_pages_converts_markdown_to_plain_text() -> None:
 
 
 def test_iter_document_pages_converts_html_to_plain_text() -> None:
-    payload = b"<html><body><h1>Heading</h1><p>Paragraph with <strong>bold</strong>.</p></body></html>"
+    payload = (
+        b"<html><body><h1>Heading</h1><p>Paragraph with <strong>bold</strong>.</p></body></html>"
+    )
     pages = list(iter_document_pages("page.html", payload))
 
     assert len(pages) == 2

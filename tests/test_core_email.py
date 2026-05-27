@@ -15,7 +15,9 @@ def test_normalise_email_success() -> None:
     assert normalise_email("User@Example.COM") == "User@example.com"
 
 
-def test_normalise_email_fallback_when_idna_missing(monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture) -> None:
+def test_normalise_email_fallback_when_idna_missing(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
     """When ``email_validator`` raises ``AttributeError`` we use the fallback validator."""
 
     def _broken_validator(email: str, check_deliverability: bool = False):  # type: ignore[override]

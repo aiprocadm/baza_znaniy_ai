@@ -204,11 +204,19 @@ def test_login_bruteforce_rate_limit(auth_client: TestClient) -> None:
 
 
 def test_revoked_access_token_rejected(auth_client: TestClient) -> None:
-    login = auth_client.post("/api/v1/auth/login", json={"email": "admin@example.com", "password": "secret"})
+    login = auth_client.post(
+        "/api/v1/auth/login", json={"email": "admin@example.com", "password": "secret"}
+    )
     token = login.json()["access_token"]
     refresh = login.json()["refresh_token"]
-    auth_client.post("/api/v1/auth/logout", json={"refresh_token": refresh}, headers={"Authorization": f"Bearer {token}"})
-    response = auth_client.get("/api/v1/tenants", headers={"Authorization": f"Bearer {token}", "X-Tenant": "default"})
+    auth_client.post(
+        "/api/v1/auth/logout",
+        json={"refresh_token": refresh},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    response = auth_client.get(
+        "/api/v1/tenants", headers={"Authorization": f"Bearer {token}", "X-Tenant": "default"}
+    )
     assert response.status_code == 401
 
 

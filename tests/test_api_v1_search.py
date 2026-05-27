@@ -34,7 +34,9 @@ def test_search_endpoint_passes_owner_and_tags_filters(monkeypatch) -> None:
 
     monkeypatch.setattr(search_api, "search", _fake_search)
 
-    request = Request({"app": type("App", (), {"state": type("State", (), {"usage_sink": None})()})()})
+    request = Request(
+        {"app": type("App", (), {"state": type("State", (), {"usage_sink": None})()})()}
+    )
     response = search_api.search_endpoint(
         request=request,
         query="replication",
@@ -86,7 +88,9 @@ def test_search_endpoint_normalizes_empty_filters(monkeypatch) -> None:
 
     monkeypatch.setattr(search_api, "search", _fake_search)
 
-    request = Request({"app": type("App", (), {"state": type("State", (), {"usage_sink": None})()})()})
+    request = Request(
+        {"app": type("App", (), {"state": type("State", (), {"usage_sink": None})()})()}
+    )
     response = search_api.search_endpoint(
         request=request,
         query="replication",
@@ -95,7 +99,16 @@ def test_search_endpoint_normalizes_empty_filters(monkeypatch) -> None:
         tenant="test-tenant",
     )
     assert response.hits == []
-    assert captured == {"owner": None, "tags": None, "tenant_id": "test-tenant", "act_type": None, "issuer": None, "reg_number": None, "is_active": None, "revision_mode": "current"}
+    assert captured == {
+        "owner": None,
+        "tags": None,
+        "tenant_id": "test-tenant",
+        "act_type": None,
+        "issuer": None,
+        "reg_number": None,
+        "is_active": None,
+        "revision_mode": "current",
+    }
 
 
 def test_search_endpoint_passes_all_npa_filters(monkeypatch) -> None:
@@ -132,7 +145,9 @@ def test_search_endpoint_passes_all_npa_filters(monkeypatch) -> None:
 
     monkeypatch.setattr(search_api, "search", _fake_search)
 
-    request = Request({"app": type("App", (), {"state": type("State", (), {"usage_sink": None})()})()})
+    request = Request(
+        {"app": type("App", (), {"state": type("State", (), {"usage_sink": None})()})()}
+    )
     search_api.search_endpoint(
         request=request,
         query="law 123",
@@ -160,7 +175,6 @@ def test_search_endpoint_passes_all_npa_filters(monkeypatch) -> None:
     }
 
 
-
 def test_search_endpoint_requires_tenant_context(monkeypatch) -> None:
     def _fake_search(*args, **kwargs):
         raise AssertionError("search should not be called")
@@ -170,5 +184,7 @@ def test_search_endpoint_requires_tenant_context(monkeypatch) -> None:
     import pytest
 
     with pytest.raises(ValueError, match="tenant context is required"):
-        request = Request({"app": type("App", (), {"state": type("State", (), {"usage_sink": None})()})()})
+        request = Request(
+            {"app": type("App", (), {"state": type("State", (), {"usage_sink": None})()})()}
+        )
         search_api.search_endpoint(request=request, query="replication", tenant="   ")

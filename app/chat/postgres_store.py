@@ -52,8 +52,9 @@ class PostgresChatStore(ChatStoreProtocol):
             with psycopg.connect(self.dsn) as connection:
                 with connection.cursor() as cursor:
                     cursor.execute(
-                        sql.SQL("CREATE SCHEMA IF NOT EXISTS {}")
-                        .format(sql.Identifier(self.schema))
+                        sql.SQL("CREATE SCHEMA IF NOT EXISTS {}").format(
+                            sql.Identifier(self.schema)
+                        )
                     )
                 connection.commit()
 
@@ -135,7 +136,9 @@ class PostgresChatStore(ChatStoreProtocol):
                 row = cursor.fetchone()
         return row["summary"] if row else None
 
-    def get_recent_messages(self, conversation_id: str, limit: Optional[int] = None) -> List[Tuple[str, str]]:
+    def get_recent_messages(
+        self, conversation_id: str, limit: Optional[int] = None
+    ) -> List[Tuple[str, str]]:
         base_query = sql.SQL(
             "SELECT role, content FROM {} WHERE conversation_id = %s "
             "ORDER BY created_at DESC, id DESC"
@@ -155,7 +158,9 @@ class PostgresChatStore(ChatStoreProtocol):
         ordered = list(rows)[::-1]
         return [(row["role"], row["content"]) for row in ordered]
 
-    def record_exchange(self, conversation_id: str, user_message: str, assistant_message: str) -> None:
+    def record_exchange(
+        self, conversation_id: str, user_message: str, assistant_message: str
+    ) -> None:
         timestamp = int(time.time())
         with self._connection() as connection:
             with connection.cursor() as cursor:
@@ -192,9 +197,9 @@ class PostgresChatStore(ChatStoreProtocol):
         with self._connection() as connection:
             with connection.cursor() as cursor:
                 cursor.execute(
-                    sql.SQL(
-                        "SELECT messages_since_summary FROM {} WHERE id = %s"
-                    ).format(self._qualified("conversations")),
+                    sql.SQL("SELECT messages_since_summary FROM {} WHERE id = %s").format(
+                        self._qualified("conversations")
+                    ),
                     (conversation_id,),
                 )
                 row = cursor.fetchone()
