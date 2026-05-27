@@ -41,12 +41,22 @@ def upload_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient
     app = FastAPI()
     app.include_router(upload_module.router, prefix="/api/v1")
 
+    stub_ingest = _StubIngestService()
+    # `get_ingest_session` (a transitive Depends of get_subject_attribution)
+    # calls get_ingest_service(request) directly — not via Depends — so
+    # dependency_overrides alone is not enough. Install the stub on the
+    # ASGI app state so the direct read in deps.get_ingest_service succeeds.
+    app.state.ingest_service = stub_ingest
+
     app.dependency_overrides[upload_module.get_current_active_user] = lambda: SimpleNamespace(
         id="user"
     )
     app.dependency_overrides[upload_module.ensure_tenant_access] = lambda: "tenant"
     app.dependency_overrides[upload_module.get_data_dir] = lambda: tmp_path
-    app.dependency_overrides[upload_module.get_ingest_service] = lambda: _StubIngestService()
+    app.dependency_overrides[upload_module.get_ingest_service] = lambda: stub_ingest
+    app.dependency_overrides[upload_module.get_subject_attribution] = lambda: (
+        upload_module.SubjectAttribution(subject_type="user", subject_id="user", tenant="tenant")
+    )
     app.dependency_overrides[upload_module.get_upload_limits] = lambda: upload_module.UploadLimits(
         max_upload_mb=1,
         allowed_extensions={"pdf", "txt"},
@@ -55,13 +65,6 @@ def upload_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient
     return TestClient(app)
 
 
-@pytest.mark.skip(
-    reason=(
-        "Fixture leaves app.state without `ingest_service` (KeyError on "
-        "starlette State lookup) — the upload route now requires it. "
-        "Rewrite the fixture to install a stub IngestService."
-    )
-)
 def test_upload_rate_limit_returns_429(
     upload_client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
