@@ -18,6 +18,31 @@ class _Record:
     vector: List[float]
 
 
+def _match_condition(payload: Dict[str, object], condition: qmodels.FieldCondition) -> bool:
+    raw = payload.get(condition.key)
+    match = condition.match
+    if isinstance(match, qmodels.MatchValue):
+        if isinstance(raw, list):
+            return match.value in raw
+        return raw == match.value
+    if isinstance(match, qmodels.MatchText):
+        return match.text.lower() in str(raw or "").lower()
+    return True
+
+
+def _match_filter(payload: Dict[str, object], flt: qmodels.Filter) -> bool:
+    for clause in flt.must or []:
+        if not _match_condition(payload, clause):
+            return False
+    for clause in flt.must_not or []:
+        if _match_condition(payload, clause):
+            return False
+    if flt.should:
+        if not any(_match_condition(payload, clause) for clause in flt.should):
+            return False
+    return True
+
+
 class QdrantClient:
     def __init__(self, **_: object) -> None:
         self._collections: Dict[str, Dict[str, _Record]] = {}
@@ -60,10 +85,13 @@ class QdrantClient:
         query_vector: Iterable[float],
         limit: int,
         with_payload: bool = True,
+        query_filter: Optional[qmodels.Filter] = None,
     ) -> List[qmodels.ScoredPoint]:
         store = self._collections.get(collection_name, {})
         results: List[qmodels.ScoredPoint] = []
         for record in store.values():
+            if query_filter is not None and not _match_filter(record.payload, query_filter):
+                continue
             results.append(
                 qmodels.ScoredPoint(
                     id=record.id,
