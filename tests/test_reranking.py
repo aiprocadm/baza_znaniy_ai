@@ -8,6 +8,7 @@ from app.api.v1 import chat as chat_module
 from app.core.config import Settings
 from app.models import ChatRequest, ChatResponse
 from app.retriever.rerank import CrossEncoderReranker
+from app.services import chat_orchestrator
 
 
 class StubChatStore:
@@ -158,17 +159,17 @@ def test_chat_uses_reranker_when_enabled(sample_hits: List[dict[str, Any]]) -> N
     assert settings.rerank_enabled is True
     assert request.app.state.reranker is reranker
 
-    original_search = chat_module.search
+    original_search = chat_orchestrator.search
 
     def stub_search(query: str, top_k: int = 10) -> List[dict[str, Any]]:
         assert top_k == settings.retrieve_topk
         return list(sample_hits)
 
-    chat_module.search = stub_search
+    chat_orchestrator.search = stub_search
     try:
         response = chat_module.chat(payload, request=request)
     finally:
-        chat_module.search = original_search
+        chat_orchestrator.search = original_search
 
     assert isinstance(response, ChatResponse)
     assert reranker.calls
@@ -205,17 +206,17 @@ def test_chat_skips_reranker_when_disabled(sample_hits: List[dict[str, Any]]) ->
     assert settings.rerank_enabled is False
     assert request.app.state.reranker is reranker
 
-    original_search = chat_module.search
+    original_search = chat_orchestrator.search
 
     def stub_search(query: str, top_k: int = 10) -> List[dict[str, Any]]:
         assert top_k == settings.retrieve_topk
         return list(sample_hits)
 
-    chat_module.search = stub_search
+    chat_orchestrator.search = stub_search
     try:
         response = chat_module.chat(payload, request=request)
     finally:
-        chat_module.search = original_search
+        chat_orchestrator.search = original_search
 
     assert isinstance(response, ChatResponse)
     assert reranker.called is False
@@ -237,18 +238,18 @@ def test_chat_falls_back_to_legacy_when_langchain_disabled(
     request, _state = _build_request(settings, sample_hits, reranker=None)
     payload = ChatRequest(user_id="u", message="legacy flow", conversation_id=None)
 
-    original_search = chat_module.search
+    original_search = chat_orchestrator.search
 
     def stub_search(query: str, top_k: int = 10) -> List[dict[str, Any]]:
         assert query == "legacy flow"
         assert top_k == settings.retrieve_topk
         return list(sample_hits)
 
-    chat_module.search = stub_search
+    chat_orchestrator.search = stub_search
     try:
         response = chat_module.chat(payload, request=request)
     finally:
-        chat_module.search = original_search
+        chat_orchestrator.search = original_search
 
     assert isinstance(response, ChatResponse)
     assert response.conversation_id == "conversation-id"
@@ -285,14 +286,14 @@ def test_history_aware_rewrite_applied_when_enabled(sample_hits: List[dict[str, 
 
     factory = __import__("app.langchain.factory", fromlist=["build_chat_chain"])
     original_builder = factory.build_chat_chain
-    factory.build_chat_chain = lambda _settings: ChainStub()
-    original_search = chat_module.search
-    chat_module.search = lambda *_args, **_kwargs: []
+    factory.build_chat_chain = lambda *_args, **_kwargs: ChainStub()
+    original_search = chat_orchestrator.search
+    chat_orchestrator.search = lambda *_args, **_kwargs: []
     try:
         response = chat_module.chat(payload, request=request)
     finally:
         factory.build_chat_chain = original_builder
-        chat_module.search = original_search
+        chat_orchestrator.search = original_search
 
     assert "кто подписант?" in captured_question["question"]
     assert response.answer.startswith("LC ответ")
