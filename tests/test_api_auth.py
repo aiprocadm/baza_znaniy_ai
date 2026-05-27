@@ -83,6 +83,12 @@ def auth_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Tes
         client.close()
         file_models.get_engine.cache_clear()
         config_module.get_settings.cache_clear()
+        # Clear module-level rate-limit state — reload(app.main) does not
+        # reach app.api.v1.auth, so the dict leaks between tests and turns
+        # a deliberate 429 in test_login_bruteforce_rate_limit into spurious
+        # 429s on every subsequent login in the file.
+        from app.api.v1 import auth as auth_module
+        auth_module._LOGIN_ATTEMPTS.clear()
 
 
 @pytest.mark.parametrize("db_scheme", ["sqlite", "sqlite+aiosqlite"])
@@ -246,7 +252,7 @@ def test_member_cannot_search_other_tenant(auth_client: TestClient) -> None:
         headers={"Authorization": f"Bearer {member_access}", "X-Tenant": "other-tenant"},
     )
     assert response.status_code == 403
-    assert response.json()["detail"] == "TENANT_ACCESS_DENIED"
+    assert response.json()["message"] == "TENANT_ACCESS_DENIED"
 
 
 def test_member_denied_admin_jobs(auth_client: TestClient) -> None:
@@ -261,7 +267,7 @@ def test_member_denied_admin_jobs(auth_client: TestClient) -> None:
         headers={"Authorization": f"Bearer {member_access}", "X-Tenant": "default"},
     )
     assert response.status_code == 403
-    assert response.json()["detail"] == "INSUFFICIENT_ROLE"
+    assert response.json()["message"] == "INSUFFICIENT_ROLE"
 
 
 def test_admin_can_access_admin_jobs(auth_client: TestClient) -> None:
