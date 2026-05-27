@@ -10,6 +10,16 @@ from qdrant_client import QdrantClient
 from qdrant_client.http import models as qmodels
 from qdrant_client.http.exceptions import UnexpectedResponse
 
+# qdrant-client renamed ``PayloadSchemaType.BOOL`` to ``BOOLEAN`` around
+# v1.13. Resolve once at import time so the call sites stay readable
+# and we keep working against both wire shapes (the in-tree test stub
+# still exposes ``BOOL``).
+_PAYLOAD_BOOL = getattr(
+    qmodels.PayloadSchemaType,
+    "BOOL",
+    getattr(qmodels.PayloadSchemaType, "BOOLEAN", None),
+)
+
 try:  # pragma: no cover - optional dependency for real deployments
     from sentence_transformers import SentenceTransformer
 except Exception:  # pragma: no cover - lightweight fallback used in tests
@@ -168,12 +178,12 @@ class QdrantVectorStore:
                 ("act_type", qmodels.PayloadSchemaType.KEYWORD),
                 ("issuer", qmodels.PayloadSchemaType.KEYWORD),
                 ("reg_number", qmodels.PayloadSchemaType.KEYWORD),
-                ("is_active", qmodels.PayloadSchemaType.BOOL),
+                ("is_active", _PAYLOAD_BOOL),
                 ("revision", qmodels.PayloadSchemaType.KEYWORD),
                 ("meta.act_type", qmodels.PayloadSchemaType.KEYWORD),
                 ("meta.issuer", qmodels.PayloadSchemaType.KEYWORD),
                 ("meta.reg_number", qmodels.PayloadSchemaType.KEYWORD),
-                ("meta.is_active", qmodels.PayloadSchemaType.BOOL),
+                ("meta.is_active", _PAYLOAD_BOOL),
                 ("meta.revision", qmodels.PayloadSchemaType.KEYWORD),
             ):
                 client.create_payload_index(

@@ -69,12 +69,23 @@ def api_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Test
     def user_override():
         return StubUser()
 
+    def subject_override():
+        return core_auth.SubjectAttribution(
+            subject_type="user", subject_id="1", tenant="default"
+        )
+
     app.dependency_overrides = {
         core_deps.get_ingest_service: lambda: app.state.ingest_service,
         core_deps.get_ingest_session: session_override,
         core_auth.get_current_active_user: user_override,
         core_auth.ensure_tenant_access: lambda: "default",
         core_auth.require_admin_user: user_override,
+        # The upload route also depends on get_subject_attribution, which
+        # calls get_current_user(request, session) *directly* (not via
+        # Depends), so the get_current_active_user override above isn't
+        # enough — the bare bearer-token lookup on `request` would still
+        # 401 the test. Override the dependency itself.
+        core_auth.get_subject_attribution: subject_override,
     }
 
     chunks: List[dict[str, object]] = []
@@ -331,7 +342,7 @@ def test_chat_returns_503_when_model_missing(api_client: TestClient) -> None:
 def test_chat_websocket_roundtrip(api_client: TestClient) -> None:
     """Verify websocket chat request/response flow with partial tokens and final payload."""
 
-    with api_client.websocket_connect("/api/v1/ws/chat") as websocket:
+    with api_client.websocket_connect("/api/v1/ws/chat", headers={"Authorization": "Bearer test-token"}) as websocket:
         websocket.send_json(
             {
                 "type": "request",
@@ -365,7 +376,7 @@ def test_chat_websocket_roundtrip(api_client: TestClient) -> None:
 def test_chat_websocket_returns_error_for_bad_message_type(api_client: TestClient) -> None:
     """Ensure websocket channel reports protocol-level envelope errors."""
 
-    with api_client.websocket_connect("/api/v1/ws/chat") as websocket:
+    with api_client.websocket_connect("/api/v1/ws/chat", headers={"Authorization": "Bearer test-token"}) as websocket:
         websocket.send_json({"type": "unexpected"})
 
         error = websocket.receive_json()
@@ -376,7 +387,7 @@ def test_chat_websocket_returns_error_for_bad_message_type(api_client: TestClien
 def test_chat_websocket_returns_error_for_invalid_payload(api_client: TestClient) -> None:
     """Ensure websocket channel returns structured validation errors."""
 
-    with api_client.websocket_connect("/api/v1/ws/chat") as websocket:
+    with api_client.websocket_connect("/api/v1/ws/chat", headers={"Authorization": "Bearer test-token"}) as websocket:
         websocket.send_json(
             {
                 "type": "request",
