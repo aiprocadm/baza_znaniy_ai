@@ -84,7 +84,6 @@ def clear_fallback_between_tests() -> None:
         vectorstore.clear_fallback()
 
 
-@pytest.mark.skip(reason=_VECTORSTORE_REFACTOR_SKIP)
 def test_index_chunks_success(monkeypatch: pytest.MonkeyPatch) -> None:
     dummy = DummyVectorStore()
     monkeypatch.setattr(vectorstore, "_VECTOR_STORE", dummy)
@@ -98,10 +97,16 @@ def test_index_chunks_success(monkeypatch: pytest.MonkeyPatch) -> None:
     assert dummy.upserted == [chunks]
 
     dummy.results = [{"text": "hit"}]
-    hits = vectorstore.search("anything", top_k=5)
+    hits = vectorstore.search("anything", top_k=5, tenant_id="t1")
 
     assert hits == dummy.results
-    assert dummy.search_calls == [("anything", 5, None, None)]
+    assert len(dummy.search_calls) == 1
+    query, top_k, filters = dummy.search_calls[0]
+    assert query == "anything"
+    assert top_k == 5
+    assert filters.tenant_id == "t1"
+    assert filters.owner is None
+    assert filters.tags == ()
 
 
 @pytest.mark.skip(reason=_VECTORSTORE_REFACTOR_SKIP)
