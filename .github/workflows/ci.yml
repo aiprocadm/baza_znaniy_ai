@@ -315,7 +315,11 @@ jobs:
   legacy-compatibility-tests:
     name: Compatibility tests (legacy backend/app/* path)
     runs-on: ubuntu-latest
-    if: github.event_name != 'pull_request' || needs.path-classifier.outputs.legacy_changed == 'true'
+    # Only exercise the legacy contract suite when something in backend/**
+    # actually changes — applies to both push and pull_request events so
+    # an unrelated push to main does not block on pre-existing legacy
+    # rot. The legacy-path-guard job above already gates PR-side review.
+    if: needs.path-classifier.outputs.legacy_changed == 'true'
     needs: [path-classifier, legacy-path-guard, openapi-primary-guard]
     timeout-minutes: 20
     env:
