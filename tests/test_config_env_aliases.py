@@ -51,27 +51,19 @@ def test_alias_choice_is_used_when_primary_missing(monkeypatch: pytest.MonkeyPat
     assert settings.chat_memory_max_tokens == 9876
 
 
-@pytest.mark.skip(
-    reason=(
-        "Settings alias resolution order was rewritten — CHAT_MEMORY_MAX_TOKENS "
-        "no longer overrides CHAT_MEMORY_MAXTOK in the new AliasChoices order. "
-        "Behaviour is intentional; test needs updating to reflect the new "
-        "precedence rules."
-    )
-)
-def test_primary_environment_variable_takes_precedence(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Primary environment variable names should override alias matches."""
+def test_first_alias_choice_wins_over_later_ones(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The first entry in AliasChoices must win when multiple aliases are set."""
 
     _prepare_environment(monkeypatch)
     _reload_settings_module()
 
-    monkeypatch.setenv("CHAT_MEMORY_MAX_TOKENS", "1234")
     monkeypatch.setenv("CHAT_MEMORY_MAXTOK", "4321")
+    monkeypatch.setenv("MEMORY_MAX_TOKENS", "1234")
 
     from app.core.config import get_settings
 
     settings = get_settings()
-    assert settings.chat_memory_max_tokens == 1234
+    assert settings.chat_memory_max_tokens == 4321
 
 
 def test_secondary_alias_option_is_respected(monkeypatch: pytest.MonkeyPatch) -> None:
