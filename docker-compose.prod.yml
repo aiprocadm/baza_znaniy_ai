@@ -20,7 +20,8 @@ services:
       args:
         INSTALL_DEV: "0"
     env_file:
-      - .env
+      - path: .env
+        required: false
     environment:
       BACKEND_ENTRYPOINT: "app.api.main:app"
       INGEST_AUTOSTART_WORKER: "false"
@@ -45,7 +46,8 @@ services:
         INSTALL_DEV: "0"
     command: ["python", "-m", "app.worker.main"]
     env_file:
-      - .env
+      - path: .env
+        required: false
     environment:
       INGEST_AUTOSTART_WORKER: "true"
       INGEST_USE_LOCAL_QUEUE: "false"

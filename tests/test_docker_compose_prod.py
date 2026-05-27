@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+from pathlib import Path
 
 import pytest
+import yaml
 
 
 def _docker_compose_cmd() -> list[str] | None:
@@ -25,24 +27,20 @@ def test_docker_compose_prod_boots_all_services() -> None:
     assert {"qdrant", "kb_api", "kb_worker", "prometheus", "grafana"}.issubset(services)
 
 
-@pytest.mark.skip(
-    reason=(
-        "Skipped for the v1.0.0 CI gate: `docker compose -f "
-        "docker-compose.prod.yml config` returns non-zero on environments "
-        "that do not have the production secret env vars set (which CI "
-        "runners do not). The metrics-targets check is also covered by "
-        "ops/grafana/prometheus.yml in the dashboards repo."
-    )
-)
 def test_docker_compose_prod_metrics_targets_present() -> None:
-    compose = _docker_compose_cmd()
-    if compose is None:
-        pytest.skip("docker compose is not available in this environment")
+    """Prometheus must be configured to scrape both kb_api and qdrant on /metrics."""
 
-    cmd = compose + ["-f", "docker-compose.prod.yml", "config"]
-    out = subprocess.run(cmd, capture_output=True, text=True, check=True)
-    rendered = out.stdout
+    prometheus_yml = Path("ops/prometheus/prometheus.yml")
+    assert prometheus_yml.is_file(), f"missing {prometheus_yml}"
 
-    assert "kb_api:8000" in rendered
-    assert "qdrant:6333" in rendered
-    assert "/metrics" in rendered
+    config = yaml.safe_load(prometheus_yml.read_text(encoding="utf-8"))
+    jobs = {job["job_name"]: job for job in config.get("scrape_configs", [])}
+
+    for job_name, expected_target in (("api", "kb_api:8000"), ("qdrant", "qdrant:6333")):
+        assert job_name in jobs, f"prometheus job {job_name!r} missing"
+        job = jobs[job_name]
+        assert job.get("metrics_path") == "/metrics"
+        targets = {t for static in job.get("static_configs", []) for t in static.get("targets", [])}
+        assert (
+            expected_target in targets
+        ), f"prometheus job {job_name!r} should scrape {expected_target}"
