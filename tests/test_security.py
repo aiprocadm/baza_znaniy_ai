@@ -59,9 +59,7 @@ def test_verify_password_handles_unknown_hash_error(security):
 
 def test_create_access_token_includes_expiry(security):
     now = datetime.now(timezone.utc)
-    token = security.create_access_token(
-        {"sub": "user-123"}, expires_delta=timedelta(minutes=1)
-    )
+    token = security.create_access_token({"sub": "user-123"}, expires_delta=timedelta(minutes=1))
 
     payload = security.decode_token(token)
     assert payload["sub"] == "user-123"
@@ -83,8 +81,10 @@ def test_create_access_token_uses_default_expiry(security):
     assert isinstance(payload["exp"], (int, float))
 
     expires_at = datetime.fromtimestamp(payload["exp"], tz=timezone.utc)
-    assert timedelta(seconds=0) <= expires_at - now <= timedelta(
-        minutes=default_expiry_minutes, seconds=5
+    assert (
+        timedelta(seconds=0)
+        <= expires_at - now
+        <= timedelta(minutes=default_expiry_minutes, seconds=5)
     )
 
 

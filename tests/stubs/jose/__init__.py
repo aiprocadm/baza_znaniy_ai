@@ -108,9 +108,7 @@ class jwt:
         return f"token.{token.dumps()}"
 
     @staticmethod
-    def decode(
-        token: str, key: str, algorithms: Iterable[str] | tuple[str, ...]
-    ) -> Dict[str, Any]:
+    def decode(token: str, key: str, algorithms: Iterable[str] | tuple[str, ...]) -> Dict[str, Any]:
         if not token.startswith("token."):
             raise JWTError("Invalid token prefix")
 

@@ -19,6 +19,7 @@ class QdrantSettings(Protocol):
     vector_embed_model: str
     vector_embed_dimension: int
 
+
 try:  # pragma: no cover - optional dependency surface during import
     from app.retriever import VectorStore, get_vector_store as _get_vector_store_factory
 except ImportError as exc:  # pragma: no cover - import guard executed in tests
@@ -120,6 +121,7 @@ def _clear_cache() -> None:
 
     _cached_settings.cache_clear()
     _cached_vector_store.cache_clear()
+
 
 __all__ = (
     *tuple(_SETTING_EXPORTS.keys()),

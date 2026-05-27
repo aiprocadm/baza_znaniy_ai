@@ -242,9 +242,7 @@ def test_search_returns_relevant_hits(client: TestClient) -> None:
         },
     )
 
-    response = client.post(
-        "/api/kb/search", json={"query": "декларация налогов", "top_k": 3}
-    )
+    response = client.post("/api/kb/search", json={"query": "декларация налогов", "top_k": 3})
     assert response.status_code == 200
     body = response.json()
     assert body["hits"], "ожидаются результаты по релевантному запросу"
@@ -265,9 +263,7 @@ def test_ask_uses_extractive_fallback_when_no_provider(client: TestClient) -> No
         },
     )
 
-    response = client.post(
-        "/api/kb/ask", json={"question": "Сколько дней отпуска?", "top_k": 3}
-    )
+    response = client.post("/api/kb/ask", json={"question": "Сколько дней отпуска?", "top_k": 3})
     assert response.status_code == 200
     body = response.json()
     assert body["provider"] == "extractive"
@@ -276,9 +272,7 @@ def test_ask_uses_extractive_fallback_when_no_provider(client: TestClient) -> No
 
 
 def test_ask_handles_empty_kb(client: TestClient) -> None:
-    response = client.post(
-        "/api/kb/ask", json={"question": "Есть ли что-то?", "top_k": 3}
-    )
+    response = client.post("/api/kb/ask", json={"question": "Есть ли что-то?", "top_k": 3})
     assert response.status_code == 200
     body = response.json()
     assert body["sources"] == []
@@ -312,9 +306,7 @@ def test_ask_uses_kb_llm_provider_when_configured(
         "/api/kb/documents",
         json={"title": "Отпуска", "text": "Отпуск составляет 28 календарных дней."},
     )
-    response = client.post(
-        "/api/kb/ask", json={"question": "Сколько дней отпуска?", "top_k": 3}
-    )
+    response = client.post("/api/kb/ask", json={"question": "Сколько дней отпуска?", "top_k": 3})
     assert response.status_code == 200
     body = response.json()
     assert body["provider"] == "deepseek"
@@ -342,9 +334,7 @@ def test_ask_falls_back_to_legacy_provider_when_kb_llm_fails(
         "/api/kb/documents",
         json={"title": "x", "text": "Документ с релевантным текстом про отпуск"},
     )
-    response = client.post(
-        "/api/kb/ask", json={"question": "Сколько дней отпуска?", "top_k": 3}
-    )
+    response = client.post("/api/kb/ask", json={"question": "Сколько дней отпуска?", "top_k": 3})
     body = response.json()
     assert body["provider"] == "legacy-llama"
     assert body["answer"] == "Legacy answer"
@@ -396,9 +386,7 @@ def test_build_provider_requires_key(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_build_provider_picks_preset_url_and_model(monkeypatch: pytest.MonkeyPatch) -> None:
-    provider = kb_llm.build_provider(
-        "deepseek", env={"DEEPSEEK_API_KEY": "test-key"}
-    )
+    provider = kb_llm.build_provider("deepseek", env={"DEEPSEEK_API_KEY": "test-key"})
     assert provider.name == "deepseek"
     assert provider.model == "deepseek-chat"
     assert provider.config.api_base == "https://api.deepseek.com/v1"
@@ -499,9 +487,7 @@ def test_openai_compatible_provider_generate_calls_http(monkeypatch: pytest.Monk
 
     monkeypatch.setattr(kb_llm_mod, "httpx", FakeHttpx)
 
-    provider = kb_llm.build_provider(
-        "deepseek", env={"DEEPSEEK_API_KEY": "secret"}
-    )
+    provider = kb_llm.build_provider("deepseek", env={"DEEPSEEK_API_KEY": "secret"})
     response = provider.generate("Hi", system="Be brief")
 
     assert response.text == "Привет!"
@@ -636,9 +622,7 @@ def test_rerank_falls_back_silently_on_model_error(
     assert body["rerank"]["enabled"] is True
 
 
-def test_rerank_status_in_health(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_rerank_status_in_health(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     """/health возвращает блок reranker с конфигом."""
 
     monkeypatch.setenv("KB_RERANK_ENABLED", "true")
@@ -738,9 +722,7 @@ def test_get_conversation_returns_messages(client: TestClient) -> None:
 
 def test_rename_conversation(client: TestClient) -> None:
     conv_id = client.post("/api/kb/conversations", json={"title": "Old"}).json()["id"]
-    response = client.patch(
-        f"/api/kb/conversations/{conv_id}", json={"title": "Renamed"}
-    )
+    response = client.patch(f"/api/kb/conversations/{conv_id}", json={"title": "Renamed"})
     assert response.status_code == 200
     assert response.json()["title"] == "Renamed"
 
@@ -927,9 +909,7 @@ def test_ask_stream_emits_meta_token_done_sequence(
         "/api/kb/documents",
         json={"title": "Отпуска", "text": "Регламент отпусков сотрудников 28 дней"},
     )
-    response = client.post(
-        "/api/kb/ask/stream", json={"question": "Сколько дней отпуска?"}
-    )
+    response = client.post("/api/kb/ask/stream", json={"question": "Сколько дней отпуска?"})
     assert response.status_code == 200
     assert "text/event-stream" in response.headers["content-type"]
     events = _parse_sse_events(response.text)
@@ -973,9 +953,7 @@ def test_ask_stream_persists_full_answer_after_done(
         "/api/kb/documents",
         json={"title": "Отпуска", "text": "Регламент отпусков сотрудников"},
     )
-    response = client.post(
-        "/api/kb/ask/stream", json={"question": "Какой регламент отпусков?"}
-    )
+    response = client.post("/api/kb/ask/stream", json={"question": "Какой регламент отпусков?"})
     events = _parse_sse_events(response.text)
     meta = next(e["data"] for e in events if e["event"] == "meta")
     conv_id = meta["conversation_id"]
@@ -995,9 +973,7 @@ def test_ask_stream_extractive_fallback_when_no_provider(client: TestClient) -> 
         "/api/kb/documents",
         json={"title": "Регламент отпусков", "text": "Отпуск 28 календарных дней"},
     )
-    response = client.post(
-        "/api/kb/ask/stream", json={"question": "Сколько дней отпуска?"}
-    )
+    response = client.post("/api/kb/ask/stream", json={"question": "Сколько дней отпуска?"})
     assert response.status_code == 200
     events = _parse_sse_events(response.text)
     done = next(e["data"] for e in events if e["event"] == "done")
@@ -1010,9 +986,7 @@ def test_ask_stream_extractive_fallback_when_no_provider(client: TestClient) -> 
 def test_ask_stream_empty_kb_emits_friendly_message(client: TestClient) -> None:
     """Стрим на пустую базу даёт корректный текст и done с provider=none."""
 
-    response = client.post(
-        "/api/kb/ask/stream", json={"question": "Что в базе?"}
-    )
+    response = client.post("/api/kb/ask/stream", json={"question": "Что в базе?"})
     assert response.status_code == 200
     events = _parse_sse_events(response.text)
     done = next(e["data"] for e in events if e["event"] == "done")
@@ -1058,9 +1032,7 @@ def test_ask_stream_continues_conversation_with_history(
         "/api/kb/documents",
         json={"title": "Отпуска", "text": "Регламент отпусков сотрудников 28 дней"},
     )
-    first = client.post(
-        "/api/kb/ask/stream", json={"question": "Какой регламент отпусков?"}
-    )
+    first = client.post("/api/kb/ask/stream", json={"question": "Какой регламент отпусков?"})
     events = _parse_sse_events(first.text)
     conv_id = next(e["data"]["conversation_id"] for e in events if e["event"] == "meta")
 
@@ -1126,9 +1098,7 @@ def test_auth_disabled_by_default(client: TestClient) -> None:
     assert response.status_code == 201
 
 
-def test_auth_required_when_key_set(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_auth_required_when_key_set(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """С KB_API_KEY — без заголовка mutating endpoints возвращают 401."""
 
     monkeypatch.setenv("KB_API_KEY", "secret-123")
@@ -1230,7 +1200,14 @@ def test_search_respects_hard_limit_env(
     """KB_SEARCH_HARD_LIMIT должен ограничивать количество извлекаемых чанков."""
 
     monkeypatch.setenv("KB_SEARCH_HARD_LIMIT", "100")
-    monkeypatch.setenv("KB_MVP_DB_PATH", str(client.app.state.kb_mvp_store.db_path) if hasattr(client.app.state, "kb_mvp_store") else "")
+    monkeypatch.setenv(
+        "KB_MVP_DB_PATH",
+        (
+            str(client.app.state.kb_mvp_store.db_path)
+            if hasattr(client.app.state, "kb_mvp_store")
+            else ""
+        ),
+    )
     # Просто проверяем что переменная читается — реальное создание 10K чанков долго
     assert kb_store._search_hard_limit() == 100
 
@@ -1259,9 +1236,7 @@ def test_search_hard_limit_clamps_invalid() -> None:
         os.environ.pop("KB_SEARCH_HARD_LIMIT", None)
 
 
-def test_search_applies_limit_in_sql(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_search_applies_limit_in_sql(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     """Поиск с маленьким лимитом — отбирает только N чанков из БД."""
 
     monkeypatch.setenv("KB_SEARCH_HARD_LIMIT", "100")
@@ -1271,9 +1246,7 @@ def test_search_applies_limit_in_sql(
             "/api/kb/documents",
             json={"title": f"doc{i}", "text": f"тестовый документ {i} с текстом " * 30},
         )
-    response = client.post(
-        "/api/kb/search", json={"query": "тестовый документ", "top_k": 5}
-    )
+    response = client.post("/api/kb/search", json={"query": "тестовый документ", "top_k": 5})
     assert response.status_code == 200
     # Лимит выше количества чанков → поиск работает нормально
     assert response.json()["hits"]

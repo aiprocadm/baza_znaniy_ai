@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 
 def test_module_imports():
     """Module imports without side effects."""
@@ -282,11 +280,7 @@ def test_parse_response_clean_array():
 def test_parse_response_strips_markdown_fence():
     from app.services.synthetic_qa import parse_qa_response
 
-    raw = (
-        "```json\n"
-        '{"instruction": "Q?", "input": "", "output": "A. [doc_chunk:2]"}\n'
-        "```"
-    )
+    raw = "```json\n" '{"instruction": "Q?", "input": "", "output": "A. [doc_chunk:2]"}\n' "```"
     pairs = parse_qa_response(raw, source_chunk_id=2)
 
     assert len(pairs) == 1
@@ -346,8 +340,12 @@ def test_estimate_chunk_cost_higher_for_paraphrase():
     from app.services.synthetic_qa import GenerationMode, estimate_chunk_cost_usd
 
     chunk_chars = 4000
-    single = estimate_chunk_cost_usd("deepseek", "deepseek-chat", GenerationMode.SINGLE, chunk_chars)
-    paraphrase = estimate_chunk_cost_usd("deepseek", "deepseek-chat", GenerationMode.PARAPHRASE, chunk_chars)
+    single = estimate_chunk_cost_usd(
+        "deepseek", "deepseek-chat", GenerationMode.SINGLE, chunk_chars
+    )
+    paraphrase = estimate_chunk_cost_usd(
+        "deepseek", "deepseek-chat", GenerationMode.PARAPHRASE, chunk_chars
+    )
 
     assert paraphrase > single
 
@@ -431,7 +429,9 @@ def test_generator_skips_refusal_response():
     )
 
     provider = _FakeProvider(
-        responses=['{"instruction":"Q?","input":"","output":"I cannot answer this question, sorry."}']
+        responses=[
+            '{"instruction":"Q?","input":"","output":"I cannot answer this question, sorry."}'
+        ]
     )
     generator = SyntheticQAGenerator(provider=provider)
 
@@ -497,13 +497,9 @@ def test_generator_can_disable_self_consistency():
             '"output":"The rule states Y must follow procedure X with verification. [doc_chunk:1]"}',
         ]
     )
-    generator = SyntheticQAGenerator(
-        provider=provider, check_self_consistency=False
-    )
+    generator = SyntheticQAGenerator(provider=provider, check_self_consistency=False)
 
-    pairs = generator.generate_for_chunk(
-        chunks=["text"], chunk_ids=[1], mode=GenerationMode.SINGLE
-    )
+    pairs = generator.generate_for_chunk(chunks=["text"], chunk_ids=[1], mode=GenerationMode.SINGLE)
 
     # Without self-consistency, only one provider call happens
     assert len(provider.calls) == 1
@@ -524,7 +520,9 @@ def test_load_processed_chunk_ids_reads_meta(tmp_path):
     pairs = [
         QAPair(instruction="Q1", input="", output="A1 long enough text here", source_chunk_id=10),
         QAPair(instruction="Q2", input="", output="A2 long enough text here", source_chunk_id=20),
-        QAPair(instruction="Q3", input="", output="A3 long enough text here", source_chunk_id=10),  # dup
+        QAPair(
+            instruction="Q3", input="", output="A3 long enough text here", source_chunk_id=10
+        ),  # dup
     ]
     with path.open("w", encoding="utf-8") as handle:
         for pair in pairs:
@@ -552,10 +550,14 @@ def test_load_processed_chunk_ids_tolerates_malformed_lines(tmp_path):
     from app.services.synthetic_qa import QAPair, load_processed_chunk_ids
 
     path = tmp_path / "out.jsonl"
-    pair = QAPair(instruction="Q", input="", output="A long enough text goes here for sure", source_chunk_id=99)
+    pair = QAPair(
+        instruction="Q",
+        input="",
+        output="A long enough text goes here for sure",
+        source_chunk_id=99,
+    )
     path.write_text(
-        "this is not json\n"
-        + pair.to_jsonl_line(),
+        "this is not json\n" + pair.to_jsonl_line(),
         encoding="utf-8",
     )
 

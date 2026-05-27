@@ -1,4 +1,5 @@
 """Utilities for preparing retrieval context and citations."""
+
 from __future__ import annotations
 
 from typing import Dict, Iterable, List, Sequence, Tuple
@@ -85,7 +86,9 @@ def select_citations(
         enriched.setdefault("article", meta.get("article"))
         enriched.setdefault("clause", meta.get("clause"))
         enriched.setdefault("revision", meta.get("revision"))
-        enriched.setdefault("revision_date", meta.get("effective_date") or meta.get("adoption_date"))
+        enriched.setdefault(
+            "revision_date", meta.get("effective_date") or meta.get("adoption_date")
+        )
         unique.append(enriched)
         if len(unique) >= maximum:
             break

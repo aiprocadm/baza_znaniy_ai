@@ -1,4 +1,5 @@
 """Admin endpoint: GET /api/v1/admin/audit — read audit_log entries."""
+
 from __future__ import annotations
 
 from datetime import datetime

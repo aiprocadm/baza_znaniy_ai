@@ -4,7 +4,12 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Query, Request
 
-from app.core.auth import SubjectAttribution, ensure_tenant_access, get_current_active_user, get_subject_attribution
+from app.core.auth import (
+    SubjectAttribution,
+    ensure_tenant_access,
+    get_current_active_user,
+    get_subject_attribution,
+)
 from app.models.user import UserRecord
 from app.models import SearchHit, SearchResponse
 from app.retriever.vector_store import SearchFilters
@@ -70,6 +75,7 @@ def search_endpoint(
     sink = getattr(request.app.state, "usage_sink", None)
     if sink is not None:
         from app.services.accounting import UsageEvent
+
         sink.write(
             UsageEvent(
                 tenant_id=subject.tenant,

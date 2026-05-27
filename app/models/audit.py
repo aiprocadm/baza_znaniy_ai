@@ -1,4 +1,5 @@
 """SQLModel for audit_log table."""
+
 from __future__ import annotations
 
 from datetime import datetime

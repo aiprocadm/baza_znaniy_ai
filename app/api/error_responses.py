@@ -77,4 +77,3 @@ __all__ = [
     "validation_exception_handler",
     "unhandled_exception_handler",
 ]
-

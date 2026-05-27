@@ -83,7 +83,9 @@ class LoraRuntimeManager:
         return numeric
 
     def _build_info(self, path: Path, *, adapter_type: str, scaling: float) -> AdapterInfo:
-        created_at = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+        created_at = (
+            datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+        )
         return AdapterInfo(
             name=path.stem,
             base=self._settings.llm_model_name,
@@ -110,8 +112,7 @@ class LoraRuntimeManager:
         numeric_scaling = self._validate_scaling(scaling)
 
         if adapter_type == "unknown":
-            raise UnsupportedAdapterFormatError(
-                f"Unsupported adapter format for {resolved.name}")
+            raise UnsupportedAdapterFormatError(f"Unsupported adapter format for {resolved.name}")
 
         load_kwargs = {"scaling": numeric_scaling}
 
@@ -119,13 +120,15 @@ class LoraRuntimeManager:
             load_fn = getattr(provider, "load_lora", None)
             if not callable(load_fn):
                 raise AdapterCompatibilityError(
-                    "Current LLM provider does not support GGUF adapters")
+                    "Current LLM provider does not support GGUF adapters"
+                )
             load_fn(resolved, **load_kwargs)
         else:
             load_fn = getattr(provider, "load_peft_adapter", None)
             if not callable(load_fn):
                 raise AdapterCompatibilityError(
-                    "Current LLM provider does not support PEFT adapters")
+                    "Current LLM provider does not support PEFT adapters"
+                )
             load_fn(resolved, **load_kwargs)
 
         info = self._build_info(resolved, adapter_type=adapter_type, scaling=numeric_scaling)
@@ -140,8 +143,7 @@ class LoraRuntimeManager:
         if path is not None:
             resolved = self._normalise_path(path)
             if resolved != current.payload:
-                raise AdapterNotLoadedError(
-                    f"Adapter {resolved} is not currently active")
+                raise AdapterNotLoadedError(f"Adapter {resolved} is not currently active")
 
         provider = self._resolve_provider()
         unload_fn = getattr(provider, "unload_lora", None)

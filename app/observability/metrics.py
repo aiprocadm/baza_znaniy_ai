@@ -176,8 +176,6 @@ def record_document_ocr_pages(pages: int, status: str, extension: str | None) ->
         DOCUMENT_OCR_PAGES_TOTAL.labels(status=status_label, extension=ext_label).inc(increment)
 
 
-
-
 def record_docling_parse(status: str, duration: float) -> None:
     status_label = _normalise(status, _DEFAULT_STATUS)
     DOCLING_PARSE_TOTAL.labels(status=status_label).inc()
@@ -187,6 +185,7 @@ def record_docling_parse(status: str, duration: float) -> None:
 def record_docling_fallback(reason: str | None) -> None:
     reason_label = _normalise(reason, "unknown")
     DOCLING_FALLBACK_TOTAL.labels(reason=reason_label).inc()
+
 
 def record_index_operation(
     status: str,
@@ -258,7 +257,9 @@ def record_queue_lag(lag: int) -> None:
 
 def record_ingestion_throughput(status: str, documents: int = 1) -> None:
     if documents > 0:
-        INGEST_THROUGHPUT_DOCS_TOTAL.labels(status=_normalise(status, _DEFAULT_STATUS)).inc(documents)
+        INGEST_THROUGHPUT_DOCS_TOTAL.labels(status=_normalise(status, _DEFAULT_STATUS)).inc(
+            documents
+        )
 
 
 def record_token_usage(direction: str, provider: str, tokens: int) -> None:

@@ -70,10 +70,14 @@ def test_cli_writes_jsonl_consumable_by_validate_dataset(tmp_path, populated_sto
     out_path = tmp_path / "out.jsonl"
     exit_code = cli.main(
         [
-            "--corpus", str(tmp_path / "kb.sqlite"),
-            "--provider", "deepseek",
-            "--mode", "single",
-            "--output", str(out_path),
+            "--corpus",
+            str(tmp_path / "kb.sqlite"),
+            "--provider",
+            "deepseek",
+            "--mode",
+            "single",
+            "--output",
+            str(out_path),
             "--no-self-consistency",
             "--no-budget-guard",
         ]
@@ -101,26 +105,38 @@ def test_cli_resume_skips_processed_chunks(tmp_path, populated_store, monkeypatc
     out_path = tmp_path / "out.jsonl"
 
     # First run
-    cli.main([
-        "--corpus", str(tmp_path / "kb.sqlite"),
-        "--provider", "deepseek",
-        "--mode", "single",
-        "--output", str(out_path),
-        "--no-self-consistency",
-        "--no-budget-guard",
-    ])
+    cli.main(
+        [
+            "--corpus",
+            str(tmp_path / "kb.sqlite"),
+            "--provider",
+            "deepseek",
+            "--mode",
+            "single",
+            "--output",
+            str(out_path),
+            "--no-self-consistency",
+            "--no-budget-guard",
+        ]
+    )
     first_lines = out_path.read_text(encoding="utf-8").splitlines()
 
     # Second run with --resume should add nothing (all chunks already seen)
-    cli.main([
-        "--corpus", str(tmp_path / "kb.sqlite"),
-        "--provider", "deepseek",
-        "--mode", "single",
-        "--output", str(out_path),
-        "--no-self-consistency",
-        "--no-budget-guard",
-        "--resume",
-    ])
+    cli.main(
+        [
+            "--corpus",
+            str(tmp_path / "kb.sqlite"),
+            "--provider",
+            "deepseek",
+            "--mode",
+            "single",
+            "--output",
+            str(out_path),
+            "--no-self-consistency",
+            "--no-budget-guard",
+            "--resume",
+        ]
+    )
     second_lines = out_path.read_text(encoding="utf-8").splitlines()
 
     assert second_lines == first_lines
@@ -135,10 +151,17 @@ def test_cli_budget_guard_aborts_when_estimate_exceeds_cap(tmp_path, populated_s
 
     out_path = tmp_path / "out.jsonl"
     with pytest.raises(SystemExit):
-        cli.main([
-            "--corpus", str(tmp_path / "kb.sqlite"),
-            "--provider", "deepseek",
-            "--mode", "single",
-            "--output", str(out_path),
-            "--max-budget-usd", "0.0000001",  # absurdly low
-        ])
+        cli.main(
+            [
+                "--corpus",
+                str(tmp_path / "kb.sqlite"),
+                "--provider",
+                "deepseek",
+                "--mode",
+                "single",
+                "--output",
+                str(out_path),
+                "--max-budget-usd",
+                "0.0000001",  # absurdly low
+            ]
+        )

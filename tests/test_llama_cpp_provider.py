@@ -137,4 +137,3 @@ def test_ensure_model_rejects_invalid_gguf_header(tmp_path: Path) -> None:
         provider.ensure_model()
 
     assert "GGUF" in str(exc.value)
-

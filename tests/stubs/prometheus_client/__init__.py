@@ -1,4 +1,5 @@
 """Minimal Prometheus client stub tailored for unit tests."""
+
 from collections import defaultdict
 from typing import Iterable, Mapping, MutableMapping, TypeVar
 
@@ -27,9 +28,7 @@ class CollectorRegistry:
         self._metrics[metric._name] = metric
         metric._registry = self
 
-    def get_sample_value(
-        self, name: str, labels: Mapping[str, str] | None = None
-    ) -> float | None:
+    def get_sample_value(self, name: str, labels: Mapping[str, str] | None = None) -> float | None:
         labels = labels or {}
         if name.endswith("_sum"):
             metric_name = name[: -len("_sum")]

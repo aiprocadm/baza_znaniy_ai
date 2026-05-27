@@ -1,4 +1,5 @@
 """Test GET /api/kb/documents/{id}/file endpoint."""
+
 from __future__ import annotations
 
 import io
@@ -16,6 +17,7 @@ from app.services.kb_store import KnowledgeBaseStore
 def app_and_store(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
     from app.core import config as _cfg
+
     if hasattr(_cfg, "get_settings"):
         _cfg.get_settings.cache_clear()
 
@@ -90,6 +92,7 @@ def test_file_endpoint_path_traversal_returns_500(app_and_store):
 
     # Inject a malicious relpath directly via sqlite
     import sqlite3
+
     conn = sqlite3.connect(store.db_path)
     conn.execute(
         "UPDATE kb_documents SET has_original_file=1, file_relpath=? WHERE id=1",
@@ -110,6 +113,7 @@ def test_file_endpoint_requires_auth_when_key_set(app_and_store, monkeypatch):
     monkeypatch.setenv("KB_API_KEY", "secret-key-xxx")
     # Force kb_auth to re-read env
     from app.api import kb_auth as _ka
+
     if hasattr(_ka, "_load_api_key"):
         _ka._load_api_key.cache_clear()
 

@@ -1,4 +1,5 @@
 """FastAPI middleware that records every /api/kb/* request to audit_log."""
+
 from __future__ import annotations
 
 import logging

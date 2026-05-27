@@ -61,7 +61,11 @@ EXPECTED_EXTENSION_SET = {"pdf", "docx", "pptx", "xlsx", "txt", "md"}
 def test_env_example_contains_unique_keys() -> None:
     """The sample environment file should not contain duplicated keys."""
 
-    lines = [line for line in ENV_EXAMPLE.read_text().splitlines() if line and not line.lstrip().startswith("#")]
+    lines = [
+        line
+        for line in ENV_EXAMPLE.read_text().splitlines()
+        if line and not line.lstrip().startswith("#")
+    ]
     keys = [line.split("=", 1)[0].strip() for line in lines]
     assert len(keys) == len(set(keys)), "Duplicate keys found in .env.example"
 
@@ -79,7 +83,9 @@ def test_env_example_defaults_match_specification() -> None:
     for key, expected in EXPECTED_DEFAULTS.items():
         assert values.get(key) == expected, f"Unexpected default for {key}"
 
-    extensions = {piece.strip() for piece in values["UPLOAD_ALLOWED_EXTS"].split(",") if piece.strip()}
+    extensions = {
+        piece.strip() for piece in values["UPLOAD_ALLOWED_EXTS"].split(",") if piece.strip()
+    }
     assert extensions == EXPECTED_EXTENSION_SET
 
     # Ensure reranking switches are present for clarity.

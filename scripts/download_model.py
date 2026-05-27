@@ -220,9 +220,7 @@ def download_via_hub(
     """Download the model using the Hugging Face Hub client."""
 
     if hf_hub_download is None or model_info is None:
-        detail = (
-            f" (import error: {_HF_IMPORT_ERROR})" if _HF_IMPORT_ERROR is not None else ""
-        )
+        detail = f" (import error: {_HF_IMPORT_ERROR})" if _HF_IMPORT_ERROR is not None else ""
         raise DownloadError(
             f"huggingface_hub is not importable; cannot download from the Hub{detail}"
         )

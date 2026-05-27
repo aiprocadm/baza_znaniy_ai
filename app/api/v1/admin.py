@@ -23,7 +23,7 @@ def list_jobs(
     job_type: Optional[str] = Query(None),
     status: Optional[str] = Query(None),
     _: str = Depends(ensure_tenant_access),
-    __= Depends(require_admin_user),
+    __=Depends(require_admin_user),
 ) -> JobsResponse:
     """Return information about queued and historical jobs."""
 

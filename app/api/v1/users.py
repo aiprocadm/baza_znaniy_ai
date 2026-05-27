@@ -10,7 +10,7 @@ from app.core.audit import log_security_event
 from app.core.datetime_utils import utc_now
 from app.core.deps import get_ingest_session
 from app.models.tenant import TenantRecord
-from app.models.user import UserCreate, UserRecord, UserResponse
+from app.models.user import UserCreate, UserRecord, UserResponse, UserRole
 from app.security import hash_password
 
 router = APIRouter(prefix="/users", tags=["users"])
@@ -37,7 +37,12 @@ def list_users(session: Session = Depends(get_ingest_session)) -> list[UserRespo
     ]
 
 
-@router.post("", response_model=UserResponse, status_code=status.HTTP_201_CREATED, dependencies=[Depends(require_admin_user)])
+@router.post(
+    "",
+    response_model=UserResponse,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_admin_user)],
+)
 def create_user(
     payload: UserCreate,
     session: Session = Depends(get_ingest_session),
@@ -47,7 +52,9 @@ def create_user(
     if session.exec(select(UserRecord).where(UserRecord.email == payload.email)).first():
         raise HTTPException(status.HTTP_409_CONFLICT, detail="USER_EXISTS")
 
-    tenant = session.exec(select(TenantRecord).where(TenantRecord.slug == payload.tenant_slug)).first()
+    tenant = session.exec(
+        select(TenantRecord).where(TenantRecord.slug == payload.tenant_slug)
+    ).first()
     if tenant is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="TENANT_NOT_FOUND")
 

@@ -1,4 +1,5 @@
 """Test PDF blob persistence in upload_document."""
+
 from __future__ import annotations
 
 import io
@@ -18,6 +19,7 @@ def app_and_store(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
     # Force settings reload — pattern depends on app.core.config caching
     from app.core import config as _cfg
+
     if hasattr(_cfg, "get_settings"):
         _cfg.get_settings.cache_clear()
 

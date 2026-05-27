@@ -1,4 +1,5 @@
 """Audit log database helpers — persistence and querying."""
+
 from __future__ import annotations
 
 import json

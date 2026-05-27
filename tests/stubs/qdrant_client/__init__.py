@@ -31,7 +31,9 @@ class QdrantClient:
         config = SimpleNamespace(params=params)
         return SimpleNamespace(config=config)
 
-    def recreate_collection(self, collection_name: str, vectors_config: qmodels.VectorParams, **_: object) -> None:
+    def recreate_collection(
+        self, collection_name: str, vectors_config: qmodels.VectorParams, **_: object
+    ) -> None:
         self._schemas[collection_name] = vectors_config
         self._collections[collection_name] = {}
 
@@ -96,7 +98,9 @@ class QdrantClient:
             payload = dict(record.payload) if with_payload else {}
             vector = list(record.vector) if with_vectors else []
             records.append(
-                qmodels.ScoredPoint(id=record.id, score=record.score, payload=payload, vector=vector)
+                qmodels.ScoredPoint(
+                    id=record.id, score=record.score, payload=payload, vector=vector
+                )
             )
         next_offset = batch[-1] if len(batch) == limit else None
         return records, next_offset

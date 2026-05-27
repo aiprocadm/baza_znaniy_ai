@@ -78,10 +78,16 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     env = os.getenv
     parser = argparse.ArgumentParser(description="Train a LoRA adapter")
     parser.add_argument("--base-model", required=True, help="Base model identifier or local path")
-    parser.add_argument("--train", required=True, type=Path, help="Training dataset in JSONL format")
+    parser.add_argument(
+        "--train", required=True, type=Path, help="Training dataset in JSONL format"
+    )
     parser.add_argument("--eval", type=Path, default=None, help="Optional evaluation dataset")
-    parser.add_argument("--output", required=True, type=Path, help="Directory to store training artefacts")
-    parser.add_argument("--max-seq-len", type=int, default=int(env("LORA_TRAIN_MAX_SEQ_LEN", "4096")))
+    parser.add_argument(
+        "--output", required=True, type=Path, help="Directory to store training artefacts"
+    )
+    parser.add_argument(
+        "--max-seq-len", type=int, default=int(env("LORA_TRAIN_MAX_SEQ_LEN", "4096"))
+    )
     parser.add_argument("--epochs", type=float, default=1.0)
     parser.add_argument("--lr", type=float, default=2e-4, help="Learning rate")
     parser.add_argument("--batch-size", type=int, default=1, help="Per device batch size")
@@ -95,7 +101,12 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         default="",
         help="Comma separated list of target modules (defaults to auto-detect)",
     )
-    parser.add_argument("--use-qlora", dest="use_qlora", action="store_true", default=_env_flag("LORA_USE_QLORA", True))
+    parser.add_argument(
+        "--use-qlora",
+        dest="use_qlora",
+        action="store_true",
+        default=_env_flag("LORA_USE_QLORA", True),
+    )
     parser.add_argument("--no-qlora", dest="use_qlora", action="store_false")
     precision = parser.add_mutually_exclusive_group()
     precision.add_argument("--fp16", action="store_true", default=_env_flag("LORA_FP16", True))
@@ -113,7 +124,9 @@ def _env_flag(name: str, default: bool) -> bool:
 
 
 def _load_config(args: argparse.Namespace) -> TrainingConfig:
-    target_modules = [item.strip() for item in args.target_modules.split(",") if item.strip()] or None
+    target_modules = [
+        item.strip() for item in args.target_modules.split(",") if item.strip()
+    ] or None
     if args.batch_size <= 0 or args.gradient_accumulation <= 0:
         raise ValueError("Batch size and gradient accumulation must be positive")
     if args.lora_r <= 0 or args.lora_alpha <= 0:
@@ -168,7 +181,9 @@ def _normalise_example(example: dict[str, Any]) -> tuple[str, str, str]:
     return instruction, context, output
 
 
-def _build_feature(example: dict[str, Any], tokenizer: AutoTokenizer, *, max_seq_len: int) -> dict[str, list[int]]:
+def _build_feature(
+    example: dict[str, Any], tokenizer: AutoTokenizer, *, max_seq_len: int
+) -> dict[str, list[int]]:
     instruction, context, output = _normalise_example(example)
     prompt_prefix = _format_prompt(instruction, context)
     prompt_tokens = tokenizer(prompt_prefix, add_special_tokens=False)["input_ids"]
@@ -230,7 +245,9 @@ def _load_datasets(config: TrainingConfig, tokenizer: AutoTokenizer):
     train_dataset = raw["train"].map(_process, remove_columns=raw["train"].column_names)
     eval_dataset = None
     if "validation" in raw:
-        eval_dataset = raw["validation"].map(_process, remove_columns=raw["validation"].column_names)
+        eval_dataset = raw["validation"].map(
+            _process, remove_columns=raw["validation"].column_names
+        )
 
     train_dataset.set_format(type="torch")
     if eval_dataset is not None:
@@ -281,7 +298,29 @@ def _build_model(config: TrainingConfig, tokenizer: AutoTokenizer) -> torch.nn.M
     return peft_model
 
 
-def _training_arguments(config: TrainingConfig, run_dir: Path, *, evaluation: bool) -> TrainingArguments:
+def _resolve_report_to() -> list[str]:
+    """Pick report backends transformers can actually load.
+
+    transformers raises RuntimeError if ``report_to`` lists a backend
+    whose Python package is missing (tensorboard or tensorboardX). On
+    minimal CPU runners (e.g. the lora-smoke CI job) tensorboard is
+    not installed; in that case we silently disable reporting rather
+    than crash the training run.
+    """
+
+    try:
+        import tensorboard  # noqa: F401
+    except ImportError:
+        try:
+            import tensorboardX  # noqa: F401
+        except ImportError:
+            return ["none"]
+    return ["tensorboard"]
+
+
+def _training_arguments(
+    config: TrainingConfig, run_dir: Path, *, evaluation: bool
+) -> TrainingArguments:
     logging_dir = run_dir / "logs"
     checkpoint_dir = run_dir / "checkpoints"
     return TrainingArguments(
@@ -295,11 +334,11 @@ def _training_arguments(config: TrainingConfig, run_dir: Path, *, evaluation: bo
         logging_steps=config.logging_steps,
         logging_dir=str(logging_dir),
         save_total_limit=2,
-        evaluation_strategy="epoch" if evaluation else "no",
+        eval_strategy="epoch" if evaluation else "no",
         bf16=config.use_bf16,
         fp16=config.use_fp16 and not config.use_bf16,
         gradient_checkpointing=config.use_qlora,
-        report_to=["tensorboard"],
+        report_to=_resolve_report_to(),
         seed=config.seed,
     )
 
@@ -313,7 +352,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 2
 
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    base_short = Path(config.base_model).name if Path(config.base_model).exists() else config.base_model.split("/")[-1]
+    base_short = (
+        Path(config.base_model).name
+        if Path(config.base_model).exists()
+        else config.base_model.split("/")[-1]
+    )
     run_name = f"{timestamp}_{base_short}_r{config.lora_r}_a{config.lora_alpha}"
     run_dir = config.output_dir / run_name
     adapter_dir = run_dir / "adapter"
@@ -355,9 +398,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         if candidates:
             candidates[0].replace(target_adapter)
         else:
-            raise FileNotFoundError(
-                f"No safetensors adapter produced in {adapter_dir}."
-            )
+            raise FileNotFoundError(f"No safetensors adapter produced in {adapter_dir}.")
     tokenizer.save_pretrained(run_dir / "tokenizer")
 
     metrics = train_result.metrics

@@ -46,6 +46,7 @@ def _error_payload(status_code: int, detail: object) -> dict[str, object]:
         details = None
     return {"status": status_code, "message": message, "details": details}
 
+
 _original_request = getattr(_FastAPITestClient, "_kb_original_request", None)
 if _original_request is None:
     _original_request = getattr(_FastAPITestClient, "request", None)
@@ -96,7 +97,9 @@ def _compat_request(self, method: str, url: str, *args: Any, **kwargs: Any):  # 
                         filename = sequence[0]
                         content = sequence[1] if len(sequence) > 1 else b""
                         content_type = sequence[2] if len(sequence) > 2 else None
-                        uploads.append(api_routes.create_upload_file(filename, content, content_type))
+                        uploads.append(
+                            api_routes.create_upload_file(filename, content, content_type)
+                        )
                         return
                     for item in sequence:
                         if isinstance(item, tuple) and len(item) == 2 and isinstance(item[0], str):
@@ -195,7 +198,9 @@ def _compat_request(self, method: str, url: str, *args: Any, **kwargs: Any):  # 
 
             def _serialise(value: Any) -> Any:
                 if is_dataclass(value):
-                    return {key: _serialise(getattr(value, key)) for key in value.__dataclass_fields__}
+                    return {
+                        key: _serialise(getattr(value, key)) for key in value.__dataclass_fields__
+                    }
                 if isinstance(value, dict):
                     return {key: _serialise(item) for key, item in value.items()}
                 if isinstance(value, (list, tuple, set)):
@@ -223,7 +228,8 @@ if _llama_module is None:
             llama_module = import_module("llama_cpp")
         except Exception as exc:  # pragma: no cover - optional dependency
             logging.getLogger(__name__).warning(
-                "llama_cpp import failed; skipping fallback completion setup: %s", exc,
+                "llama_cpp import failed; skipping fallback completion setup: %s",
+                exc,
             )
             llama_module = None
     else:
@@ -270,9 +276,7 @@ WEB_ROOT = Path(__file__).resolve().parents[1] / "data" / "www"
 app = create_app()
 
 
-def _invoke_generate_override(
-    prompt: str, context: Mapping[str, Any] | None
-) -> str | None:
+def _invoke_generate_override(prompt: str, context: Mapping[str, Any] | None) -> str | None:
     """Return the result of an externally patched ``generate`` function if present."""
 
     override = globals().get("generate")
@@ -418,9 +422,7 @@ def _register_root_route() -> None:
     else:
         get_route = getattr(app, "get", None)
         if callable(get_route):
-            get_route("/", include_in_schema=False)(
-                _serve_index
-            )
+            get_route("/", include_in_schema=False)(_serve_index)
         route_list = getattr(app, "_routes", None)
         if isinstance(route_list, list) and route_list:
             route_list.insert(0, route_list.pop())
@@ -724,16 +726,20 @@ def chat(payload: ChatRequest) -> ChatResponse:
         prompt_parts.extend(["Recent chat history:", history_text])
     if memory_text:
         prompt_parts.extend(["Long-term memory:", memory_text])
-    prompt_parts.extend([
-        "Retrieved context:",
-        context or "(нет подходящего контекста)",
-        "",
-        f"User message: {payload.message}",
-        "Сформулируй точный ответ, используя контекст, если он релевантен. Если данных недостаточно, сообщи об этом.",
-    ])
+    prompt_parts.extend(
+        [
+            "Retrieved context:",
+            context or "(нет подходящего контекста)",
+            "",
+            f"User message: {payload.message}",
+            "Сформулируй точный ответ, используя контекст, если он релевантен. Если данных недостаточно, сообщи об этом.",
+        ]
+    )
 
     min_citations, max_citations = settings.citations_bounds
-    citations_raw, has_minimum = select_citations(hits, minimum=min_citations, maximum=max_citations)
+    citations_raw, has_minimum = select_citations(
+        hits, minimum=min_citations, maximum=max_citations
+    )
 
     prompt = "\n".join(part for part in prompt_parts if part is not None)
     answer = generate(prompt).strip()

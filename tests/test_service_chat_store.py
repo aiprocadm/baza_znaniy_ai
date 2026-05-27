@@ -89,5 +89,3 @@ def test_message_workflow(store: ChatStore) -> None:
     store.save_summary(conversation_id, "updated summary")
     assert store.get_summary(conversation_id) == "updated summary"
     assert store.messages_since_summary(conversation_id) == 0
-
-

@@ -309,7 +309,13 @@ def _ensure_memory_store(state: Any, settings: Any) -> Any:
             elif callable(memory_cls):
                 try:
                     candidate = memory_cls(
-                        db_path=str(getattr(settings, "memory_db_path_resolved", Path(settings.data_dir) / "memory")),
+                        db_path=str(
+                            getattr(
+                                settings,
+                                "memory_db_path_resolved",
+                                Path(settings.data_dir) / "memory",
+                            )
+                        ),
                         ttl_days=getattr(settings, "chat_memory_ttl_days", 30),
                         summary_trigger=getattr(settings, "chat_summary_trigger", 5),
                         max_tokens=getattr(settings, "chat_memory_max_tokens", 2048),
@@ -465,9 +471,11 @@ def warmup(request: Request) -> JSONResponse:
             "elapsed_ms": round(elapsed_ms, 3),
         }
 
-    overall_status = "error" if any(
-        component.get("status") == "error" for component in details.values()
-    ) else "ok"
+    overall_status = (
+        "error"
+        if any(component.get("status") == "error" for component in details.values())
+        else "ok"
+    )
 
     status_code = int(HTTPStatus.OK if overall_status == "ok" else HTTPStatus.SERVICE_UNAVAILABLE)
     payload = {
@@ -542,7 +550,9 @@ def _check_vector_store_ready(state) -> dict[str, Any]:
 
     ensure_ready = getattr(vector_store, "ensure_ready", None)
     if not callable(ensure_ready):  # pragma: no cover - unexpected implementation
-        status_info.update(status="error", detail="Векторное хранилище не поддерживает проверку готовности")
+        status_info.update(
+            status="error", detail="Векторное хранилище не поддерживает проверку готовности"
+        )
         return status_info
 
     try:
@@ -1103,10 +1113,10 @@ def chat(request: Request, inp: ChatIn) -> dict[str, Any]:
     response: dict[str, Any]
     try:
         summary_text = chat_store.get_summary(conversation_id) or ""
-        history = chat_store.get_recent_messages(
-            conversation_id, limit=settings.chat_history_limit
+        history = chat_store.get_recent_messages(conversation_id, limit=settings.chat_history_limit)
+        history_text = (
+            "\n".join(f"{role}: {content}" for role, content in history) if history else ""
         )
-        history_text = "\n".join(f"{role}: {content}" for role, content in history) if history else ""
 
         memory_text = ""
         if isinstance(memory_store, MemoryStore):

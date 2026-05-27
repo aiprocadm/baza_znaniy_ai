@@ -16,10 +16,14 @@ def test_health_endpoint_returns_version(monkeypatch):
     monkeypatch.setattr(ops, "get_version_info", lambda: {"revision": "abc"})
     client = _build_client(monkeypatch)
 
-    response = client.get("/ops/health")
+    # The endpoint was split into liveness/readiness/dependencies; liveness
+    # is the spiritual successor of the old /ops/health (returns version
+    # without exercising external dependencies). Status string changed
+    # from "ok" to "alive" to match the new vocabulary.
+    response = client.get("/ops/health/liveness")
 
     assert response.status_code == 200
-    assert response.json() == {"status": "ok", "version": {"revision": "abc"}}
+    assert response.json() == {"status": "alive", "version": {"revision": "abc"}}
 
 
 def test_warmup_endpoint_ensures_vector_store(monkeypatch):

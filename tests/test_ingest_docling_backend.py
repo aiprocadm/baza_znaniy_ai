@@ -108,7 +108,9 @@ def test_extract_page_texts_falls_back_to_text_when_markdown_empty() -> None:
 def test_parse_document_docling_hard_fail_with_fallback(monkeypatch):
     from app.ingest import chunking
 
-    monkeypatch.setattr(chunking, "_resolve_parser_backend", lambda explicit_backend=None: "docling")
+    monkeypatch.setattr(
+        chunking, "_resolve_parser_backend", lambda explicit_backend=None: "docling"
+    )
 
     class FakeAdapter:
         SUPPORTED_MIME = chunking.DoclingBackend.SUPPORTED_MIME

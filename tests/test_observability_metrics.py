@@ -65,9 +65,7 @@ def test_record_document_parse(isolated_metrics: CollectorRegistry) -> None:
     assert chunk_total == pytest.approx(3.0)
 
     assert (
-        isolated_metrics.get_sample_value(
-            "kb_document_chunks_total", {"extension": "unknown"}
-        )
+        isolated_metrics.get_sample_value("kb_document_chunks_total", {"extension": "unknown"})
         is None
     )
 
@@ -196,14 +194,9 @@ def test_record_chat_completion(isolated_metrics: CollectorRegistry) -> None:
     assert citations_total == pytest.approx(2.0)
 
     assert (
-        isolated_metrics.get_sample_value(
-            "kb_chat_context_hits_total", {"status": "unknown"}
-        )
+        isolated_metrics.get_sample_value("kb_chat_context_hits_total", {"status": "unknown"})
         is None
     )
     assert (
-        isolated_metrics.get_sample_value(
-            "kb_chat_citations_total", {"status": "unknown"}
-        )
-        is None
+        isolated_metrics.get_sample_value("kb_chat_citations_total", {"status": "unknown"}) is None
     )

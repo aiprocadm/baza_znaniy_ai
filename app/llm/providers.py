@@ -21,6 +21,7 @@ class LLMProvider(Protocol):
 
     def ensure_model(self) -> None:
         """Ensure the underlying model (if any) is ready for use."""
+
     def ensure_ready(self) -> None:
         """Perform provider specific readiness checks."""
 

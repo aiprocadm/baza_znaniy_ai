@@ -35,7 +35,9 @@ def upgrade() -> None:
         sa.Column("llm_requests", sa.Integer(), nullable=False, server_default="0"),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
         sa.ForeignKeyConstraint(["tenant_id"], ["tenants.id"], ondelete="CASCADE"),
-        sa.UniqueConstraint("tenant_id", "period_start", "period_end", name="uq_usage_counter_period"),
+        sa.UniqueConstraint(
+            "tenant_id", "period_start", "period_end", name="uq_usage_counter_period"
+        ),
     )
 
 

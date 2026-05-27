@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
 
 from app.core.datetime_utils import utc_now
+
 try:  # pragma: no cover - allows importing app.models with lightweight test stubs
     from .lora import LoraAdapterInfo, LoraAdapterName, LoraStatusResponse
 except Exception:  # pragma: no cover - optional during reduced dependency test runs
@@ -28,6 +29,8 @@ _LAZY_MODELS = {
     "TenantResponse": ("app.models.tenant", "TenantResponse"),
     "TenantUpdate": ("app.models.tenant", "TenantUpdate"),
 }
+
+
 class Document(BaseModel):
     """Representation of a stored document chunk used across the service."""
 

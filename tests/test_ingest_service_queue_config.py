@@ -7,10 +7,16 @@ from app.ingest import service as service_module
 
 def test_coerce_queue_size_handles_various_inputs():
     assert service_module.IngestService._coerce_queue_size(None, default=5, source="default") == 5
-    assert service_module.IngestService._coerce_queue_size("  unbounded ", default=5, source="env") == 0
+    assert (
+        service_module.IngestService._coerce_queue_size("  unbounded ", default=5, source="env")
+        == 0
+    )
     assert service_module.IngestService._coerce_queue_size(-3, default=5, source="cfg") == 0
     assert service_module.IngestService._coerce_queue_size("7", default=5, source="cfg") == 7
-    assert service_module.IngestService._coerce_queue_size(Decimal("NaN"), default=5, source="cfg") == 5
+    assert (
+        service_module.IngestService._coerce_queue_size(Decimal("NaN"), default=5, source="cfg")
+        == 5
+    )
     assert service_module.IngestService._coerce_queue_size("bad", default=5, source="cfg") == 5
 
 
@@ -131,5 +137,3 @@ def test_background_worker_skips_invalid_cron(monkeypatch):
         await service.stop_background_worker()
 
     asyncio.run(scenario())
-
-

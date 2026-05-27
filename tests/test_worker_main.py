@@ -6,7 +6,6 @@ from collections.abc import Callable
 from types import ModuleType
 
 
-
 def _reload_worker_module():
     """Return a freshly reloaded ``app.worker.main`` module."""
 
@@ -227,7 +226,9 @@ def test_run_worker_with_scheduler(monkeypatch):
         monkeypatch.setattr(worker, "IngestService", DummyService)
         monkeypatch.setattr(worker, "IngestWorker", DummyWorker)
         monkeypatch.setattr(
-            worker, "schedule_sqlmodel_metadata_guard", lambda scheduler: guard_calls.append(scheduler)
+            worker,
+            "schedule_sqlmodel_metadata_guard",
+            lambda scheduler: guard_calls.append(scheduler),
         )
 
         await worker._run_worker()
@@ -376,4 +377,3 @@ def test_rag_ingest_module_reexports(monkeypatch):
 
     assert module.IngestService is dummy.IngestService
     assert module.IngestWorker is dummy.IngestWorker
-

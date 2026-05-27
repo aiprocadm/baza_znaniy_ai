@@ -15,7 +15,11 @@ _task_id: contextvars.ContextVar[str] = contextvars.ContextVar("task_id", defaul
 
 
 def bind_log_context(
-    *, request_id: str | None = None, tenant_id: str | None = None, user_id: str | None = None, task_id: str | None = None
+    *,
+    request_id: str | None = None,
+    tenant_id: str | None = None,
+    user_id: str | None = None,
+    task_id: str | None = None,
 ) -> None:
     if request_id is not None:
         _request_id.set(request_id or "-")

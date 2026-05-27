@@ -71,9 +71,7 @@ def _jwt_parameters() -> Tuple[str, str, int]:
     )
 
 
-def create_access_token(
-    data: Dict[str, Any], *, expires_delta: timedelta | None = None
-) -> str:
+def create_access_token(data: Dict[str, Any], *, expires_delta: timedelta | None = None) -> str:
     """Create a signed JWT carrying the provided payload."""
 
     to_encode = dict(data) if data is not None else {}

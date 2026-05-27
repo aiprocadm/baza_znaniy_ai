@@ -73,7 +73,6 @@ else:
         metadata: Dict[str, Any] = dataclass_field(default_factory=dict)
         alias: Any | None = None
 
-
     class AliasChoices(tuple):
         """Minimal stand-in for :class:`pydantic.alias_generators.AliasChoices`."""
 
@@ -86,7 +85,6 @@ else:
         def __repr__(self) -> str:  # pragma: no cover - debugging helper
             values = ", ".join(repr(choice) for choice in self)
             return f"AliasChoices({values})"
-
 
     def Field(
         default: Any = ...,
@@ -108,9 +106,7 @@ else:
             alias=alias_value,
         )
 
-
     T = TypeVar("T", bound="BaseModel")
-
 
     class BaseModel:
         """Minimal model implementation supporting validation and dumping."""
@@ -230,9 +226,7 @@ else:
                     return data[alias], True
             return None, False
 
-        def _coerce_value(
-            self, name: str, value: Any, target: Any, field: FieldInfo | None
-        ) -> Any:
+        def _coerce_value(self, name: str, value: Any, target: Any, field: FieldInfo | None) -> Any:
             if value is None:
                 coerced = None
             else:
@@ -351,9 +345,7 @@ else:
                     for entry in metadata:
                         mode = entry["mode"]
                         for field_name in entry["fields"]:
-                            bucket = store.setdefault(mode, {}).setdefault(
-                                field_name, []
-                            )
+                            bucket = store.setdefault(mode, {}).setdefault(field_name, [])
                             if bound not in bucket:
                                 bucket.append(bound)
 
@@ -379,9 +371,7 @@ else:
             return result
 
         @classmethod
-        def _apply_field_constraints(
-            cls, name: str, value: Any, field: FieldInfo | None
-        ) -> Any:
+        def _apply_field_constraints(cls, name: str, value: Any, field: FieldInfo | None) -> Any:
             if field is None:
                 return value
             metadata = field.metadata
@@ -389,9 +379,7 @@ else:
                 return value
 
             numeric_constraints = {
-                key: metadata[key]
-                for key in ("gt", "ge", "lt", "le")
-                if key in metadata
+                key: metadata[key] for key in ("gt", "ge", "lt", "le") if key in metadata
             }
             if not numeric_constraints or value is None:
                 return value
@@ -407,9 +395,7 @@ else:
                 return value
 
             if not math.isfinite(number):
-                raise ValidationError(
-                    f"Field '{name}' must be a finite number"
-                )
+                raise ValidationError(f"Field '{name}' must be a finite number")
 
             lower_inclusive = numeric_constraints.get("ge")
             lower_exclusive = numeric_constraints.get("gt")
@@ -417,21 +403,13 @@ else:
             upper_exclusive = numeric_constraints.get("lt")
 
             if lower_inclusive is not None and number < float(lower_inclusive):
-                raise ValidationError(
-                    f"Field '{name}' must be >= {lower_inclusive}"
-                )
+                raise ValidationError(f"Field '{name}' must be >= {lower_inclusive}")
             if lower_exclusive is not None and number <= float(lower_exclusive):
-                raise ValidationError(
-                    f"Field '{name}' must be > {lower_exclusive}"
-                )
+                raise ValidationError(f"Field '{name}' must be > {lower_exclusive}")
             if upper_inclusive is not None and number > float(upper_inclusive):
-                raise ValidationError(
-                    f"Field '{name}' must be <= {upper_inclusive}"
-                )
+                raise ValidationError(f"Field '{name}' must be <= {upper_inclusive}")
             if upper_exclusive is not None and number >= float(upper_exclusive):
-                raise ValidationError(
-                    f"Field '{name}' must be < {upper_exclusive}"
-                )
+                raise ValidationError(f"Field '{name}' must be < {upper_exclusive}")
 
             return value
 
@@ -471,12 +449,10 @@ else:
             values = ", ".join(f"{name}={getattr(self, name)!r}" for name in self.__annotations__)
             return f"{self.__class__.__name__}({values})"
 
-
     class ValidationError(Exception):
         """Compatibility exception used by third-party clients."""
 
         pass
-
 
     class EmailStr(str):
         """Placeholder email type used by sqlmodel during tests."""
@@ -487,7 +463,6 @@ else:
 
         def __new__(cls, value: Any):
             return str.__new__(cls, str(value))
-
 
     def computed_field(*args: Any, **__: Any):
         def decorator(func: Any) -> property:
@@ -517,15 +492,12 @@ else:
             if isinstance(function, (classmethod, staticmethod)):
                 target = function.__func__
 
-            existing: List[Dict[str, Any]] = getattr(
-                target, "__pydantic_field_validators__", []
-            )
+            existing: List[Dict[str, Any]] = getattr(target, "__pydantic_field_validators__", [])
             existing.append({"fields": normalized, "mode": mode_value})
             setattr(target, "__pydantic_field_validators__", existing)
             return function
 
         return decorator
-
 
     def model_validator(*fields: str, **_: Any):
         def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
@@ -533,9 +505,7 @@ else:
 
         return decorator
 
-
     ConfigDict = dict
-
 
     __all__ = [
         "AliasChoices",

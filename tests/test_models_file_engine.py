@@ -91,7 +91,9 @@ def _connect_and_scalar(engine: Any) -> Any:
         return scalar() if callable(scalar) else execution
 
 
-def test_get_engine_handles_missing_metadata(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_get_engine_handles_missing_metadata(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """``get_engine`` should rebuild metadata when it is ``None``."""
 
     db_path = tmp_path / "missing-metadata.sqlite"
@@ -231,4 +233,3 @@ def test_ensure_sync_engine_wraps_on_attribute_failure(tmp_path: Path) -> None:
 
     with pytest.raises(RuntimeError):
         file_module._ensure_sync_engine(rejecting, url)
-

@@ -13,6 +13,7 @@ from typing import Any, List
 
 import pytest
 
+
 @dataclass
 class _DummySettings:
     """Minimal ``Settings`` replacement for the tests."""
@@ -198,9 +199,7 @@ def test_load_adapter_returns_status_and_reuses_adapter_name(
     asyncio.run(scenario())
 
 
-def test_load_adapter_missing_file_raises(
-    tmp_path: Path, manager_module: ModuleType
-) -> None:
+def test_load_adapter_missing_file_raises(tmp_path: Path, manager_module: ModuleType) -> None:
     async def scenario() -> None:
         manager_cls = manager_module.LlamaLoraManager
         manager, _ = _make_manager_with_factory(manager_cls)
@@ -211,9 +210,7 @@ def test_load_adapter_missing_file_raises(
     asyncio.run(scenario())
 
 
-def test_load_adapter_rejects_invalid_scaling(
-    tmp_path: Path, manager_module: ModuleType
-) -> None:
+def test_load_adapter_rejects_invalid_scaling(tmp_path: Path, manager_module: ModuleType) -> None:
     adapter_path = tmp_path / "invalid.gguf"
     adapter_path.write_text("stub")
 
@@ -228,9 +225,7 @@ def test_load_adapter_rejects_invalid_scaling(
     asyncio.run(scenario())
 
 
-def test_unload_adapter_error_conditions(
-    tmp_path: Path, manager_module: ModuleType
-) -> None:
+def test_unload_adapter_error_conditions(tmp_path: Path, manager_module: ModuleType) -> None:
     async def scenario() -> None:
         manager_cls = manager_module.LlamaLoraManager
         manager, factory = _make_manager_with_factory(manager_cls)

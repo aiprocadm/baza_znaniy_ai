@@ -112,7 +112,9 @@ def _build_answer_prompt() -> Any:
     )
 
 
-def build_chat_chain(settings: Any, *, tenant_id: str, retrieve_topk: int) -> Callable[..., Mapping[str, Any]]:
+def build_chat_chain(
+    settings: Any, *, tenant_id: str, retrieve_topk: int
+) -> Callable[..., Mapping[str, Any]]:
     """Build a retrieval QA chain callable using LangChain composition helpers."""
 
     try:  # pragma: no cover - optional dependency

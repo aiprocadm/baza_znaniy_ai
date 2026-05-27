@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any
 
 from pydantic import BaseModel, Field, ConfigDict, field_validator, ValidationError
+
 try:  # pragma: no cover - compatibility with pydantic stubs used in unit tests
     from pydantic import GetCoreSchemaHandler, GetJsonSchemaHandler
 except ImportError:  # pragma: no cover - pydantic v1/test stubs
@@ -193,7 +194,9 @@ class LoraStatusResponse(BaseModel):
     """Response describing the currently active adapter."""
 
     loaded: bool = Field(..., description="Whether an adapter is currently active")
-    adapter: LoraAdapterInfo | None = Field(default=None, description="Metadata for the active adapter")
+    adapter: LoraAdapterInfo | None = Field(
+        default=None, description="Metadata for the active adapter"
+    )
 
     @classmethod
     def empty(cls) -> "LoraStatusResponse":

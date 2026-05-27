@@ -79,10 +79,7 @@ def test_select_citations_filters_duplicates_and_flags_shortage():
 
 
 def test_select_citations_caps_at_maximum():
-    hits = [
-        {"file": f"doc{i}.pdf", "page": i, "score": 1 / (i + 1)}
-        for i in range(10)
-    ]
+    hits = [{"file": f"doc{i}.pdf", "page": i, "score": 1 / (i + 1)} for i in range(10)]
 
     citations, has_minimum = select_citations(hits, minimum=3, maximum=5)
 

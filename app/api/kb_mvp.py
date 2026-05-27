@@ -619,9 +619,7 @@ def health(request: Request) -> dict[str, Any]:
                 row = conn.execute("SELECT COUNT(*) FROM kb_chunks").fetchone()
                 if row:
                     chunks_count = int(row[0])
-                row = conn.execute(
-                    "SELECT MAX(created_at) FROM kb_documents"
-                ).fetchone()
+                row = conn.execute("SELECT MAX(created_at) FROM kb_documents").fetchone()
                 if row and row[0]:
                     last_indexed_at = str(row[0])
             finally:

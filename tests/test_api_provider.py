@@ -22,7 +22,9 @@ def test_api_provider_requires_base_url() -> None:
         provider.ensure_ready()
 
 
-def test_api_provider_generate_uses_openai_compatible_shape(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_api_provider_generate_uses_openai_compatible_shape(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     captured: dict[str, object] = {}
 
     class _Response:
@@ -107,7 +109,9 @@ def test_api_provider_generate_timeout_error_is_retryable(
         provider.generate("Hello")
 
 
-def test_api_provider_generate_retries_on_429_then_succeeds(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_api_provider_generate_retries_on_429_then_succeeds(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     class _TimeoutException(Exception):
         pass
 
@@ -152,7 +156,9 @@ def test_api_provider_generate_retries_on_429_then_succeeds(monkeypatch: pytest.
             RequestError=_RequestError,
         ),
     )
-    monkeypatch.setattr("app.llm.api_provider.time.sleep", lambda seconds: sleep_calls.append(seconds))
+    monkeypatch.setattr(
+        "app.llm.api_provider.time.sleep", lambda seconds: sleep_calls.append(seconds)
+    )
 
     settings = Settings(
         llm_provider="api",

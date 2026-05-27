@@ -7,6 +7,7 @@ is skipped. This ensures the test actually exercises
 alembic/versions/20260522_02_pdf_citation.py's upgrade(), not a manual
 duplication of the SQL.
 """
+
 from __future__ import annotations
 
 import sqlite3
@@ -30,7 +31,8 @@ def _create_pre_migration_tables(db_path: Path) -> None:
     """Create kb_documents and kb_chunks as they'd exist before our migration."""
     conn = sqlite3.connect(str(db_path))
     try:
-        conn.execute("""
+        conn.execute(
+            """
             CREATE TABLE kb_documents (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 title TEXT NOT NULL,
@@ -40,8 +42,10 @@ def _create_pre_migration_tables(db_path: Path) -> None:
                 filename TEXT,
                 mime_type TEXT
             )
-        """)
-        conn.execute("""
+        """
+        )
+        conn.execute(
+            """
             CREATE TABLE kb_chunks (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 document_id INTEGER NOT NULL REFERENCES kb_documents(id) ON DELETE CASCADE,
@@ -51,7 +55,8 @@ def _create_pre_migration_tables(db_path: Path) -> None:
                 embedder TEXT NOT NULL DEFAULT 'hash',
                 dim INTEGER NOT NULL DEFAULT 256
             )
-        """)
+        """
+        )
         conn.commit()
     finally:
         conn.close()
@@ -85,7 +90,8 @@ def test_pdf_citation_migration_adds_columns(tmp_path: Path) -> None:
         assert "file_relpath" in doc_cols, f"file_relpath not in {doc_cols}"
 
         idx_names = {
-            row[1] for row in conn.execute(
+            row[1]
+            for row in conn.execute(
                 "SELECT type, name FROM sqlite_master "
                 "WHERE type='index' AND tbl_name='kb_chunks'"
             )
@@ -121,8 +127,7 @@ def test_pdf_citation_migration_default_values(tmp_path: Path) -> None:
     conn = sqlite3.connect(str(db_path))
     try:
         row = conn.execute(
-            "SELECT has_original_file, file_relpath FROM kb_documents "
-            "WHERE title='Old doc'"
+            "SELECT has_original_file, file_relpath FROM kb_documents " "WHERE title='Old doc'"
         ).fetchone()
     finally:
         conn.close()

@@ -6,7 +6,15 @@ import asyncio
 import logging
 from typing import Any, Iterable, List
 
-from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket, WebSocketDisconnect, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    HTTPException,
+    Request,
+    WebSocket,
+    WebSocketDisconnect,
+    status,
+)
 from fastapi.concurrency import run_in_threadpool
 
 try:  # FastAPI<0.115 exposes Depends via param_functions only
@@ -14,7 +22,12 @@ try:  # FastAPI<0.115 exposes Depends via param_functions only
 except ModuleNotFoundError:  # pragma: no cover - compatibility shim
     from fastapi.param_functions import Depends as DependsMarker
 
-from app.core.auth import SubjectAttribution, ensure_tenant_access, get_current_active_user, get_subject_attribution
+from app.core.auth import (
+    SubjectAttribution,
+    ensure_tenant_access,
+    get_current_active_user,
+    get_subject_attribution,
+)
 from app.core.config import get_settings
 from app.models import ChatRequest, ChatResponse, Citation
 from app.models.user import UserRecord
@@ -33,9 +46,7 @@ def _format_answer(answer: str, citations: Iterable[Citation]) -> str:
     answer_text = answer.strip()
     entries: List[str] = []
     for idx, citation in enumerate(citations, start=1):
-        location = (
-            f" — страница {citation.page}" if citation.page is not None else ""
-        )
+        location = f" — страница {citation.page}" if citation.page is not None else ""
         entries.append(f"[{idx}] {citation.file or 'неизвестный источник'}{location}")
     if not entries:
         return answer_text
@@ -109,9 +120,7 @@ def _build_runtime(app_state: Any, payload: ChatRequest) -> ChatRuntime:
     )
 
 
-async def _send_partial_tokens(
-    websocket: WebSocket, request_id: str, answer: str
-) -> None:
+async def _send_partial_tokens(websocket: WebSocket, request_id: str, answer: str) -> None:
     for token_index, token in enumerate(answer.split(), start=1):
         await websocket.send_json(
             {
@@ -157,6 +166,7 @@ def chat(
     sink = getattr(app_state, "usage_sink", None)
     if sink is not None:
         from app.services.accounting import UsageEvent
+
         sink.write(
             UsageEvent(
                 tenant_id=subject.tenant,
@@ -164,7 +174,9 @@ def chat(
                 subject_id=subject.subject_id,
                 event_type="chat",
                 payload={"message": payload.message},
-                idempotency_key=request.headers.get("Idempotency-Key") if request is not None else None,
+                idempotency_key=(
+                    request.headers.get("Idempotency-Key") if request is not None else None
+                ),
             )
         )
         write_rag = getattr(sink, "write_rag_run", None)
@@ -207,7 +219,9 @@ async def chat_websocket(websocket: WebSocket) -> None:
         except asyncio.TimeoutError:
             now = asyncio.get_running_loop().time()
             if now - last_pong >= _HEARTBEAT_TIMEOUT_SECONDS:
-                await websocket.close(code=status.WS_1011_INTERNAL_ERROR, reason="heartbeat-timeout")
+                await websocket.close(
+                    code=status.WS_1011_INTERNAL_ERROR, reason="heartbeat-timeout"
+                )
                 return
             await websocket.send_json({"type": "ping"})
             continue

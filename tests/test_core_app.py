@@ -188,6 +188,7 @@ def core_app(monkeypatch):
     @router_module.api_router.get("/ping")
     def _ping(request: Request):  # pragma: no cover - used via test client
         return {"request_id": getattr(request.state, "request_id", None)}
+
     monkeypatch.setitem(sys.modules, "app.api.router", router_module)
 
     api_module = types.ModuleType("app.api")
@@ -240,11 +241,13 @@ def test_prepare_cors_origins_trims_and_ignores_empty_values(core_app):
 
 
 def test_prepare_cors_origins_returns_cleaned_values(core_app):
-    result = core_app._prepare_cors_origins([
-        " https://example.com ",
-        "",
-        "https://foo.test",
-    ])
+    result = core_app._prepare_cors_origins(
+        [
+            " https://example.com ",
+            "",
+            "https://foo.test",
+        ]
+    )
 
     assert result == ["https://example.com", "https://foo.test"]
 
@@ -292,10 +295,7 @@ def test_v1_router_registers_admin_routes(monkeypatch):
     sys.modules.pop("app.api.v1", None)
 
     routes = getattr(router, "routes", getattr(router, "_routes", []))
-    paths = {
-        getattr(route, "path", getattr(route, "path_format", None))
-        for route in routes
-    }
+    paths = {getattr(route, "path", getattr(route, "path_format", None)) for route in routes}
     assert "/admin/ping" in paths
 
 
@@ -333,8 +333,7 @@ def test_initialise_reranker_logs_failure(core_app, monkeypatch, caplog):
 
     assert result is None
     assert any(
-        "Failed to initialise cross-encoder reranker" in message
-        for message in caplog.messages
+        "Failed to initialise cross-encoder reranker" in message for message in caplog.messages
     )
 
 
@@ -445,6 +444,7 @@ def test_create_app_excludes_reranker_when_disabled(core_app, monkeypatch):
 
     assert application.state.reranker is None
     assert application.state.rerank_enabled is False
+
 
 def test_request_id_middleware_adds_header(core_app, monkeypatch):
     dependencies = _stub_app_dependencies(core_app, monkeypatch)

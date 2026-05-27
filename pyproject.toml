@@ -25,9 +25,12 @@ dev = { file = ["requirements-dev.txt"] }
 
 [tool.black]
 line-length = 100
+target-version = ["py312"]
+extend-exclude = "^/backend/"
 
 [tool.ruff]
 line-length = 100
+extend-exclude = ["backend"]
 
 [tool.ruff.lint]
 ignore = ["E402"]

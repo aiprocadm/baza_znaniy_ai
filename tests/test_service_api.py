@@ -210,9 +210,7 @@ def test_chat_returns_citations(service_app: Any):
         assert data["citations_insufficient"] is True
 
 
-def test_ingest_metrics_endpoint_reports_queue_state(
-    service_app: Any, tmp_path: Path
-) -> None:
+def test_ingest_metrics_endpoint_reports_queue_state(service_app: Any, tmp_path: Path) -> None:
     app = service_app.app
     file_store = app.state.file_store
     ingest_queue = app.state.ingest_queue
@@ -451,7 +449,10 @@ def test_upload_returns_no_text_found_when_chunks_missing(
     ],
 )
 def test_docs_upload_indexes_each_demo_asset(
-    service_app: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, asset_specs: list[tuple[str, str, list[dict[str, Any]]]]
+    service_app: Any,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    asset_specs: list[tuple[str, str, list[dict[str, Any]]]],
 ):
     sample_dir = tmp_path / "samples"
     ensure_demo_assets(sample_dir)
@@ -528,7 +529,9 @@ def _clone_settings(settings: Any) -> Any:
     return copy.deepcopy(settings)
 
 
-def test_init_memory_store_toggle(service_app: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+def test_init_memory_store_toggle(
+    service_app: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
     settings = _clone_settings(service_app.get_settings())
     settings.data_dir = tmp_path
     monkeypatch.setattr(service_app, "get_settings", lambda: settings)
@@ -568,9 +571,7 @@ def test_chat_records_memory_when_enabled(
         def load_context(self, user_id: str, conversation_id: str) -> str:
             return "context"
 
-        def record(
-            self, user_id: str, conversation_id: str, message: str, answer: str
-        ) -> None:
+        def record(self, user_id: str, conversation_id: str, message: str, answer: str) -> None:
             record_calls.append((user_id, conversation_id, message, answer))
 
     monkeypatch.setattr(service_app, "MemoryStore", StubMemoryStore)
@@ -598,7 +599,10 @@ def test_load_index_html_missing_file_uses_fallback(
 
 
 def test_init_memory_store_logs_on_failure(
-    service_app: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    service_app: Any,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
 ):
     settings = _clone_settings(service_app.get_settings())
     settings.data_dir = tmp_path
@@ -618,7 +622,9 @@ def test_init_memory_store_logs_on_failure(
     assert any("Failed to initialise memory store" in message for message in caplog.messages)
 
 
-def test_bootstrap_initialises_state(service_app: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+def test_bootstrap_initialises_state(
+    service_app: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
     settings = _clone_settings(service_app.get_settings())
     settings.log_level = "DEBUG"
     settings.data_dir = tmp_path / "bootstrap-data"
@@ -791,10 +797,7 @@ def test_chat_truncates_hits_and_formats_response(
     monkeypatch.setattr(service_app, "ensure_model", lambda: None)
     monkeypatch.setattr(service_app, "ensure_collection", lambda: None)
 
-    hits = [
-        {"file": f"doc{i}.pdf", "page": i, "score": 1 - i * 0.1}
-        for i in range(1, 5)
-    ]
+    hits = [{"file": f"doc{i}.pdf", "page": i, "score": 1 - i * 0.1} for i in range(1, 5)]
 
     def fake_search(_query: str, top_k: int = 10):
         assert top_k == settings.retrieve_topk

@@ -44,6 +44,7 @@ except ImportError:  # pragma: no cover - provide light-weight fallbacks
 
         return decorator
 
+
 try:  # pragma: no cover - ``pydantic-settings`` is optional
     from pydantic_settings import BaseSettings as PydanticBaseSettings, SettingsConfigDict
 except ImportError:  # pragma: no cover - minimal shim for tests
@@ -236,20 +237,15 @@ if PydanticBaseSettings is None:
 
         alias_value = getattr(field, "alias", None)
         if alias_value is None:
-            alias_value = getattr(getattr(field, "metadata", {}), "get", lambda *_: None)(
-                "alias"
-            )
+            alias_value = getattr(getattr(field, "metadata", {}), "get", lambda *_: None)("alias")
         _add_all(alias_value)
 
         validation_alias = getattr(field, "validation_alias", None)
         if validation_alias is None and hasattr(field, "metadata"):
-            validation_alias = getattr(field.metadata, "get", lambda *_: None)(
-                "validation_alias"
-            )
+            validation_alias = getattr(field.metadata, "get", lambda *_: None)("validation_alias")
         _add_all(validation_alias)
 
         return candidates
-
 
     class SettingsConfigDict(dict):  # type: ignore[override]
         def __init__(self, **kwargs: object) -> None:
@@ -378,10 +374,7 @@ else:
                     iterable: Iterable[tuple[str, object]] = fields_map.items()
                 else:
                     annotations = getattr(self.__class__, "__annotations__", {})
-                    iterable = (
-                        (name, getattr(self.__class__, name, None))
-                        for name in annotations
-                    )
+                    iterable = ((name, getattr(self.__class__, name, None)) for name in annotations)
                 for name, field_info in iterable:
                     for env_name in _candidate_env_names(name, field_info):
                         env_value = os.getenv(env_name)
@@ -390,7 +383,6 @@ else:
                             break
             values.update(data)
             super().__init__(**values)
-
 
 
 def _default_app_version() -> str:
@@ -449,16 +441,23 @@ class Settings(BaseSettings):
         ),
     )
 
-
     auth_provider: str = Field(
         default="local-jwt",
         validation_alias=AliasChoices("AUTH_PROVIDER"),
     )
-    keycloak_server_url: str | None = Field(default=None, validation_alias=AliasChoices("KEYCLOAK_SERVER_URL"))
-    keycloak_realm: str | None = Field(default=None, validation_alias=AliasChoices("KEYCLOAK_REALM"))
-    keycloak_client_id: str | None = Field(default=None, validation_alias=AliasChoices("KEYCLOAK_CLIENT_ID"))
+    keycloak_server_url: str | None = Field(
+        default=None, validation_alias=AliasChoices("KEYCLOAK_SERVER_URL")
+    )
+    keycloak_realm: str | None = Field(
+        default=None, validation_alias=AliasChoices("KEYCLOAK_REALM")
+    )
+    keycloak_client_id: str | None = Field(
+        default=None, validation_alias=AliasChoices("KEYCLOAK_CLIENT_ID")
+    )
     supabase_url: str | None = Field(default=None, validation_alias=AliasChoices("SUPABASE_URL"))
-    supabase_jwt_secret: str | None = Field(default=None, validation_alias=AliasChoices("SUPABASE_JWT_SECRET"))
+    supabase_jwt_secret: str | None = Field(
+        default=None, validation_alias=AliasChoices("SUPABASE_JWT_SECRET")
+    )
 
     # Core paths ---------------------------------------------------------
     data_dir: Path = Field(
@@ -491,7 +490,9 @@ class Settings(BaseSettings):
         default=None,
         validation_alias=AliasChoices("CHAT_DB_DSN", "CHAT_DB_URL", "DATABASE_URL"),
     )
-    chat_db_schema: str | None = Field(default=None, validation_alias=AliasChoices("CHAT_DB_SCHEMA"))
+    chat_db_schema: str | None = Field(
+        default=None, validation_alias=AliasChoices("CHAT_DB_SCHEMA")
+    )
     chat_history_limit: int = Field(default=12, validation_alias=AliasChoices("CHAT_HISTORY_LIMIT"))
     chat_summary_trigger: int = Field(
         default=10,
@@ -507,7 +508,9 @@ class Settings(BaseSettings):
         default=50,
         validation_alias=AliasChoices("RERANK_TOPK", "RERANK_TOP_K"),
     )
-    rag_tokenizer_name: str = Field(default="cl100k_base", validation_alias=AliasChoices("RAG_TOKENIZER_NAME"))
+    rag_tokenizer_name: str = Field(
+        default="cl100k_base", validation_alias=AliasChoices("RAG_TOKENIZER_NAME")
+    )
     rag_chunk: int = Field(default=900, validation_alias=AliasChoices("RAG_CHUNK"))
     rag_overlap: int = Field(default=140, validation_alias=AliasChoices("RAG_OVERLAP"))
     ingest_max_retries: int = Field(default=3, validation_alias=AliasChoices("INGEST_MAX_RETRIES"))
@@ -611,7 +614,6 @@ class Settings(BaseSettings):
             raise ValueError("ingest_job_retention_days must be positive")
         return candidate
 
-
     # OCR configuration --------------------------------------------------
     ocr_tesseract_cmd: str | None = Field(
         default=None,
@@ -676,7 +678,6 @@ class Settings(BaseSettings):
         description="Maximum number of pages to parse via Docling.",
     )
 
-
     @field_validator("document_parser_backend", mode="before")
     @classmethod
     def _validate_document_parser_backend(cls, value: object) -> str:
@@ -696,6 +697,7 @@ class Settings(BaseSettings):
             return None
         candidate = int(value)
         return candidate if candidate > 0 else None
+
     html2text_bodywidth: int = Field(
         default=0,
         validation_alias=AliasChoices("HTML2TEXT_BODYWIDTH"),
@@ -737,7 +739,6 @@ class Settings(BaseSettings):
         description="Prefer unicode characters for typographical symbols when converting HTML.",
     )
 
-
     # Vector store -------------------------------------------------------
     vector_backend: str = Field(default="qdrant", validation_alias=AliasChoices("VECTOR_BACKEND"))
     vector_embed_model: str = Field(
@@ -762,15 +763,21 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("QDRANT_PATH", "QDRANT_STORAGE_PATH"),
         description="Filesystem directory used for embedded Qdrant storage.",
     )
-    qdrant_api_key: str | None = Field(default=None, validation_alias=AliasChoices("QDRANT_API_KEY"))
-    qdrant_collection: str = Field(default="kb_chunks", validation_alias=AliasChoices("QDRANT_COLLECTION"))
+    qdrant_api_key: str | None = Field(
+        default=None, validation_alias=AliasChoices("QDRANT_API_KEY")
+    )
+    qdrant_collection: str = Field(
+        default="kb_chunks", validation_alias=AliasChoices("QDRANT_COLLECTION")
+    )
 
     # Memory -------------------------------------------------------------
     chat_memory_enabled: bool = Field(
         default=False,
         validation_alias=AliasChoices("CHAT_MEMORY_ENABLED", "MEMORY_ENABLED"),
     )
-    memory_db_path: Path | None = Field(default=None, validation_alias=AliasChoices("MEMORY_DB_PATH"))
+    memory_db_path: Path | None = Field(
+        default=None, validation_alias=AliasChoices("MEMORY_DB_PATH")
+    )
     chat_memory_ttl_days: int = Field(
         default=90,
         validation_alias=AliasChoices("CHAT_MEMORY_TTL_DAYS", "MEMORY_TTL_DAYS"),
@@ -834,7 +841,9 @@ class Settings(BaseSettings):
     )
 
     # LangChain integration ---------------------------------------------
-    langchain_enabled: bool = Field(default=False, validation_alias=AliasChoices("LANGCHAIN_ENABLED"))
+    langchain_enabled: bool = Field(
+        default=False, validation_alias=AliasChoices("LANGCHAIN_ENABLED")
+    )
     langchain_mode: str = Field(default="legacy", validation_alias=AliasChoices("LANGCHAIN_MODE"))
     langchain_use_history_aware: bool = Field(
         default=False,
@@ -844,8 +853,12 @@ class Settings(BaseSettings):
         default=False,
         validation_alias=AliasChoices("LANGCHAIN_RETURN_SOURCE_DOCS"),
     )
-    langchain_tracing: bool = Field(default=False, validation_alias=AliasChoices("LANGCHAIN_TRACING"))
-    langchain_project: str = Field(default="kb-ai", validation_alias=AliasChoices("LANGCHAIN_PROJECT"))
+    langchain_tracing: bool = Field(
+        default=False, validation_alias=AliasChoices("LANGCHAIN_TRACING")
+    )
+    langchain_project: str = Field(
+        default="kb-ai", validation_alias=AliasChoices("LANGCHAIN_PROJECT")
+    )
     redis_url: str | None = Field(default=None, validation_alias=AliasChoices("REDIS_URL"))
 
     llm_lora_adapter: str | None = Field(
@@ -896,7 +909,9 @@ class Settings(BaseSettings):
         default=30,
         validation_alias=AliasChoices("ACCESS_TOKEN_EXPIRE_MINUTES"),
     )
-    api_key_hash_salt: str = Field(default="kb-ai-salt", validation_alias=AliasChoices("API_KEY_HASH_SALT"))
+    api_key_hash_salt: str = Field(
+        default="kb-ai-salt", validation_alias=AliasChoices("API_KEY_HASH_SALT")
+    )
 
     # Billing ------------------------------------------------------------
     billing_enabled: bool = Field(default=False, validation_alias=AliasChoices("BILLING_ENABLED"))
@@ -1005,7 +1020,6 @@ class Settings(BaseSettings):
         if value in {None, "", Ellipsis}:
             return None
         return int(value)
-
 
     @field_validator("langchain_mode", mode="before")
     @classmethod

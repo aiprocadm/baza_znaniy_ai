@@ -44,7 +44,12 @@ def upgrade() -> None:
         op.create_table(
             "kb_chunks",
             sa.Column("id", sa.Integer, primary_key=True, autoincrement=True),
-            sa.Column("document_id", sa.Integer, sa.ForeignKey("kb_documents.id", ondelete="CASCADE"), nullable=False),
+            sa.Column(
+                "document_id",
+                sa.Integer,
+                sa.ForeignKey("kb_documents.id", ondelete="CASCADE"),
+                nullable=False,
+            ),
             sa.Column("chunk_index", sa.Integer, nullable=False),
             sa.Column("text", sa.Text, nullable=False),
             sa.Column("embedding", sa.LargeBinary, nullable=False),

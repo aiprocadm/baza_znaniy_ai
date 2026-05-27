@@ -107,7 +107,9 @@ def index_chunks(chunks: Iterable[dict[str, object]]) -> int:
     try:
         store.ensure_ready()
         store.upsert(items)
-    except _VECTOR_ERRORS as exc:  # pragma: no cover - gracefully degrade when Qdrant is unavailable
+    except (
+        _VECTOR_ERRORS
+    ) as exc:  # pragma: no cover - gracefully degrade when Qdrant is unavailable
         duration = time.perf_counter() - start
         record_index_operation("error", "vector", len(items), duration)
         LOGGER.exception("Falling back to in-memory index", exc_info=exc)
@@ -166,20 +168,30 @@ def _search_fallback(
             chunk_tags = chunk.get("tags")
             if not isinstance(chunk_tags, list):
                 continue
-            chunk_tag_set = {
-                str(tag).strip().lower() for tag in chunk_tags if str(tag).strip()
-            }
+            chunk_tag_set = {str(tag).strip().lower() for tag in chunk_tags if str(tag).strip()}
             if not normalized_tags.issubset(chunk_tag_set):
                 continue
 
         meta = chunk.get("meta") if isinstance(chunk.get("meta"), dict) else {}
-        if filters.act_type and str(meta.get("act_type", "")).strip().lower() != filters.act_type.lower():
+        if (
+            filters.act_type
+            and str(meta.get("act_type", "")).strip().lower() != filters.act_type.lower()
+        ):
             continue
-        if filters.issuer and filters.issuer.lower() not in str(meta.get("issuer", "")).strip().lower():
+        if (
+            filters.issuer
+            and filters.issuer.lower() not in str(meta.get("issuer", "")).strip().lower()
+        ):
             continue
-        if filters.reg_number and filters.reg_number.lower() != str(meta.get("reg_number", "")).strip().lower():
+        if (
+            filters.reg_number
+            and filters.reg_number.lower() != str(meta.get("reg_number", "")).strip().lower()
+        ):
             continue
-        if filters.is_active is not None and bool(meta.get("is_active", True)) is not filters.is_active:
+        if (
+            filters.is_active is not None
+            and bool(meta.get("is_active", True)) is not filters.is_active
+        ):
             continue
         if filters.revision_mode == "current" and meta.get("is_active") is False:
             continue
@@ -237,7 +249,18 @@ def search(
         record_search_operation("vector", "error", duration, 0)
         LOGGER.exception("Falling back to in-memory search", exc_info=exc)
         fallback_start = time.perf_counter()
-        fallback_hits = _search_fallback(query, top_k, owner=filters.owner, tags=list(filters.tags), act_type=filters.act_type, issuer=filters.issuer, reg_number=filters.reg_number, is_active=filters.is_active, revision_mode=filters.revision_mode, tenant_id=filters.tenant_id)
+        fallback_hits = _search_fallback(
+            query,
+            top_k,
+            owner=filters.owner,
+            tags=list(filters.tags),
+            act_type=filters.act_type,
+            issuer=filters.issuer,
+            reg_number=filters.reg_number,
+            is_active=filters.is_active,
+            revision_mode=filters.revision_mode,
+            tenant_id=filters.tenant_id,
+        )
         record_search_operation(
             "fallback",
             "success",
@@ -257,7 +280,9 @@ def clear_fallback() -> None:
         get_fallback_storage().clear()
 
 
-def reindex_alias_atomic(*, document_id: str, idempotency_key: str | None = None, dry_run: bool = False):
+def reindex_alias_atomic(
+    *, document_id: str, idempotency_key: str | None = None, dry_run: bool = False
+):
     """Run alias-based reindex pipeline with atomic switch + rollback safety."""
 
     store = _resolve_vector_store()
@@ -278,10 +303,20 @@ def reindex_alias_atomic(*, document_id: str, idempotency_key: str | None = None
         store.validate_collection_not_empty(temp_collection)
         if dry_run:
             store.delete_collection_safe(temp_collection)
-            return {"status": "dry_run", "copied": copied, "alias": alias, "idempotency_key": idempotency_key}
+            return {
+                "status": "dry_run",
+                "copied": copied,
+                "alias": alias,
+                "idempotency_key": idempotency_key,
+            }
         store.switch_alias(alias, temp_collection)
         switched = True
-        return {"status": "completed", "copied": copied, "alias": alias, "idempotency_key": idempotency_key}
+        return {
+            "status": "completed",
+            "copied": copied,
+            "alias": alias,
+            "idempotency_key": idempotency_key,
+        }
     except Exception:
         if not switched:
             store.delete_collection_safe(temp_collection)

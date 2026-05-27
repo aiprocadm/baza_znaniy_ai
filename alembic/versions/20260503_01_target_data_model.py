@@ -28,17 +28,26 @@ def upgrade() -> None:
     op.execute("UPDATE tenants SET slug = legacy_slug")
     op.alter_column("tenants", "slug", nullable=False)
     op.create_unique_constraint("uq_tenants_slug", "tenants", ["slug"])
-    op.add_column("tenants", sa.Column("status", sa.String(length=32), server_default="active", nullable=False))
+    op.add_column(
+        "tenants",
+        sa.Column("status", sa.String(length=32), server_default="active", nullable=False),
+    )
 
     op.add_column("users", sa.Column("tenant_id", sa.Integer(), nullable=True))
-    op.execute("UPDATE users u SET tenant_id = t.id FROM tenants t WHERE u.tenant_slug = t.legacy_slug")
+    op.execute(
+        "UPDATE users u SET tenant_id = t.id FROM tenants t WHERE u.tenant_slug = t.legacy_slug"
+    )
     op.alter_column("users", "tenant_id", nullable=False)
     op.drop_constraint("users_tenant_slug_fkey", "users", type_="foreignkey")
     op.drop_column("users", "tenant_slug")
-    op.create_foreign_key("fk_users_tenant_id", "users", "tenants", ["tenant_id"], ["id"], ondelete="CASCADE")
+    op.create_foreign_key(
+        "fk_users_tenant_id", "users", "tenants", ["tenant_id"], ["id"], ondelete="CASCADE"
+    )
 
     op.add_column("documents", sa.Column("tenant_id", sa.Integer(), nullable=True))
-    op.execute("UPDATE documents d SET tenant_id = t.id FROM tenants t WHERE d.tenant_slug = t.legacy_slug")
+    op.execute(
+        "UPDATE documents d SET tenant_id = t.id FROM tenants t WHERE d.tenant_slug = t.legacy_slug"
+    )
     op.alter_column("documents", "tenant_id", nullable=False)
     op.drop_constraint("documents_tenant_slug_fkey", "documents", type_="foreignkey")
     op.drop_column("documents", "tenant_slug")
@@ -48,9 +57,20 @@ def upgrade() -> None:
     op.drop_column("documents", "chunks")
     op.drop_column("documents", "content")
     op.add_column("documents", sa.Column("owner_user_id", sa.Integer(), nullable=True))
-    op.add_column("documents", sa.Column("chunks_count", sa.Integer(), server_default="0", nullable=False))
-    op.create_foreign_key("fk_documents_tenant_id", "documents", "tenants", ["tenant_id"], ["id"], ondelete="CASCADE")
-    op.create_foreign_key("fk_documents_owner_user_id", "documents", "users", ["owner_user_id"], ["id"], ondelete="SET NULL")
+    op.add_column(
+        "documents", sa.Column("chunks_count", sa.Integer(), server_default="0", nullable=False)
+    )
+    op.create_foreign_key(
+        "fk_documents_tenant_id", "documents", "tenants", ["tenant_id"], ["id"], ondelete="CASCADE"
+    )
+    op.create_foreign_key(
+        "fk_documents_owner_user_id",
+        "documents",
+        "users",
+        ["owner_user_id"],
+        ["id"],
+        ondelete="SET NULL",
+    )
 
     op.create_table(
         "document_versions",
@@ -76,9 +96,20 @@ def upgrade() -> None:
     op.drop_column("chunks", "sha256")
     op.drop_column("chunks", "batch")
     op.alter_column("chunks", "chunk_index", nullable=False)
-    op.create_foreign_key("fk_chunks_tenant_id", "chunks", "tenants", ["tenant_id"], ["id"], ondelete="CASCADE")
-    op.create_foreign_key("fk_chunks_document_id", "chunks", "documents", ["document_id"], ["id"], ondelete="CASCADE")
-    op.create_foreign_key("fk_chunks_document_version_id", "chunks", "document_versions", ["document_version_id"], ["id"], ondelete="CASCADE")
+    op.create_foreign_key(
+        "fk_chunks_tenant_id", "chunks", "tenants", ["tenant_id"], ["id"], ondelete="CASCADE"
+    )
+    op.create_foreign_key(
+        "fk_chunks_document_id", "chunks", "documents", ["document_id"], ["id"], ondelete="CASCADE"
+    )
+    op.create_foreign_key(
+        "fk_chunks_document_version_id",
+        "chunks",
+        "document_versions",
+        ["document_version_id"],
+        ["id"],
+        ondelete="CASCADE",
+    )
 
     op.create_table(
         "subscriptions",

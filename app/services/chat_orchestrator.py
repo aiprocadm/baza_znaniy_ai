@@ -46,10 +46,7 @@ def _map_langchain_result_to_chat_response(
     source_items = []
     if runtime.langchain_return_source_docs:
         source_items = list(
-            result.get("sources")
-            or result.get("source_documents")
-            or result.get("context")
-            or []
+            result.get("sources") or result.get("source_documents") or result.get("context") or []
         )
 
     citations = [
@@ -166,7 +163,9 @@ def handle_chat(
         history = runtime.chat_store.get_recent_messages(
             conversation_id, limit=runtime.history_limit
         )
-        history_text = "\n".join(f"{role}: {content}" for role, content in history) if history else ""
+        history_text = (
+            "\n".join(f"{role}: {content}" for role, content in history) if history else ""
+        )
 
         memory_text = ""
         if isinstance(runtime.memory_store, MemoryStore):
@@ -186,7 +185,11 @@ def handle_chat(
                 tenant_id=context.tenant,
                 retrieve_topk=runtime.retrieve_topk,
             )
-            rewritten_message = rewrite_with_history(payload.message, history_text) if runtime.langchain_use_history_aware else payload.message
+            rewritten_message = (
+                rewrite_with_history(payload.message, history_text)
+                if runtime.langchain_use_history_aware
+                else payload.message
+            )
             lc_result = chain(
                 payload=payload,
                 context={
@@ -205,7 +208,10 @@ def handle_chat(
             )
             answer = str(lc_result.get("answer") or lc_result.get("output") or "").strip()
             runtime.chat_store.record_exchange(conversation_id, payload.message, answer)
-            if runtime.chat_store.messages_since_summary(conversation_id) >= runtime.chat_summary_trigger:
+            if (
+                runtime.chat_store.messages_since_summary(conversation_id)
+                >= runtime.chat_summary_trigger
+            ):
                 runtime.summarizer.summarize(conversation_id)
             latency_ms = (time.perf_counter() - start) * 1000
             return _map_langchain_result_to_chat_response(
@@ -274,7 +280,10 @@ def handle_chat(
         citations_count = len(citations)
 
         runtime.chat_store.record_exchange(conversation_id, payload.message, answer)
-        if runtime.chat_store.messages_since_summary(conversation_id) >= runtime.chat_summary_trigger:
+        if (
+            runtime.chat_store.messages_since_summary(conversation_id)
+            >= runtime.chat_summary_trigger
+        ):
             runtime.summarizer.summarize(conversation_id)
 
         if isinstance(runtime.memory_store, MemoryStore):

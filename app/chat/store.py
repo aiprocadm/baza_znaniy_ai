@@ -15,25 +15,21 @@ __all__ = ["ChatStore", "ConversationAccessError", "ChatStoreProtocol"]
 class ChatStoreProtocol(Protocol):
     """Interface implemented by chat persistence backends."""
 
-    def ensure_conversation(self, user_id: str, conversation_id: Optional[str]) -> str:
-        ...
+    def ensure_conversation(self, user_id: str, conversation_id: Optional[str]) -> str: ...
 
-    def get_summary(self, conversation_id: str) -> Optional[str]:
-        ...
+    def get_summary(self, conversation_id: str) -> Optional[str]: ...
 
     def get_recent_messages(
         self, conversation_id: str, limit: Optional[int] = None
-    ) -> List[Tuple[str, str]]:
-        ...
+    ) -> List[Tuple[str, str]]: ...
 
-    def record_exchange(self, conversation_id: str, user_message: str, assistant_message: str) -> None:
-        ...
+    def record_exchange(
+        self, conversation_id: str, user_message: str, assistant_message: str
+    ) -> None: ...
 
-    def messages_since_summary(self, conversation_id: str) -> int:
-        ...
+    def messages_since_summary(self, conversation_id: str) -> int: ...
 
-    def save_summary(self, conversation_id: str, summary: str) -> None:
-        ...
+    def save_summary(self, conversation_id: str, summary: str) -> None: ...
 
 
 class ConversationAccessError(RuntimeError):
@@ -136,7 +132,9 @@ class ChatStore:
             ).fetchone()
         return row["summary"] if row else None
 
-    def get_recent_messages(self, conversation_id: str, limit: Optional[int] = None) -> List[Tuple[str, str]]:
+    def get_recent_messages(
+        self, conversation_id: str, limit: Optional[int] = None
+    ) -> List[Tuple[str, str]]:
         query = (
             "SELECT role, content FROM messages WHERE conversation_id = ? "
             "ORDER BY created_at DESC, id DESC"
@@ -149,7 +147,9 @@ class ChatStore:
         ordered = list(rows)[::-1]
         return [(row["role"], row["content"]) for row in ordered]
 
-    def record_exchange(self, conversation_id: str, user_message: str, assistant_message: str) -> None:
+    def record_exchange(
+        self, conversation_id: str, user_message: str, assistant_message: str
+    ) -> None:
         timestamp = int(time.time())
         with self._connect() as connection:
             connection.execute(

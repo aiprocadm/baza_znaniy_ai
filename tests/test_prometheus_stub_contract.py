@@ -30,9 +30,9 @@ def stub_module(monkeypatch):
             monkeypatch.delitem(sys.modules, name, raising=False)
     monkeypatch.syspath_prepend(str(STUBS_PATH))
     module = importlib.import_module("prometheus_client")
-    assert "stubs" in (module.__file__ or ""), (
-        "Test fixture should resolve to the stub, not the real package"
-    )
+    assert "stubs" in (
+        module.__file__ or ""
+    ), "Test fixture should resolve to the stub, not the real package"
     return module
 
 
@@ -70,7 +70,4 @@ def test_labeled_metric_still_requires_labels_call(stub_module):
 
     counter = stub_module.Counter("test_labeled", "doc", labelnames=("kind",))
     counter.labels(kind="a").inc()
-    assert (
-        stub_module._DEFAULT_REGISTRY.get_sample_value("test_labeled", {"kind": "a"})
-        == 1.0
-    )
+    assert stub_module._DEFAULT_REGISTRY.get_sample_value("test_labeled", {"kind": "a"}) == 1.0

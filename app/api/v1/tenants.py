@@ -32,7 +32,12 @@ def list_tenants(session: Session = Depends(get_ingest_session)) -> list[TenantR
     ]
 
 
-@router.post("", response_model=TenantResponse, status_code=status.HTTP_201_CREATED, dependencies=[Depends(require_admin_user)])
+@router.post(
+    "",
+    response_model=TenantResponse,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_admin_user)],
+)
 def create_tenant(
     payload: TenantCreate,
     session: Session = Depends(get_ingest_session),
@@ -65,4 +70,3 @@ def create_tenant(
         created_at=record.created_at,
         updated_at=record.updated_at,
     )
-

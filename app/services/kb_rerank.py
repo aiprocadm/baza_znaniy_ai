@@ -21,7 +21,7 @@ from __future__ import annotations
 import logging
 import threading
 import time
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from typing import List, Mapping, Optional, Sequence
 
 from app.services._envutil import env as _env
@@ -106,9 +106,7 @@ def _get_reranker(config: RerankConfig):
             raise RuntimeError(
                 "sentence-transformers is required for KB_RERANK_ENABLED=true"
             ) from exc
-        reranker = CrossEncoderReranker(
-            model_name=config.model_name, batch_size=config.batch_size
-        )
+        reranker = CrossEncoderReranker(model_name=config.model_name, batch_size=config.batch_size)
         _RERANKER_CACHE[config.model_name] = reranker
         return reranker
 
@@ -172,7 +170,9 @@ def rerank_hits(
     effective_top_n = max(1, effective_top_n)
 
     if not hits:
-        return RerankResult(hits=[], model=effective_config.model_name, elapsed_ms=0.0, candidates=0)
+        return RerankResult(
+            hits=[], model=effective_config.model_name, elapsed_ms=0.0, candidates=0
+        )
 
     if not effective_config.enabled:
         return RerankResult(

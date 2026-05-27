@@ -15,7 +15,9 @@ class VectorStore(Protocol):
     def ensure_ready(self) -> None:  # pragma: no cover - protocol definition
         """Ensure that the backing index exists and is configured."""
 
-    def upsert(self, chunks: Iterable[dict[str, object]]) -> None:  # pragma: no cover - protocol definition
+    def upsert(
+        self, chunks: Iterable[dict[str, object]]
+    ) -> None:  # pragma: no cover - protocol definition
         """Persist or update a batch of document chunks."""
 
     def search(
@@ -26,7 +28,6 @@ class VectorStore(Protocol):
         filters: SearchFilters,
     ) -> list[dict[str, object]]:  # pragma: no cover - protocol definition
         """Return the top matching chunks for the supplied query."""
-
 
 
 def _load_backends():
@@ -73,6 +74,8 @@ setattr(get_vector_store, "cache_clear", _clear_cache)
 
 
 __all__ = ["SearchFilters", "VectorStore", "get_vector_store", "_build_backend"]
+
+
 @dataclass(frozen=True)
 class SearchFilters:
     """Canonical tenant-scoped filter contract used by API and vector stores."""

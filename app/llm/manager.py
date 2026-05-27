@@ -148,16 +148,12 @@ class AdapterNotLoadedError(LoraManagerError):
     """Raised when attempting to operate on a missing adapter."""
 
 
-
-
-
 SCALING_MIN = 0.0
 SCALING_MAX = 10.0
 
 
 class InvalidScalingError(LoraManagerError):
     """Raised when an invalid scaling factor is supplied."""
-
 
 
 class LlamaLoraManager:
@@ -283,9 +279,7 @@ class LlamaLoraManager:
             adapter_name = self._adapter_name_from_path(candidate)
 
             if hasattr(llama, "load_adapter"):
-                llama.load_adapter(
-                    str(candidate), adapter_name=adapter_name, scale=scaling_value
-                )
+                llama.load_adapter(str(candidate), adapter_name=adapter_name, scale=scaling_value)
             if hasattr(llama, "set_adapter"):
                 llama.set_adapter(adapter_name)
 

@@ -113,4 +113,3 @@ __all__ = [
     "html_to_plain_text",
     "html_to_text_sections",
 ]
-

@@ -107,7 +107,6 @@ def test_conversation_summarizer_handles_empty_history(tmp_path: Path) -> None:
     assert store.get_summary(conversation_id) is None
     assert called["value"] is False
 
-
     assert summarizer.summarize(conversation_id) is None
     assert store.get_summary(conversation_id) is None
     assert store.messages_since_summary(conversation_id) == 0
@@ -136,7 +135,9 @@ def test_conversation_summarizer_ignores_blank_summary(tmp_path: Path) -> None:
 
 
 def test_memory_store_respects_ttl(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    store = MemoryStore(str(tmp_path / "memory.sqlite3"), ttl_days=1, summary_trigger=5, max_tokens=200)
+    store = MemoryStore(
+        str(tmp_path / "memory.sqlite3"), ttl_days=1, summary_trigger=5, max_tokens=200
+    )
 
     current = {"value": 1_000_000}
 
@@ -155,7 +156,9 @@ def test_memory_store_respects_ttl(monkeypatch: pytest.MonkeyPatch, tmp_path: Pa
 
 
 def test_memory_store_truncates_to_token_limit(tmp_path: Path) -> None:
-    store = MemoryStore(str(tmp_path / "memory_tokens.sqlite3"), ttl_days=1, summary_trigger=5, max_tokens=2)
+    store = MemoryStore(
+        str(tmp_path / "memory_tokens.sqlite3"), ttl_days=1, summary_trigger=5, max_tokens=2
+    )
 
     store.record("user-2", None, "очень длинное сообщение", "такой же длинный ответ")
     transcript = store.load_context("user-2", None)

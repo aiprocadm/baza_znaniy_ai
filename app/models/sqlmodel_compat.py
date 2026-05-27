@@ -16,7 +16,10 @@ def is_sqlmodel_stub() -> bool:
 
     metadata = getattr(SQLModel, "metadata", None)
     metadata_type = type(metadata)
-    if metadata_type.__module__.startswith("tests.stubs") or metadata_type.__name__ == "FakeMetaData":
+    if (
+        metadata_type.__module__.startswith("tests.stubs")
+        or metadata_type.__name__ == "FakeMetaData"
+    ):
         return True
 
     module_name = getattr(SQLModel, "__module__", "")
@@ -108,7 +111,8 @@ def install_stub_model_initializers(models: Iterable[type[Any]]) -> None:
             model_cls.__init__ = _make_init(model_cls, field_names, defaults)  # type: ignore[assignment]
         except Exception:  # pragma: no cover - attaching the shim is best-effort
             logger.debug(
-                "Failed to attach SQLModel stub __init__ to %s", getattr(model_cls, "__name__", model_cls),
+                "Failed to attach SQLModel stub __init__ to %s",
+                getattr(model_cls, "__name__", model_cls),
                 exc_info=True,
             )
 

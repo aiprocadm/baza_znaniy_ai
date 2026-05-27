@@ -14,9 +14,11 @@ from typing import Sequence
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlmodel import Session
+
 try:
     from starlette.middleware.base import BaseHTTPMiddleware
 except ModuleNotFoundError:  # pragma: no cover - fallback for stubbed test envs
+
     class BaseHTTPMiddleware:  # type: ignore[override]
         """Fallback base class when Starlette middleware is unavailable."""
 
@@ -40,9 +42,11 @@ except ModuleNotFoundError:  # pragma: no cover - optional dependency fallback
     AsyncIOScheduler = None  # type: ignore[assignment]
     STATE_RUNNING = None  # type: ignore[assignment]
 from app.chat.summarizer import ConversationSummarizer
+
 try:
     from app.core.auth import TokenRegistry
 except ImportError:  # pragma: no cover - fallback for heavily stubbed test modules
+
     class TokenRegistry:  # type: ignore[override]
         """Lightweight replacement used when the real auth module is unavailable."""
 
@@ -68,9 +72,11 @@ except ImportError:  # pragma: no cover - fallback for heavily stubbed test modu
         def is_active(self, user_id: str | None) -> bool:
             return bool(user_id and user_id not in self._inactive_users)
 
+
 from app.core.config import get_settings
 from app.core.services import init_chat_store, init_memory_store
 from app.ingest import IngestService, IngestWorker, parse_and_chunk  # noqa: F401
+
 try:  # pragma: no cover - allow stubbed LLM modules in tests
     from app.llm import LLMProvider, get_cached_provider, reset_provider_cache
 except ImportError:  # pragma: no cover - fallback when cache reset is unavailable
@@ -78,12 +84,14 @@ except ImportError:  # pragma: no cover - fallback when cache reset is unavailab
 
     def reset_provider_cache() -> None:  # type: ignore[redefining-outer-name]
         return None
+
+
 try:  # pragma: no cover - allow heavily stubbed llm modules in tests
     from app.llm import lora_runtime
 except ImportError:  # pragma: no cover - lightweight fallback when runtime missing
+
     def _lora_not_available(*_args, **_kwargs):
         raise RuntimeError("LoRA runtime is not available in this environment")
-
 
     lora_runtime = SimpleNamespace(  # type: ignore[assignment]
         load_adapter=_lora_not_available,
@@ -290,7 +298,9 @@ def create_app(provider: LLMProvider | None = None) -> FastAPI:
     if Limiter is not None:
         storage_uri = getattr(settings, "redis_url", None)
         if storage_uri:
-            application.state.limiter = Limiter(key_func=get_remote_address, storage_uri=storage_uri)
+            application.state.limiter = Limiter(
+                key_func=get_remote_address, storage_uri=storage_uri
+            )
         else:
             application.state.limiter = Limiter(key_func=get_remote_address)
 
@@ -309,9 +319,7 @@ def create_app(provider: LLMProvider | None = None) -> FastAPI:
     ingest_queue = IngestQueue()
     scheduler = None
     if AsyncIOScheduler is None:  # pragma: no cover - optional dependency guard
-        logger.warning(
-            "APScheduler is not installed; background scheduling is disabled"
-        )
+        logger.warning("APScheduler is not installed; background scheduling is disabled")
     else:
         scheduler = AsyncIOScheduler(timezone=timezone.utc)
         schedule_sqlmodel_metadata_guard(scheduler)
@@ -367,7 +375,10 @@ def create_app(provider: LLMProvider | None = None) -> FastAPI:
         application.state.usage_sink = NoopUsageSink()
         application.state.billing_sink = NoopBillingSink()
     else:
-        session_factory = lambda: Session(ingest_service.engine)
+
+        def session_factory() -> Session:
+            return Session(ingest_service.engine)
+
         application.state.usage_sink = SqlUsageSink(session_factory)
         application.state.billing_sink = SqlBillingSink(session_factory)
 

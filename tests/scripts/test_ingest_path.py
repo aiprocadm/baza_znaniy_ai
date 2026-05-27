@@ -18,8 +18,7 @@ def ingest_module() -> types.ModuleType:
         del sys.modules[module_name]
 
     original_modules: dict[str, types.ModuleType | None] = {
-        name: sys.modules.get(name)
-        for name in ("app.ingest", "app.ingest.service", "sqlmodel")
+        name: sys.modules.get(name) for name in ("app.ingest", "app.ingest.service", "sqlmodel")
     }
 
     added_modules: list[str] = []
@@ -150,6 +149,9 @@ def test_ingest_path_indexes_only_supported_documents(
     total_chunks = ingest_module.ingest_path(tmp_path)
 
     assert vector_store.ensure_ready_calls == 1
-    assert vector_store.upsert_calls == [documents[f"alpha{supported_extension}"], documents[f"gamma{supported_extension}"]]
+    assert vector_store.upsert_calls == [
+        documents[f"alpha{supported_extension}"],
+        documents[f"gamma{supported_extension}"],
+    ]
     assert total_chunks == 3
     assert sorted(parsed_documents) == sorted(documents.keys())

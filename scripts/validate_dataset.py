@@ -129,7 +129,9 @@ def load_examples(path: Path) -> list[Example]:
                 raise DatasetValidationError(
                     f"Line {index}: missing instruction/prompt or output/response",
                 )
-            rows.append(Example(instruction=instruction, input=context, output=output, source=index))
+            rows.append(
+                Example(instruction=instruction, input=context, output=output, source=index)
+            )
     if not rows:
         raise DatasetValidationError("Dataset is empty")
     return rows
@@ -254,7 +256,9 @@ def _report_path(dataset_path: Path, report_dir: Path, suffix: str) -> Path:
     return report_dir / f"{dataset_path.stem}_validation.{suffix}"
 
 
-def write_reports(dataset_path: Path, report: ValidationReport, *, report_dir: Path) -> tuple[Path, Path]:
+def write_reports(
+    dataset_path: Path, report: ValidationReport, *, report_dir: Path
+) -> tuple[Path, Path]:
     report_dir.mkdir(parents=True, exist_ok=True)
     json_path = _report_path(dataset_path, report_dir, "json")
     md_path = _report_path(dataset_path, report_dir, "md")
@@ -303,7 +307,9 @@ def write_reports(dataset_path: Path, report: ValidationReport, *, report_dir: P
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
     report_dir = args.report_dir or args.path.parent
-    long_threshold = args.long_threshold or max(args.short_threshold * 4, int(args.max_seq_len * 0.6))
+    long_threshold = args.long_threshold or max(
+        args.short_threshold * 4, int(args.max_seq_len * 0.6)
+    )
 
     try:
         examples = load_examples(args.path)

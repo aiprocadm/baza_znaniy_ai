@@ -10,6 +10,16 @@ from qdrant_client import QdrantClient
 from qdrant_client.http import models as qmodels
 from qdrant_client.http.exceptions import UnexpectedResponse
 
+# qdrant-client renamed ``PayloadSchemaType.BOOL`` to ``BOOLEAN`` around
+# v1.13. Resolve once at import time so the call sites stay readable
+# and we keep working against both wire shapes (the in-tree test stub
+# still exposes ``BOOL``).
+_PAYLOAD_BOOL = getattr(
+    qmodels.PayloadSchemaType,
+    "BOOL",
+    getattr(qmodels.PayloadSchemaType, "BOOLEAN", None),
+)
+
 try:  # pragma: no cover - optional dependency for real deployments
     from sentence_transformers import SentenceTransformer
 except Exception:  # pragma: no cover - lightweight fallback used in tests
@@ -33,10 +43,13 @@ except Exception:  # pragma: no cover - lightweight fallback used in tests
                 vector = raw.astype(np.float32)
                 norm = np.linalg.norm(vector) or 1.0
                 vectors.append(vector / norm)
-            array = np.vstack(vectors) if vectors else np.zeros((0, self._dimension), dtype=np.float32)
+            array = (
+                np.vstack(vectors) if vectors else np.zeros((0, self._dimension), dtype=np.float32)
+            )
             if convert_to_numpy:
                 return array
             return array.tolist()
+
 
 from app.core.config import Settings, get_settings
 from app.retriever.embedding_protocol import EmbedderProtocol
@@ -47,6 +60,7 @@ __all__ = ["QdrantVectorStore"]
 try:  # pragma: no cover - optional LangChain integration
     from langchain_core.documents import Document
 except Exception:  # pragma: no cover - lightweight fallback for tests
+
     class Document:  # type: ignore[override]
         def __init__(self, page_content: str, metadata: dict[str, object] | None = None) -> None:
             self.page_content = page_content
@@ -64,8 +78,8 @@ class QdrantVectorStore:
         client_factory: Callable[..., QdrantClient] | None = None,
     ) -> None:
         self.settings = settings or get_settings()
-        self._embedder_factory: Callable[[str], EmbedderProtocol] = (
-            embedder_factory or cast(Callable[[str], EmbedderProtocol], SentenceTransformer)
+        self._embedder_factory: Callable[[str], EmbedderProtocol] = embedder_factory or cast(
+            Callable[[str], EmbedderProtocol], SentenceTransformer
         )
         self._client_factory = client_factory or QdrantClient
         self._model: EmbedderProtocol | None = None
@@ -164,12 +178,12 @@ class QdrantVectorStore:
                 ("act_type", qmodels.PayloadSchemaType.KEYWORD),
                 ("issuer", qmodels.PayloadSchemaType.KEYWORD),
                 ("reg_number", qmodels.PayloadSchemaType.KEYWORD),
-                ("is_active", qmodels.PayloadSchemaType.BOOL),
+                ("is_active", _PAYLOAD_BOOL),
                 ("revision", qmodels.PayloadSchemaType.KEYWORD),
                 ("meta.act_type", qmodels.PayloadSchemaType.KEYWORD),
                 ("meta.issuer", qmodels.PayloadSchemaType.KEYWORD),
                 ("meta.reg_number", qmodels.PayloadSchemaType.KEYWORD),
-                ("meta.is_active", qmodels.PayloadSchemaType.BOOL),
+                ("meta.is_active", _PAYLOAD_BOOL),
                 ("meta.revision", qmodels.PayloadSchemaType.KEYWORD),
             ):
                 client.create_payload_index(
@@ -197,7 +211,9 @@ class QdrantVectorStore:
             if not pending:
                 return
 
-            texts = [str(item.get("text") or item.get("content") or "") for item in pending.values()]
+            texts = [
+                str(item.get("text") or item.get("content") or "") for item in pending.values()
+            ]
             embeddings = self._batched_encode(texts)
             if not len(embeddings):
                 pending.clear()
@@ -258,7 +274,6 @@ class QdrantVectorStore:
         if not len(query_vector):
             return []
 
-
         client = self._client_instance()
         query_filter = self._to_qdrant_filter(filters)
 
@@ -287,7 +302,6 @@ class QdrantVectorStore:
             hits.append(payload)
         return hits
 
-
     @staticmethod
     def _to_qdrant_filter(filters: SearchFilters) -> qmodels.Filter:
         conditions: list[qmodels.FieldCondition] = [
@@ -297,21 +311,43 @@ class QdrantVectorStore:
             )
         ]
         if filters.owner:
-            conditions.append(qmodels.FieldCondition(key="owner", match=qmodels.MatchValue(value=filters.owner)))
+            conditions.append(
+                qmodels.FieldCondition(key="owner", match=qmodels.MatchValue(value=filters.owner))
+            )
         for tag in filters.tags:
-            conditions.append(qmodels.FieldCondition(key="tags", match=qmodels.MatchValue(value=tag)))
+            conditions.append(
+                qmodels.FieldCondition(key="tags", match=qmodels.MatchValue(value=tag))
+            )
         if filters.act_type:
-            conditions.append(qmodels.FieldCondition(key="act_type", match=qmodels.MatchValue(value=filters.act_type)))
+            conditions.append(
+                qmodels.FieldCondition(
+                    key="act_type", match=qmodels.MatchValue(value=filters.act_type)
+                )
+            )
         if filters.issuer:
-            conditions.append(qmodels.FieldCondition(key="issuer", match=qmodels.MatchText(text=filters.issuer)))
+            conditions.append(
+                qmodels.FieldCondition(key="issuer", match=qmodels.MatchText(text=filters.issuer))
+            )
         if filters.reg_number:
-            conditions.append(qmodels.FieldCondition(key="reg_number", match=qmodels.MatchValue(value=filters.reg_number)))
+            conditions.append(
+                qmodels.FieldCondition(
+                    key="reg_number", match=qmodels.MatchValue(value=filters.reg_number)
+                )
+            )
         if filters.is_active is not None:
-            conditions.append(qmodels.FieldCondition(key="is_active", match=qmodels.MatchValue(value=filters.is_active)))
+            conditions.append(
+                qmodels.FieldCondition(
+                    key="is_active", match=qmodels.MatchValue(value=filters.is_active)
+                )
+            )
         if filters.revision_mode == "current":
-            conditions.append(qmodels.FieldCondition(key="is_active", match=qmodels.MatchValue(value=True)))
+            conditions.append(
+                qmodels.FieldCondition(key="is_active", match=qmodels.MatchValue(value=True))
+            )
         elif filters.revision_mode == "historical":
-            conditions.append(qmodels.FieldCondition(key="is_active", match=qmodels.MatchValue(value=False)))
+            conditions.append(
+                qmodels.FieldCondition(key="is_active", match=qmodels.MatchValue(value=False))
+            )
         return qmodels.Filter(must=conditions)
 
     def as_retriever(self, *, query: str, top_k: int, filters: SearchFilters) -> list[Document]:
@@ -331,7 +367,6 @@ class QdrantVectorStore:
         from app.langchain.retrievers import TenantFilteredQdrantRetriever
 
         return TenantFilteredQdrantRetriever(store=self, tenant_id=tenant_id, k=k)
-
 
     def resolve_collection_name(self, alias_name: str) -> str:
         client = self._client_instance()
@@ -390,7 +425,13 @@ class QdrantVectorStore:
         client = self._client_instance()
         offset = None
         while True:
-            records, offset = client.scroll(collection_name=collection_name, limit=batch_size, offset=offset, with_payload=True, with_vectors=True)
+            records, offset = client.scroll(
+                collection_name=collection_name,
+                limit=batch_size,
+                offset=offset,
+                with_payload=True,
+                with_vectors=True,
+            )
             if not records:
                 break
             for record in records:
@@ -403,7 +444,9 @@ class QdrantVectorStore:
             if not offset:
                 break
 
-    def import_payloads_to_collection(self, collection_name: str, payloads: Iterable[dict[str, object]]) -> None:
+    def import_payloads_to_collection(
+        self, collection_name: str, payloads: Iterable[dict[str, object]]
+    ) -> None:
         client = self._client_instance()
         batch: list[qmodels.PointStruct] = []
         for payload in payloads:
@@ -414,7 +457,13 @@ class QdrantVectorStore:
             vector_list = list(vector.tolist()) if hasattr(vector, "tolist") else list(vector)
             if not vector_list:
                 continue
-            batch.append(qmodels.PointStruct(id=str(payload.get("id") or payload.get("sha256") or ""), vector=vector_list, payload=dict(payload)))
+            batch.append(
+                qmodels.PointStruct(
+                    id=str(payload.get("id") or payload.get("sha256") or ""),
+                    vector=vector_list,
+                    payload=dict(payload),
+                )
+            )
             if len(batch) >= 512:
                 client.upsert(collection_name=collection_name, points=list(batch))
                 batch.clear()
@@ -423,7 +472,9 @@ class QdrantVectorStore:
 
     def validate_collection_not_empty(self, collection_name: str) -> None:
         client = self._client_instance()
-        records, _ = client.scroll(collection_name=collection_name, limit=1, with_payload=False, with_vectors=False)
+        records, _ = client.scroll(
+            collection_name=collection_name, limit=1, with_payload=False, with_vectors=False
+        )
         if not records:
             raise ValueError("Temporary collection is empty after reindex")
 

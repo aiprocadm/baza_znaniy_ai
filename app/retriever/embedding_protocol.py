@@ -30,4 +30,3 @@ class EmbedderProtocol(Protocol):
 
     # ``__call__`` is intentionally omitted; factory functions may return any
     # callable adhering to this protocol.
-

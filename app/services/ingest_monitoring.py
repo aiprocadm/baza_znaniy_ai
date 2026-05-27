@@ -100,9 +100,7 @@ def compute_ingest_queue_metrics(
             status_counts[status] = 0
         status_counts[status] += 1
         uploaded_at = _normalise_datetime(record.uploaded_at)
-        if uploaded_at is not None and (
-            last_activity is None or uploaded_at > last_activity
-        ):
+        if uploaded_at is not None and (last_activity is None or uploaded_at > last_activity):
             last_activity = uploaded_at
 
     now_dt = _normalise_datetime(now) or utc_now()

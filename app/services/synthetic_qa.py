@@ -208,25 +208,18 @@ def build_prompt(
         raise ValueError("at least one chunk is required")
 
     if mode is GenerationMode.SINGLE:
-        return _PROMPT_SINGLE.format(
-            chunk_text=chunks[0], chunk_id=chunk_ids[0]
-        )
+        return _PROMPT_SINGLE.format(chunk_text=chunks[0], chunk_id=chunk_ids[0])
 
     if mode is GenerationMode.PARAPHRASE:
-        return _PROMPT_PARAPHRASE.format(
-            chunk_text=chunks[0], chunk_id=chunk_ids[0]
-        )
+        return _PROMPT_PARAPHRASE.format(chunk_text=chunks[0], chunk_id=chunk_ids[0])
 
     if mode is GenerationMode.MULTI_HOP:
         if len(chunks) < 2:
             raise ValueError("multi-hop mode requires at least 2 chunks")
         block = "\n\n".join(
-            f"Фрагмент [doc_chunk:{cid}]:\n{text}"
-            for text, cid in zip(chunks, chunk_ids)
+            f"Фрагмент [doc_chunk:{cid}]:\n{text}" for text, cid in zip(chunks, chunk_ids)
         )
-        return _PROMPT_MULTI_HOP.format(
-            n_chunks=len(chunks), chunks_block=block
-        )
+        return _PROMPT_MULTI_HOP.format(n_chunks=len(chunks), chunks_block=block)
 
     raise ValueError(f"Unsupported generation mode: {mode!r}")
 
@@ -371,10 +364,7 @@ def estimate_chunk_cost_usd(
     input_tokens = _chars_to_tokens(chunk_chars) + 200  # 200 ≈ prompt overhead
     output_tokens = _OUTPUT_TOKENS_PER_MODE[mode]
 
-    cost = (
-        input_tokens * input_price / 1_000_000
-        + output_tokens * output_price / 1_000_000
-    )
+    cost = input_tokens * input_price / 1_000_000 + output_tokens * output_price / 1_000_000
     return cost
 
 

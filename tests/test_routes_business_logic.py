@@ -100,7 +100,9 @@ def test_vector_store_adapter_produces_synthetic_hits_when_empty():
 
 def test_memory_store_created_via_module_factory(monkeypatch, tmp_path):
     class DummyStore:
-        def __init__(self, *, db_path: str, ttl_days: int, summary_trigger: int, max_tokens: int) -> None:
+        def __init__(
+            self, *, db_path: str, ttl_days: int, summary_trigger: int, max_tokens: int
+        ) -> None:
             self.db_path = db_path
             self.ttl_days = ttl_days
             self.summary_trigger = summary_trigger
@@ -162,9 +164,11 @@ def test_content_length_check_honours_limits():
 
 
 def test_coerce_upload_file_handles_nested_tuples():
-    upload = routes_module._coerce_upload_file([
-        ("doc.txt", b"data", "text/plain"),
-    ])
+    upload = routes_module._coerce_upload_file(
+        [
+            ("doc.txt", b"data", "text/plain"),
+        ]
+    )
 
     assert isinstance(upload, UploadFile)
     assert upload.filename == "doc.txt"
@@ -185,7 +189,11 @@ def test_coerce_bytes_resets_stream_position():
 def test_index_chunks_uses_fallback_on_failure(monkeypatch):
     fallback_index: list[dict[str, str]] = []
     request = SimpleNamespace(
-        app=SimpleNamespace(state=SimpleNamespace(vector_store=ExplodingVectorStore(), fallback_index=fallback_index))
+        app=SimpleNamespace(
+            state=SimpleNamespace(
+                vector_store=ExplodingVectorStore(), fallback_index=fallback_index
+            )
+        )
     )
     recorded: list[tuple[str, str, int]] = []
 
@@ -200,5 +208,3 @@ def test_index_chunks_uses_fallback_on_failure(monkeypatch):
     assert fallback_index == [{"id": 1}]
     assert ("error", "vector", 1) in recorded
     assert ("success", "fallback", 1) in recorded
-
-

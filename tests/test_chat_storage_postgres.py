@@ -15,7 +15,9 @@ from psycopg import sql
 from psycopg.conninfo import make_conninfo
 
 if getattr(psycopg, "IS_STUB", False):
-    pytest.skip("psycopg stub detected; skipping PostgreSQL integration tests", allow_module_level=True)
+    pytest.skip(
+        "psycopg stub detected; skipping PostgreSQL integration tests", allow_module_level=True
+    )
 
 
 def _pg_binaries_available() -> bool:
@@ -30,7 +32,9 @@ def _pg_binaries_available() -> bool:
 
 
 if not _pg_binaries_available():  # pragma: no cover - depends on environment tooling
-    pytest.skip("PostgreSQL binaries not available; skipping PostgreSQL tests", allow_module_level=True)
+    pytest.skip(
+        "PostgreSQL binaries not available; skipping PostgreSQL tests", allow_module_level=True
+    )
 
 pytest.importorskip("pytest_postgresql")
 
@@ -60,10 +64,7 @@ def postgres_dsn(postgresql_proc) -> str:
 
     with psycopg.connect(admin_dsn, autocommit=True) as connection:
         with connection.cursor() as cursor:
-            cursor.execute(
-                sql.SQL("CREATE DATABASE {}")
-                .format(sql.Identifier(db_name))
-            )
+            cursor.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(db_name)))
 
     dsn = make_conninfo(
         dbname=db_name,
@@ -81,17 +82,19 @@ def postgres_dsn(postgresql_proc) -> str:
             with connection.cursor() as cursor:
                 try:
                     cursor.execute(
-                        sql.SQL("DROP DATABASE IF EXISTS {} WITH (FORCE)")
-                        .format(sql.Identifier(db_name))
+                        sql.SQL("DROP DATABASE IF EXISTS {} WITH (FORCE)").format(
+                            sql.Identifier(db_name)
+                        )
                     )
                 except psycopg.errors.SyntaxError:
                     cursor.execute(
-                        sql.SQL("SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = %s"),
+                        sql.SQL(
+                            "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = %s"
+                        ),
                         (db_name,),
                     )
                     cursor.execute(
-                        sql.SQL("DROP DATABASE IF EXISTS {}")
-                        .format(sql.Identifier(db_name))
+                        sql.SQL("DROP DATABASE IF EXISTS {}").format(sql.Identifier(db_name))
                     )
 
 

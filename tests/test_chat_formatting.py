@@ -37,12 +37,7 @@ def test_format_answer_with_citations():
 
     formatted = _format_answer(answer, citations)
 
-    expected = (
-        "Ответ на вопрос.\n\n"
-        "Источники:\n\n"
-        "[1] doc1.pdf — страница 3\n"
-        "[2] doc2.txt"
-    )
+    expected = "Ответ на вопрос.\n\n" "Источники:\n\n" "[1] doc1.pdf — страница 3\n" "[2] doc2.txt"
 
     assert formatted == expected
 
