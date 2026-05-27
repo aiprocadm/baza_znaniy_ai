@@ -109,15 +109,17 @@ def test_index_chunks_success(monkeypatch: pytest.MonkeyPatch) -> None:
     assert filters.tags == ()
 
 
-@pytest.mark.skip(reason=_VECTORSTORE_REFACTOR_SKIP)
 def test_index_chunks_fallback_and_search_order(monkeypatch: pytest.MonkeyPatch) -> None:
     failing_store = ExplodingVectorStore()
     monkeypatch.setattr(vectorstore, "_VECTOR_STORE", failing_store)
 
+    # tenant_id is required end-to-end now; the fallback filter rejects
+    # chunks that don't match the tenant. Tag every chunk with "t1" so
+    # the ordering assertion below is not silently empty.
     chunks = [
-        {"id": 1, "text": "Alpha beta alpha"},
-        {"id": 2, "text": "Beta beta"},
-        {"id": 3, "text": "Gamma"},
+        {"id": 1, "text": "Alpha beta alpha", "tenant_id": "t1"},
+        {"id": 2, "text": "Beta beta", "tenant_id": "t1"},
+        {"id": 3, "text": "Gamma", "tenant_id": "t1"},
     ]
 
     stored = vectorstore.index_chunks(chunks)
@@ -125,11 +127,11 @@ def test_index_chunks_fallback_and_search_order(monkeypatch: pytest.MonkeyPatch)
     assert stored == len(chunks)
     assert failing_store.ready_calls == 1
 
-    results = vectorstore.search("beta", top_k=2)
+    results = vectorstore.search("beta", top_k=2, tenant_id="t1")
     assert [chunk["id"] for chunk in results] == [2, 1]
 
     vectorstore.clear_fallback()
-    assert vectorstore.search("beta", top_k=2) == []
+    assert vectorstore.search("beta", top_k=2, tenant_id="t1") == []
 
 
 def test_configurable_fallback_storage(monkeypatch: pytest.MonkeyPatch) -> None:
