@@ -9,11 +9,6 @@ import pytest
 import app.services.vectorstore as vectorstore
 from app.retriever.vector_store import SearchFilters
 
-_VECTORSTORE_REFACTOR_SKIP = (
-    "Targets the legacy (owner/tags) signature of vectorstore.search; "
-    "scheduled for un-skip in subsequent tasks of this sprint."
-)
-
 
 class DummyVectorStore:
     """A minimal stand-in for the real vector store implementation.
@@ -184,12 +179,8 @@ def test_fallback_search_filters(monkeypatch: pytest.MonkeyPatch) -> None:
         ]
     )
 
-    owner_hits = vectorstore.search(
-        "replication", top_k=10, tenant_id="t1", owner="alice@kb.ai"
-    )
+    owner_hits = vectorstore.search("replication", top_k=10, tenant_id="t1", owner="alice@kb.ai")
     assert [item["id"] for item in owner_hits] == [1, 3]
 
-    tag_hits = vectorstore.search(
-        "replication", top_k=10, tenant_id="t1", tags=["prod", "runbook"]
-    )
+    tag_hits = vectorstore.search("replication", top_k=10, tenant_id="t1", tags=["prod", "runbook"])
     assert [item["id"] for item in tag_hits] == [1]
