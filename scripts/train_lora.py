@@ -314,7 +314,7 @@ def _training_arguments(
         logging_steps=config.logging_steps,
         logging_dir=str(logging_dir),
         save_total_limit=2,
-        evaluation_strategy="epoch" if evaluation else "no",
+        eval_strategy="epoch" if evaluation else "no",
         bf16=config.use_bf16,
         fp16=config.use_fp16 and not config.use_bf16,
         gradient_checkpointing=config.use_qlora,
