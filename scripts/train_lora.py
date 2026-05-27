@@ -298,6 +298,26 @@ def _build_model(config: TrainingConfig, tokenizer: AutoTokenizer) -> torch.nn.M
     return peft_model
 
 
+def _resolve_report_to() -> list[str]:
+    """Pick report backends transformers can actually load.
+
+    transformers raises RuntimeError if ``report_to`` lists a backend
+    whose Python package is missing (tensorboard or tensorboardX). On
+    minimal CPU runners (e.g. the lora-smoke CI job) tensorboard is
+    not installed; in that case we silently disable reporting rather
+    than crash the training run.
+    """
+
+    try:
+        import tensorboard  # noqa: F401
+    except ImportError:
+        try:
+            import tensorboardX  # noqa: F401
+        except ImportError:
+            return ["none"]
+    return ["tensorboard"]
+
+
 def _training_arguments(
     config: TrainingConfig, run_dir: Path, *, evaluation: bool
 ) -> TrainingArguments:
@@ -318,7 +338,7 @@ def _training_arguments(
         bf16=config.use_bf16,
         fp16=config.use_fp16 and not config.use_bf16,
         gradient_checkpointing=config.use_qlora,
-        report_to=["tensorboard"],
+        report_to=_resolve_report_to(),
         seed=config.seed,
     )
 
