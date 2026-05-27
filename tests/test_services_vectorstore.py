@@ -7,23 +7,27 @@ from typing import Iterable, List
 import pytest
 
 import app.services.vectorstore as vectorstore
+from app.retriever.vector_store import SearchFilters
 
 _VECTORSTORE_REFACTOR_SKIP = (
-    "Targets the legacy (owner/tags) signature of vectorstore.search and "
-    "DummyVectorStore.search; the production search() now requires a "
-    "tenant_id and passes a SearchFilters dataclass to the underlying "
-    "store. Re-enable after rewriting the test stubs against "
-    "app.retriever.vector_store.SearchFilters."
+    "Targets the legacy (owner/tags) signature of vectorstore.search; "
+    "scheduled for un-skip in subsequent tasks of this sprint."
 )
 
 
 class DummyVectorStore:
-    """A minimal stand-in for the real vector store implementation."""
+    """A minimal stand-in for the real vector store implementation.
+
+    Mirrors :class:`app.retriever.vector_store.VectorStore` exactly:
+    ``search(query, top_k, *, filters: SearchFilters)``. Filter content
+    is captured into ``search_calls`` so tests can assert what the
+    production ``vectorstore.search`` actually forwarded.
+    """
 
     def __init__(self) -> None:
         self.ready_calls = 0
         self.upserted: List[List[dict[str, object]]] = []
-        self.search_calls: List[tuple[str, int, str | None, list[str] | None]] = []
+        self.search_calls: List[tuple[str, int, SearchFilters]] = []
         self.results: List[dict[str, object]] = []
 
     def ensure_ready(self) -> None:
@@ -35,12 +39,11 @@ class DummyVectorStore:
     def search(
         self,
         query: str,
-        *,
         top_k: int,
-        owner: str | None = None,
-        tags: list[str] | None = None,
+        *,
+        filters: SearchFilters,
     ) -> List[dict[str, object]]:
-        self.search_calls.append((query, top_k, owner, tags))
+        self.search_calls.append((query, top_k, filters))
         return self.results[:top_k]
 
 
@@ -60,10 +63,9 @@ class ExplodingVectorStore:
     def search(
         self,
         query: str,
-        *,
         top_k: int,
-        owner: str | None = None,
-        tags: list[str] | None = None,
+        *,
+        filters: SearchFilters,
     ) -> List[dict[str, object]]:  # pragma: no cover - not called
         raise RuntimeError("boom")
 
