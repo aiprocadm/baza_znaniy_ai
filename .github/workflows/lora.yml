@@ -32,7 +32,7 @@ jobs:
         run: |
           python scripts/validate_dataset.py \
             --path data/dev.jsonl \
-            --base-model sshleifer/tiny-gpt2 \
+            --base-model hf-internal-testing/tiny-random-gpt2 \
             --max-seq-len 128 \
             --short-threshold 2
 
@@ -41,7 +41,7 @@ jobs:
           LORA_USE_QLORA: "0"
         run: |
           python scripts/train_lora.py \
-            --base-model sshleifer/tiny-gpt2 \
+            --base-model hf-internal-testing/tiny-random-gpt2 \
             --train data/lora/smoke_train.jsonl \
             --eval data/lora/smoke_eval.jsonl \
             --output data/lora/runs \
@@ -60,7 +60,7 @@ jobs:
         run: |
           ADAPTER_DIR=$(ls -td data/lora/runs/*/adapter | head -n1)
           python scripts/eval_lora.py \
-            --base-model sshleifer/tiny-gpt2 \
+            --base-model hf-internal-testing/tiny-random-gpt2 \
             --adapter "$ADAPTER_DIR/adapter.safetensors" \
             --dataset data/lora/smoke_eval.jsonl \
             --max-new-tokens 64 \
