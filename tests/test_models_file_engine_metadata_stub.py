@@ -4,15 +4,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
 from sqlalchemy import text
 
 from app.models import file as file_module
 
 
-def test_get_engine_logs_and_continues_when_metadata_has_no_create_all(
-    tmp_path, caplog
-) -> None:
+def test_get_engine_logs_and_continues_when_metadata_has_no_create_all(tmp_path, caplog) -> None:
     """``get_engine`` should continue initialisation when schema creation is impossible."""
 
     file_module.get_engine.cache_clear()

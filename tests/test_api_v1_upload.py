@@ -20,7 +20,7 @@ warnings.filterwarnings(
     message=r"builtin type swigvarlink has no __module__ attribute",
 )
 
-import app  # ensure warning filters are installed
+import app as _app_warning_filters  # noqa: F401 -- side effect: installs warning filters
 
 
 if "fastapi" not in sys.modules:
@@ -55,9 +55,7 @@ if "starlette.datastructures" not in sys.modules:
                         else str(key).lower()
                     )
                     value_str = (
-                        value.decode()
-                        if isinstance(value, (bytes, bytearray))
-                        else str(value)
+                        value.decode() if isinstance(value, (bytes, bytearray)) else str(value)
                     )
                     super().__setitem__(key_str, value_str)
                 self._rebuild_raw()
@@ -137,7 +135,9 @@ def _invoke_post(app: FastAPI, path: str, *, files: list[tuple[str, object]]) ->
         body[key] = uploads
 
     kwargs = fastapi_module._build_call_arguments(route.handler, body, params, app)  # type: ignore[attr-defined]
-    limits_override = getattr(app, "dependency_overrides", {}).get(getattr(upload_module, "get_upload_limits", None))
+    limits_override = getattr(app, "dependency_overrides", {}).get(
+        getattr(upload_module, "get_upload_limits", None)
+    )
     if isinstance(kwargs.get("limits"), dict) and callable(limits_override):
         kwargs["limits"] = limits_override()
     result = route.handler(**kwargs)
@@ -215,22 +215,22 @@ if "sqlmodel" not in sys.modules:
 
 _pydantic = sys.modules.get("pydantic", pydantic)
 if _pydantic is not None and not hasattr(_pydantic, "field_validator"):
+
     def _field_validator(*args, **kwargs):  # pragma: no cover - stub
         def decorator(func):
             return func
 
         return decorator
 
-
     setattr(_pydantic, "field_validator", _field_validator)
 
 if _pydantic is not None and not hasattr(_pydantic, "model_validator"):
+
     def _model_validator(*args, **kwargs):  # pragma: no cover - stub
         def decorator(func):
             return func
 
         return decorator
-
 
     setattr(_pydantic, "model_validator", _model_validator)
 
@@ -433,7 +433,9 @@ def test_upload_file_accepts_uploadfile_instance(tmp_path: Path) -> None:
     assert getattr(upload.file, "closed", False)
 
 
-def test_upload_file_coerces_tuple_and_list_payloads(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_upload_file_coerces_tuple_and_list_payloads(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     limits = UploadLimits(max_upload_mb=2, allowed_extensions={"txt", "md"})
     service = _StubIngestService()
 
@@ -721,9 +723,7 @@ def test_upload_does_not_mutate_original_uploadfile(tmp_path: Path) -> None:
     assert response.filename == "immutable.txt"
     assert original.filename == ""
     recorded = service.calls[0]
-    expected_path = _expected_storage_path(
-        tmp_path, "immutable", payload, recorded["filename"]
-    )
+    expected_path = _expected_storage_path(tmp_path, "immutable", payload, recorded["filename"])
     stored_path = Path(recorded["path"])
     assert stored_path == expected_path
     assert stored_path.read_bytes() == payload

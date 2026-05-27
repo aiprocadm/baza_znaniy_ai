@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Protocol, Any
-from sqlmodel import Session, select
+from sqlmodel import select
 
 from app.models.file import BillingEventRecord, RagRunRecord, RagRunSourceRecord, UsageEventRecord
 
@@ -75,9 +75,19 @@ class SqlUsageSink:
             session.commit()
         return None
 
-    def write_rag_run(self, *, tenant_id: str, subject_type: str, subject_id: str, query: str, sources: list[dict[str, Any]]) -> None:
+    def write_rag_run(
+        self,
+        *,
+        tenant_id: str,
+        subject_type: str,
+        subject_id: str,
+        query: str,
+        sources: list[dict[str, Any]],
+    ) -> None:
         with self._session_factory() as session:
-            run = RagRunRecord(tenant_id=tenant_id, subject_type=subject_type, subject_id=subject_id, query=query)
+            run = RagRunRecord(
+                tenant_id=tenant_id, subject_type=subject_type, subject_id=subject_id, query=query
+            )
             session.add(run)
             session.commit()
             session.refresh(run)

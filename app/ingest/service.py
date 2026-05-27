@@ -10,7 +10,7 @@ import os
 import re
 from asyncio import QueueEmpty, QueueFull
 from dataclasses import dataclass
-from datetime import timedelta
+from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Any, Optional, Tuple, TYPE_CHECKING
 
@@ -40,6 +40,7 @@ from app.services import vectorstore
 try:  # pragma: no cover - optional dependency resolution
     from apscheduler.jobstores.base import JobLookupError as _ApsJobLookupError
 except ModuleNotFoundError:  # pragma: no cover - optional dependency fallback
+
     class _ApsJobLookupError(Exception):
         """Fallback exception when APScheduler is unavailable."""
 
@@ -71,8 +72,6 @@ def _load_scheduler_artifacts():
     return scheduler_cls, cron_cls, interval_cls
 
 
-
-
 def _extract_npa_fields(content: str, metadata: dict[str, Any] | None = None) -> dict[str, Any]:
     metadata = metadata or {}
     text = content or ""
@@ -86,14 +85,35 @@ def _extract_npa_fields(content: str, metadata: dict[str, Any] | None = None) ->
                 return m.group(1).strip()
         return None
 
-    act_type = _pick([r"(?:тип\s*акта|вид\s*нпа)\s*[:\-]\s*([^\n]+)", r"\b(федеральный закон|постановление|приказ|указ)\b"], "act_type")
+    act_type = _pick(
+        [
+            r"(?:тип\s*акта|вид\s*нпа)\s*[:\-]\s*([^\n]+)",
+            r"\b(федеральный закон|постановление|приказ|указ)\b",
+        ],
+        "act_type",
+    )
     issuer = _pick([r"(?:орган\s*принятия|издатель|issuer)\s*[:\-]\s*([^\n]+)"], "issuer")
-    reg_number = _pick([r"(?:№|номер|reg(?:istration)?\s*number)\s*[:\-]?\s*([A-Za-zА-Яа-я0-9\-\/]+)"], "reg_number")
-    adoption_date = _pick([r"(?:дата\s*принятия|adoption\s*date)\s*[:\-]\s*([0-9]{2}\.[0-9]{2}\.[0-9]{4})"], "adoption_date")
-    effective_date = _pick([r"(?:дата\s*вступления\s*в\s*силу|effective\s*date)\s*[:\-]\s*([0-9]{2}\.[0-9]{2}\.[0-9]{4})"], "effective_date")
+    reg_number = _pick(
+        [r"(?:№|номер|reg(?:istration)?\s*number)\s*[:\-]?\s*([A-Za-zА-Яа-я0-9\-\/]+)"],
+        "reg_number",
+    )
+    adoption_date = _pick(
+        [r"(?:дата\s*принятия|adoption\s*date)\s*[:\-]\s*([0-9]{2}\.[0-9]{2}\.[0-9]{4})"],
+        "adoption_date",
+    )
+    effective_date = _pick(
+        [
+            r"(?:дата\s*вступления\s*в\s*силу|effective\s*date)\s*[:\-]\s*([0-9]{2}\.[0-9]{2}\.[0-9]{4})"
+        ],
+        "effective_date",
+    )
     revision = _pick([r"(?:редакция|revision)\s*[:\-]\s*([^\n]+)"], "revision")
     is_active_raw = metadata.get("is_active")
-    is_active = True if is_active_raw is None else str(is_active_raw).strip().lower() in {"1","true","yes","да"}
+    is_active = (
+        True
+        if is_active_raw is None
+        else str(is_active_raw).strip().lower() in {"1", "true", "yes", "да"}
+    )
 
     return {
         "act_type": act_type,
@@ -104,6 +124,8 @@ def _extract_npa_fields(content: str, metadata: dict[str, Any] | None = None) ->
         "revision": revision,
         "is_active": is_active,
     }
+
+
 logger = logging.getLogger(__name__)
 
 
@@ -238,9 +260,7 @@ class IngestService:
         if backoff_seconds is not None:
             backoff = backoff_seconds
         else:
-            env_backoff = os.getenv("INGEST_BACKOFF_SECONDS") or os.getenv(
-                "INGEST_BACKOFF_BASE"
-            )
+            env_backoff = os.getenv("INGEST_BACKOFF_SECONDS") or os.getenv("INGEST_BACKOFF_BASE")
             if env_backoff is not None:
                 try:
                     backoff = float(env_backoff)
@@ -311,9 +331,7 @@ class IngestService:
         self._scheduler: AsyncIOScheduler | None = None
         self._worker_job_id: str | None = None
         self._maintenance_job_id: str | None = None
-        self.worker_interval_seconds = max(
-            0.1, float(settings.ingest_worker_interval_seconds)
-        )
+        self.worker_interval_seconds = max(0.1, float(settings.ingest_worker_interval_seconds))
         self.maintenance_cron = settings.ingest_maintenance_cron
         self.job_retention_days = max(1, int(settings.ingest_job_retention_days))
         self.processing_timeout_seconds = max(
@@ -516,7 +534,6 @@ class IngestService:
             if manage_session:
                 session_obj.close()
 
-
     def dequeue_next_job(self, session: Session | None = None) -> IngestJob | None:
         """Atomically reserve the next queued job from the database."""
 
@@ -664,8 +681,6 @@ class IngestService:
                         session_obj.rollback()
                 finally:
                     session_obj.close()
-
-
 
     async def enqueue_job(
         self, file_obj: FileRecord, *, attempt: int = 0, session: Session | None = None
@@ -885,9 +900,7 @@ class IngestWorker:
         with Session(self.service.engine) as session:
             file_obj = session.get(FileRecord, job.file_id)
             job_record = (
-                session.get(JobRecord, job.job_record_id)
-                if job.job_record_id is not None
-                else None
+                session.get(JobRecord, job.job_record_id) if job.job_record_id is not None else None
             )
             if not file_obj:
                 if job_record:
@@ -899,11 +912,7 @@ class IngestWorker:
                     session.commit()
                 return
             document_id = job.document_id or file_obj.document_id
-            document = (
-                session.get(DocumentRecord, document_id)
-                if document_id is not None
-                else None
-            )
+            document = session.get(DocumentRecord, document_id) if document_id is not None else None
             if file_obj.status == FileStatus.COMPLETED:
                 if job_record and job_record.status == JobStatus.QUEUED:
                     job_record.status = JobStatus.COMPLETED
@@ -966,9 +975,7 @@ class IngestWorker:
                     return
                 document_id = job.document_id or file_obj.document_id
                 document = (
-                    session.get(DocumentRecord, document_id)
-                    if document_id is not None
-                    else None
+                    session.get(DocumentRecord, document_id) if document_id is not None else None
                 )
                 if success:
                     file_obj.status = FileStatus.COMPLETED
@@ -1031,7 +1038,11 @@ class IngestWorker:
         chunk_payloads: list[dict[str, object]] = []
         full_text = "\n".join(text for _page, text in pages)
         with Session(self.service.engine) as session:
-            document = session.get(DocumentRecord, job.document_id) if job.document_id is not None else None
+            document = (
+                session.get(DocumentRecord, job.document_id)
+                if job.document_id is not None
+                else None
+            )
             attrs: dict[str, Any] = {}
             if document is not None:
                 attrs = _extract_npa_fields(full_text, metadata=document.meta or {})
@@ -1109,8 +1120,8 @@ class IngestWorker:
                             "page": page.number,
                             "chunk": offset,
                             "parser_backend": parse_result.parser_backend_used,
-                        "fallback_reason": parse_result.fallback_reason,
-                        "ocr_used": parse_result.ocr_used,
+                            "fallback_reason": parse_result.fallback_reason,
+                            "ocr_used": parse_result.ocr_used,
                             **attrs,
                         },
                     )
