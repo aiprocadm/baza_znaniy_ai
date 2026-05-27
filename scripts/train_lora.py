@@ -162,6 +162,9 @@ def _format_prompt(instruction: str, context: str) -> str:
     return PROMPT_TEMPLATE.format(instruction=instruction, input=context_block)
 
 
+from scripts._lora_artifacts import finalise_adapter_artifacts as _finalise_adapter_artifacts
+
+
 def _normalise_example(example: dict[str, Any]) -> tuple[str, str, str]:
     def pick(fields: tuple[str, ...]) -> str:
         for field in fields:
@@ -388,17 +391,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     adapter_dir.mkdir(parents=True, exist_ok=True)
     trainer.model.save_pretrained(adapter_dir)
 
-    adapter_file = adapter_dir / "adapter_model.safetensors"
+    _finalise_adapter_artifacts(adapter_dir)
     target_adapter = adapter_dir / "adapter.safetensors"
-    if adapter_file.exists():
-        adapter_file.replace(target_adapter)
-    else:
-        # Fallback to the first safetensors file created by `save_pretrained`.
-        candidates = sorted(adapter_dir.glob("*.safetensors"))
-        if candidates:
-            candidates[0].replace(target_adapter)
-        else:
-            raise FileNotFoundError(f"No safetensors adapter produced in {adapter_dir}.")
     tokenizer.save_pretrained(run_dir / "tokenizer")
 
     metrics = train_result.metrics
