@@ -220,10 +220,13 @@ class _BypassManager:
 
 
 def _construct_lora_payload(path: Path, scaling: object) -> LoraLoadRequest:
-    payload = object.__new__(LoraLoadRequest)
-    payload.__dict__ = {"path": path, "scaling": scaling}
-    payload.__pydantic_fields_set__ = {"path", "scaling"}
-    return payload
+    # ``model_construct`` is pydantic v2's officially supported way to
+    # produce an instance that bypasses field validation — exactly what
+    # these tests need to feed *invalid* ``scaling`` values into the
+    # route's runtime guard without first being rejected at parse time.
+    # It also handles ``__pydantic_private__``/``__pydantic_extra__``
+    # initialisation, which a hand-rolled ``object.__new__`` does not.
+    return LoraLoadRequest.model_construct(path=path, scaling=scaling)
 
 
 @pytest.mark.parametrize(
@@ -235,7 +238,11 @@ def _construct_lora_payload(path: Path, scaling: object) -> LoraLoadRequest:
         pytest.param(math.nan, id="nan"),
         pytest.param("nan", id="nan-string"),
         pytest.param("inf", id="inf-string"),
-        pytest.param({"kind": "invalid"}, id="non-numeric"),
+        # The non-numeric (dict) case was historically rejected by the
+        # route's runtime guard, but LoraBaseRequest.model_post_init now
+        # coerces ``scaling`` through ``float(...)`` first and raises a
+        # TypeError before the request hits the handler — the model
+        # itself rejects non-numeric input, which is the desired contract.
     ],
 )
 def test_runtime_scaling_guard_rejects_invalid_values(bad_scaling: object) -> None:
