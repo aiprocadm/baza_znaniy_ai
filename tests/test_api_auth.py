@@ -88,6 +88,7 @@ def auth_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Tes
         # a deliberate 429 in test_login_bruteforce_rate_limit into spurious
         # 429s on every subsequent login in the file.
         from app.api.v1 import auth as auth_module
+
         auth_module._LOGIN_ATTEMPTS.clear()
 
 
