@@ -543,46 +543,31 @@ class IngestService:
         try:
             now = utc_now()
             stale_before = now - timedelta(seconds=self.processing_timeout_seconds)
-            statement = text(
+            select_statement = text(
                 """
-                WITH next_job AS (
-                    SELECT id, status
-                    FROM jobs
-                    WHERE job_type = :job_type
-                      AND (
-                        status = :queued
-                        OR (
-                            status = :processing
-                            AND COALESCE(updated_at, started_at, created_at) <= :stale_before
-                        )
-                      )
-                    ORDER BY
-                        CASE WHEN status = :queued THEN 0 ELSE 1 END,
-                        priority DESC,
-                        created_at
-                    LIMIT 1
-                )
-                UPDATE jobs
-                SET status = :processing,
-                    started_at = COALESCE(started_at, :ts),
-                    updated_at = :ts
-                WHERE id IN (SELECT id FROM next_job)
-                RETURNING
-                    id,
-                    (
-                        SELECT status
-                        FROM next_job
-                        WHERE next_job.id = jobs.id
-                    ) AS previous_status
+                SELECT id, status
+                FROM jobs
+                WHERE job_type = :job_type
+                  AND (
+                    status = :queued
+                    OR (
+                        status = :processing
+                        AND COALESCE(updated_at, started_at, created_at) <= :stale_before
+                    )
+                  )
+                ORDER BY
+                    CASE WHEN status = :queued THEN 0 ELSE 1 END,
+                    priority DESC,
+                    created_at
+                LIMIT 1
                 """
             )
             row = session_obj.exec(
-                statement,
+                select_statement,
                 params={
                     "job_type": "ingest",
                     "queued": JobStatus.QUEUED,
                     "processing": JobStatus.PROCESSING,
-                    "ts": now,
                     "stale_before": stale_before,
                 },
             ).first()
@@ -594,7 +579,7 @@ class IngestService:
             mapping = getattr(row, "_mapping", None)
             if mapping is not None and "id" in mapping:
                 job_id = mapping["id"]
-                previous_status = mapping.get("previous_status")
+                previous_status = mapping.get("status")
             elif hasattr(row, "__getitem__"):
                 try:
                     job_id = int(row[0])  # type: ignore[index]
@@ -606,14 +591,39 @@ class IngestService:
                     previous_status = None
             else:
                 job_id = getattr(row, "id", None)
-                previous_status = getattr(row, "previous_status", None)
+                previous_status = getattr(row, "status", None)
 
-            if job_id is None:
+            if job_id is None or previous_status is None:
+                return None
+
+            # Optimistic-locking UPDATE: only claim the job if its status is
+            # still what we observed in the SELECT above. If a competing worker
+            # transitioned it first, rowcount == 0 and we yield this round.
+            claim_statement = text(
+                """
+                UPDATE jobs
+                SET status = :processing,
+                    started_at = COALESCE(started_at, :ts),
+                    updated_at = :ts
+                WHERE id = :id AND status = :previous_status
+                """
+            )
+            claim_result = session_obj.execute(
+                claim_statement,
+                {
+                    "processing": JobStatus.PROCESSING,
+                    "ts": now,
+                    "id": job_id,
+                    "previous_status": previous_status,
+                },
+            )
+            if getattr(claim_result, "rowcount", 0) == 0:
                 return None
 
             job_record = session_obj.get(JobRecord, job_id)
             if job_record is None:
                 return None
+            session_obj.refresh(job_record)
             recovered_stuck_job = previous_status == JobStatus.PROCESSING
             if recovered_stuck_job:
                 job_record.attempt = int(job_record.attempt or 0) + 1

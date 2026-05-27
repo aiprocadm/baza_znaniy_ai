@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-import sys
+import gc
 from pathlib import Path
 
-import pytest
 from sqlalchemy import text
 
 from app.models import file as file_module
@@ -37,10 +36,6 @@ def test_get_engine_logs_and_continues_when_metadata_has_no_create_all(tmp_path,
         file_module.get_engine.cache_clear()
 
 
-@pytest.mark.skipif(
-    sys.platform.startswith("win"),
-    reason="Windows-only file lock on pytest tmp_path teardown — SQLAlchemy still holds the SQLite file handle when pytest tries to rmtree() the temp dir, surfacing as PermissionError (WinError 32). Passes cleanly on Linux/CI.",
-)
 def test_get_engine_skips_schema_when_metadata_is_none(tmp_path, monkeypatch) -> None:
     """``get_engine`` should return an engine with sync API even without metadata."""
 
@@ -52,6 +47,7 @@ def test_get_engine_skips_schema_when_metadata_is_none(tmp_path, monkeypatch) ->
     db_path = Path(tmp_path) / "metadata-none.sqlite"
     monkeypatch.setenv("DB_URL", f"sqlite:///{db_path}")
 
+    engine = None
     try:
         engine = file_module.get_engine(create_schema=True)
 
@@ -73,6 +69,12 @@ def test_get_engine_skips_schema_when_metadata_is_none(tmp_path, monkeypatch) ->
             value = scalar() if callable(scalar) else execution
             assert value in {1, "SELECT 1"}
     finally:
+        if engine is not None:
+            engine.dispose()
+        engine = None
+        # On Windows the SQLite DLL holds the file handle until the
+        # connection object is collected — even after engine.dispose().
+        gc.collect()
         file_module.SQLModel.metadata = original_metadata
         file_module.get_engine.cache_clear()
         monkeypatch.delenv("DB_URL", raising=False)
