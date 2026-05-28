@@ -541,6 +541,91 @@ def test_api_embedder_constructs(monkeypatch: pytest.MonkeyPatch) -> None:
     assert embedder.api_key == "k"
 
 
+def test_hashing_fallback_warns_when_production_like(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """KB_API_KEY set + no real embedder = silent failure. Warn loudly."""
+
+    for name in ("KB_EMBEDDINGS_BACKEND", "OLLAMA_EMBED_MODEL", "EMBEDDINGS_API_BASE_URL"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("KB_API_KEY", "any-key")
+    kb_embeddings.reset_embedder()
+
+    with caplog.at_level("WARNING", logger="app.services.kb_embeddings"):
+        embedder = kb_embeddings.get_embedder()
+
+    assert isinstance(embedder, kb_embeddings.HashingEmbedder)
+    matching = [r for r in caplog.records if "hashing" in r.message.lower()]
+    assert (
+        matching
+    ), f"expected hashing-fallback warning, got: {[r.message for r in caplog.records]}"
+
+
+def test_hashing_default_silent_when_no_api_key(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Pure dev mode (no KB_API_KEY) — hashing is expected, no warning."""
+
+    for name in (
+        "KB_EMBEDDINGS_BACKEND",
+        "OLLAMA_EMBED_MODEL",
+        "EMBEDDINGS_API_BASE_URL",
+        "KB_API_KEY",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    kb_embeddings.reset_embedder()
+
+    with caplog.at_level("WARNING", logger="app.services.kb_embeddings"):
+        embedder = kb_embeddings.get_embedder()
+
+    assert isinstance(embedder, kb_embeddings.HashingEmbedder)
+    matching = [r for r in caplog.records if "hashing" in r.message.lower()]
+    assert not matching, f"unexpected warning in dev mode: {[r.message for r in caplog.records]}"
+
+
+def test_hashing_silent_when_explicitly_requested(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """User chose hash explicitly — respect that even in production-like setup."""
+
+    for name in ("OLLAMA_EMBED_MODEL", "EMBEDDINGS_API_BASE_URL"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("KB_API_KEY", "any-key")
+    monkeypatch.setenv("KB_EMBEDDINGS_BACKEND", "hash")
+    kb_embeddings.reset_embedder()
+
+    with caplog.at_level("WARNING", logger="app.services.kb_embeddings"):
+        embedder = kb_embeddings.get_embedder()
+
+    assert isinstance(embedder, kb_embeddings.HashingEmbedder)
+    matching = [r for r in caplog.records if "hashing" in r.message.lower()]
+    assert (
+        not matching
+    ), f"unexpected warning for explicit hash: {[r.message for r in caplog.records]}"
+
+
+def test_embedder_backend_metric_records_active_kind(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``kb_embedder_backend_active{kind=…}`` gauge reflects the selected backend."""
+
+    from prometheus_client import REGISTRY
+
+    for name in (
+        "KB_EMBEDDINGS_BACKEND",
+        "OLLAMA_EMBED_MODEL",
+        "EMBEDDINGS_API_BASE_URL",
+        "KB_API_KEY",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    kb_embeddings.reset_embedder()
+
+    kb_embeddings.get_embedder()
+
+    hash_value = REGISTRY.get_sample_value("kb_embedder_backend_active", labels={"kind": "hash"})
+    assert hash_value == 1.0
+
+
 # ----------------------------------------------------------------------
 # kb_rerank
 # ----------------------------------------------------------------------

@@ -137,6 +137,13 @@ LLM_TOKEN_USAGE_TOTAL = Counter(
     labelnames=("direction", "provider"),
 )
 
+EMBEDDER_BACKEND_ACTIVE = Gauge(
+    "kb_embedder_backend_active",
+    "Active embedding backend (1 for the chosen kind, 0 for others).",
+    labelnames=("kind",),
+)
+_EMBEDDER_BACKEND_KINDS: Final[Tuple[str, ...]] = ("hash", "ollama", "api")
+
 SQLMODEL_METADATA_HEALTH = Gauge(
     "kb_sqlmodel_metadata_health",
     "Health status of SQLModel metadata (1=healthy, 0=invalid).",
@@ -265,6 +272,20 @@ def record_ingestion_throughput(status: str, documents: int = 1) -> None:
 def record_token_usage(direction: str, provider: str, tokens: int) -> None:
     if tokens > 0:
         LLM_TOKEN_USAGE_TOTAL.labels(direction=direction, provider=provider).inc(tokens)
+
+
+def record_embedder_backend(kind: str) -> None:
+    """Mark *kind* as the active embedding backend; zero the others.
+
+    Keeps the gauge representing a single-active-of-N state — alerting
+    on ``kb_embedder_backend_active{kind="hash"} == 1`` only fires for
+    the currently selected backend, never stale series from a previous
+    resolution within the same process.
+    """
+
+    for known in _EMBEDDER_BACKEND_KINDS:
+        EMBEDDER_BACKEND_ACTIVE.labels(kind=known).set(0.0)
+    EMBEDDER_BACKEND_ACTIVE.labels(kind=kind).set(1.0)
 
 
 def record_sqlmodel_metadata_state(
