@@ -1,4 +1,27 @@
-"""Minimal data models for the qdrant client stub."""
+"""Minimal data models for the qdrant client stub.
+
+Shape notes (kept in sync with the real ``qdrant-client~=1.11`` package
+production code targets):
+
+* ``MatchValue(value=...)`` — exact-value match. ``value`` can be a
+  string, bool, or int. For multi-valued payload fields (e.g. ``tags``
+  stored as a list), the qdrant server interprets ``MatchValue`` as
+  *"the list contains this value"*; the stub's ``_match_condition``
+  helper mirrors that (see ``tests/stubs/qdrant_client/__init__.py``).
+* ``MatchText(text=...)`` — substring/full-text match (case-insensitive
+  in the stub).
+* ``PayloadSchemaType.BOOL`` — kept as the canonical name even though
+  real ``qdrant-client>=1.13`` renamed it to ``BOOLEAN``. Production
+  code (``app/retriever/qdrant.py:17-21``) resolves the symbol via
+  ``getattr`` so both names work; the stub stays on ``BOOL`` for
+  parity with the historical wire format.
+
+The alias-management dataclasses (``CreateAlias`` / ``CreateAliasOperation``
+/ ``DeleteAlias`` / ``DeleteAliasOperation``) are no-op wrappers — they
+only have to satisfy attribute access since the stub's ``QdrantClient``
+does not implement ``update_collection_aliases``. They are kept for
+production-code-import parity (see ``app/retriever/qdrant.py:386-414``).
+"""
 
 from __future__ import annotations
 
@@ -77,6 +100,35 @@ class Filter:
     must_not: Any = None
 
 
+@dataclass
+class CreateAlias:
+    """Mirror of qdrant ``models.CreateAlias`` — alias→collection binding."""
+
+    collection_name: str
+    alias_name: str
+
+
+@dataclass
+class CreateAliasOperation:
+    """Mirror of qdrant ``models.CreateAliasOperation`` — alias-create op envelope."""
+
+    create_alias: CreateAlias
+
+
+@dataclass
+class DeleteAlias:
+    """Mirror of qdrant ``models.DeleteAlias`` — alias removal."""
+
+    alias_name: str
+
+
+@dataclass
+class DeleteAliasOperation:
+    """Mirror of qdrant ``models.DeleteAliasOperation`` — alias-delete op envelope."""
+
+    delete_alias: DeleteAlias
+
+
 __all__ = [
     "Distance",
     "VectorParams",
@@ -88,4 +140,8 @@ __all__ = [
     "MatchText",
     "FieldCondition",
     "Filter",
+    "CreateAlias",
+    "CreateAliasOperation",
+    "DeleteAlias",
+    "DeleteAliasOperation",
 ]

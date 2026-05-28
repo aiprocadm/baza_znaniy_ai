@@ -3,16 +3,10 @@
 from __future__ import annotations
 
 import sys
-
-_BACKEND_REFACTOR_SKIP = (
-    "Backend retrieval contract drifted: faiss now requires SearchFilters "
-    "with tenant_id and qdrant's filter Pydantic model swapped MatchValue/"
-    "MatchText. Production search works against both; tests need a rewrite "
-    "against the current SearchFilters/qmodels.* shape."
-)
 import types
 from dataclasses import dataclass
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Iterable, Sequence
 
 import numpy as np
@@ -112,7 +106,10 @@ class _StubRecord:
 
 class _StubClient:
     def __init__(self, *_: object, **__: object) -> None:
-        self.collections: dict[str, dict[str, object]] = {}
+        # info objects are SimpleNamespace so production's `info.config.params.vectors.size`
+        # attribute chain (see app/retriever/qdrant.py:154) resolves on the second
+        # ensure_ready call (search-after-upsert).
+        self.collections: dict[str, SimpleNamespace] = {}
         self.upserts: list[list[dict[str, object]]] = []
         self.search_queries: list[dict[str, object]] = []
 
@@ -122,19 +119,10 @@ class _StubClient:
         return self.collections[name]
 
     def recreate_collection(self, **kwargs: object) -> None:
-        self.collections[kwargs["collection_name"]] = {
-            "config": type(
-                "cfg",
-                (),
-                {
-                    "params": type(
-                        "params",
-                        (),
-                        {"vectors": type("vec", (), {"size": kwargs["vectors_config"].size})()},
-                    )()
-                },
-            )()
-        }
+        size = kwargs["vectors_config"].size
+        self.collections[kwargs["collection_name"]] = SimpleNamespace(
+            config=SimpleNamespace(params=SimpleNamespace(vectors=SimpleNamespace(size=size)))
+        )
 
     def create_payload_index(self, **_: object) -> None:
         pass
@@ -203,12 +191,11 @@ def test_get_vector_store_selects_backend(tmp_path: Path, monkeypatch: pytest.Mo
     vs.get_vector_store.cache_clear()
 
 
-@pytest.mark.skip(reason=_BACKEND_REFACTOR_SKIP)
 def test_qdrant_upsert_batches_embeddings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # embed_batch_size=2 is set via _make_settings; QdrantVectorStore reads it on upsert.
     settings = _make_settings(tmp_path, backend="qdrant")
 
     embedder = _StubEmbedder("stub")
-    settings.embed_batch_size = 2
 
     # Provide lightweight stand-ins for qdrant models
     class _PointStruct:
@@ -312,7 +299,6 @@ def test_qdrant_initialises_embedded_client_when_url_missing(tmp_path: Path) -> 
     assert settings.qdrant_path_resolved.exists()
 
 
-@pytest.mark.skip(reason=_BACKEND_REFACTOR_SKIP)
 def test_faiss_search_returns_payload(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     settings = _make_settings(tmp_path, backend="faiss")
 
@@ -324,9 +310,11 @@ def test_faiss_search_returns_payload(tmp_path: Path, monkeypatch: pytest.Monkey
             return base * factors
 
     store = FaissVectorStore(settings=settings, embedder_factory=_Embedder)
+    # FAISS post-filters by tenant_id (faiss.py:247-251); chunks must carry it
+    # (or owner, which upsert falls back to) for hits to survive filtering.
     chunks: Iterable[dict[str, object]] = [
-        {"sha256": "a", "text": "alpha"},
-        {"sha256": "b", "text": "beta"},
+        {"sha256": "a", "text": "alpha", "tenant_id": "test-tenant"},
+        {"sha256": "b", "text": "beta", "tenant_id": "test-tenant"},
     ]
 
     store.upsert(chunks)
@@ -339,9 +327,9 @@ def test_faiss_search_returns_payload(tmp_path: Path, monkeypatch: pytest.Monkey
     assert hits
     assert hits[0]["sha256"] in {"a", "b"}
     assert "score" in hits[0]
+    assert hits[0]["tenant_id"] == "test-tenant"
 
 
-@pytest.mark.skip(reason=_BACKEND_REFACTOR_SKIP)
 def test_qdrant_search_builds_filter_parity(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -404,10 +392,21 @@ def test_qdrant_search_builds_filter_parity(
         "is_active",
         "is_active",
     ]
-    assert isinstance(sent_filter.must[4].match, _MatchText)
+    # act_type (index 4) is exact-match; issuer (index 5) is full-text/substring.
+    assert isinstance(sent_filter.must[4].match, _MatchValue)
+    assert isinstance(sent_filter.must[5].match, _MatchText)
+    # is_active=False must serialise as a MatchValue with literal False, not None
+    # (the `is not None` branch in _to_qdrant_filter).
+    assert isinstance(sent_filter.must[7].match, _MatchValue)
+    assert sent_filter.must[7].match.value is False
+    # revision_mode="historical" appends a second is_active=False condition.
+    assert sent_filter.must[8].match.value is False
+    # tenant_id and tags carry MatchValue, not MatchText (exact-match semantics).
+    assert isinstance(sent_filter.must[0].match, _MatchValue)
+    assert sent_filter.must[0].match.value == "tenant-a"
+    assert {sent_filter.must[2].match.value, sent_filter.must[3].match.value} == {"a", "b"}
 
 
-@pytest.mark.skip(reason=_BACKEND_REFACTOR_SKIP)
 def test_qdrant_and_faiss_apply_same_filters(tmp_path: Path) -> None:
     chunks = [
         {
