@@ -13,6 +13,7 @@ _BACKEND_REFACTOR_SKIP = (
 import types
 from dataclasses import dataclass
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Iterable, Sequence
 
 import numpy as np
@@ -112,7 +113,10 @@ class _StubRecord:
 
 class _StubClient:
     def __init__(self, *_: object, **__: object) -> None:
-        self.collections: dict[str, dict[str, object]] = {}
+        # info objects are SimpleNamespace so production's `info.config.params.vectors.size`
+        # attribute chain (see app/retriever/qdrant.py:154) resolves on the second
+        # ensure_ready call (search-after-upsert).
+        self.collections: dict[str, SimpleNamespace] = {}
         self.upserts: list[list[dict[str, object]]] = []
         self.search_queries: list[dict[str, object]] = []
 
@@ -122,19 +126,12 @@ class _StubClient:
         return self.collections[name]
 
     def recreate_collection(self, **kwargs: object) -> None:
-        self.collections[kwargs["collection_name"]] = {
-            "config": type(
-                "cfg",
-                (),
-                {
-                    "params": type(
-                        "params",
-                        (),
-                        {"vectors": type("vec", (), {"size": kwargs["vectors_config"].size})()},
-                    )()
-                },
-            )()
-        }
+        size = kwargs["vectors_config"].size
+        self.collections[kwargs["collection_name"]] = SimpleNamespace(
+            config=SimpleNamespace(
+                params=SimpleNamespace(vectors=SimpleNamespace(size=size))
+            )
+        )
 
     def create_payload_index(self, **_: object) -> None:
         pass
@@ -419,7 +416,6 @@ def test_qdrant_search_builds_filter_parity(
     assert {sent_filter.must[2].match.value, sent_filter.must[3].match.value} == {"a", "b"}
 
 
-@pytest.mark.skip(reason=_BACKEND_REFACTOR_SKIP)
 def test_qdrant_and_faiss_apply_same_filters(tmp_path: Path) -> None:
     chunks = [
         {
