@@ -342,7 +342,6 @@ def test_faiss_search_returns_payload(tmp_path: Path, monkeypatch: pytest.Monkey
     assert hits[0]["tenant_id"] == "test-tenant"
 
 
-@pytest.mark.skip(reason=_BACKEND_REFACTOR_SKIP)
 def test_qdrant_search_builds_filter_parity(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -405,7 +404,19 @@ def test_qdrant_search_builds_filter_parity(
         "is_active",
         "is_active",
     ]
-    assert isinstance(sent_filter.must[4].match, _MatchText)
+    # act_type (index 4) is exact-match; issuer (index 5) is full-text/substring.
+    assert isinstance(sent_filter.must[4].match, _MatchValue)
+    assert isinstance(sent_filter.must[5].match, _MatchText)
+    # is_active=False must serialise as a MatchValue with literal False, not None
+    # (the `is not None` branch in _to_qdrant_filter).
+    assert isinstance(sent_filter.must[7].match, _MatchValue)
+    assert sent_filter.must[7].match.value is False
+    # revision_mode="historical" appends a second is_active=False condition.
+    assert sent_filter.must[8].match.value is False
+    # tenant_id and tags carry MatchValue, not MatchText (exact-match semantics).
+    assert isinstance(sent_filter.must[0].match, _MatchValue)
+    assert sent_filter.must[0].match.value == "tenant-a"
+    assert {sent_filter.must[2].match.value, sent_filter.must[3].match.value} == {"a", "b"}
 
 
 @pytest.mark.skip(reason=_BACKEND_REFACTOR_SKIP)
