@@ -152,3 +152,35 @@ def test_irrelevant_refusal_is_localised() -> None:
     from app.services.rag_dataset import IRRELEVANT_REFUSAL
 
     assert "документ" in IRRELEVANT_REFUSAL.lower()
+
+
+def test_build_partial_sample_mixes_seed_with_distractors() -> None:
+    from app.services.rag_dataset import (
+        PARTIAL_PREFIX,
+        RAGVariant,
+        build_partial_sample,
+    )
+
+    seed = QAPair(
+        instruction="Что такое отпуск?",
+        input="",
+        output="Это перерыв. [doc_chunk:7]",
+        source_chunk_id=7,
+    )
+    seed_hit = _FakeHit(chunk_index=7, text="Отпуск — это перерыв в работе.")
+    distractors = [
+        _FakeHit(chunk_index=200, text="Калибровка манометра — раз в год."),
+        _FakeHit(chunk_index=201, text="Поверка средств измерения."),
+    ]
+
+    sample = build_partial_sample(
+        seed,
+        seed_hit=seed_hit,
+        distractor_chunks=distractors,
+    )
+
+    assert sample.variant is RAGVariant.PARTIAL
+    assert sample.output.startswith(PARTIAL_PREFIX)
+    assert "[doc_chunk:7]" in sample.output
+    assert sample.retrieved_chunk_ids[0] == 7
+    assert 200 in sample.retrieved_chunk_ids

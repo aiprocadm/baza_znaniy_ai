@@ -202,3 +202,32 @@ def build_irrelevant_sample(
         source_chunk_id=seed.source_chunk_id,
         retrieved_chunk_ids=_chunk_ids(negative_chunks),
     )
+
+
+PARTIAL_PREFIX = "По доступным фрагментам: "
+
+
+def build_partial_sample(
+    seed: QAPair,
+    *,
+    seed_hit: object,
+    distractor_chunks: Sequence[object],
+) -> RAGSample:
+    """Mix the seed chunk with distractors and hedge the answer.
+
+    The hedged output keeps the seed citation intact so the model
+    still learns the citation format; the prefix teaches caution when
+    only part of the context is on-topic.
+    """
+
+    mixed = [seed_hit, *distractor_chunks]
+    hedged_output = PARTIAL_PREFIX + seed.output
+    return RAGSample(
+        instruction=seed.instruction,
+        input=seed.input,
+        output=hedged_output,
+        retrieved_context=_join_chunks(mixed),
+        variant=RAGVariant.PARTIAL,
+        source_chunk_id=seed.source_chunk_id,
+        retrieved_chunk_ids=_chunk_ids(mixed),
+    )
