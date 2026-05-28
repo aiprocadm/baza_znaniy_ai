@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Iterable, List
+from typing import Iterable, Iterator, List
 
 import pytest
 
@@ -66,7 +66,7 @@ class ExplodingVectorStore:
 
 
 @pytest.fixture(autouse=True)
-def clear_fallback_between_tests() -> None:
+def clear_fallback_between_tests() -> Iterator[None]:
     """Ensure a clean fallback index for each test."""
 
     storage: list[dict[str, object]] = []
