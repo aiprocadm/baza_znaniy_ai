@@ -14,9 +14,11 @@ from __future__ import annotations
 import json
 import logging
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
-from typing import Callable, Mapping, Sequence
+from typing import Callable, Iterable, Iterator, Mapping, Sequence
+
+from app.services.synthetic_qa import QAPair
 
 LOGGER = logging.getLogger(__name__)
 
@@ -126,8 +128,6 @@ def apportion_counts(
         counts[remainders[i][0]] += 1
     return counts
 
-
-from app.services.synthetic_qa import QAPair
 
 # Retriever callbacks receive (query, top_k) and return any sequence
 # of objects exposing ``.chunk_index`` (int) and ``.text`` (str). That
@@ -253,3 +253,69 @@ def build_empty_sample(seed: QAPair) -> RAGSample:
         source_chunk_id=seed.source_chunk_id,
         retrieved_chunk_ids=(),
     )
+
+
+@dataclass(slots=True)
+class RAGSampleBuilder:
+    """Orchestrate variant assembly across an iterable of seed Q&A pairs.
+
+    The builder is the only place that knows about proportions; the
+    per-variant ``build_*`` helpers stay independent and reusable.
+    """
+
+    retriever: Retriever
+    negative_pool: Sequence[object]
+    distractor_pool: Sequence[object]
+    proportions: ProportionSpec = field(default_factory=default_proportions)
+    top_k: int = 3
+
+    def build(
+        self,
+        seeds: Iterable[QAPair],
+        *,
+        total: int,
+    ) -> Iterator[RAGSample]:
+        counts = apportion_counts(self.proportions, total=total)
+        emitted: dict[RAGVariant, int] = {v: 0 for v in RAGVariant}
+
+        order = (
+            RAGVariant.RELEVANT,
+            RAGVariant.IRRELEVANT,
+            RAGVariant.PARTIAL,
+            RAGVariant.EMPTY,
+        )
+
+        for seed in seeds:
+            if sum(emitted.values()) >= total:
+                return
+            for variant in order:
+                if emitted[variant] >= counts[variant]:
+                    continue
+                sample = self._build_one(seed, variant)
+                if sample is None:
+                    continue
+                emitted[variant] += 1
+                yield sample
+                break
+
+    def _build_one(self, seed: QAPair, variant: RAGVariant) -> RAGSample | None:
+        if variant is RAGVariant.RELEVANT:
+            return build_relevant_sample(seed, retriever=self.retriever, top_k=self.top_k)
+        if variant is RAGVariant.IRRELEVANT:
+            return build_irrelevant_sample(seed, negative_chunks=self.negative_pool)
+        if variant is RAGVariant.PARTIAL:
+            hits = list(self.retriever(seed.instruction, self.top_k))
+            seed_hit = next(
+                (h for h in hits if int(getattr(h, "chunk_index")) == seed.source_chunk_id),
+                None,
+            )
+            if seed_hit is None:
+                return None
+            return build_partial_sample(
+                seed,
+                seed_hit=seed_hit,
+                distractor_chunks=self.distractor_pool,
+            )
+        if variant is RAGVariant.EMPTY:
+            return build_empty_sample(seed)
+        return None

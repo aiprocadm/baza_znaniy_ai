@@ -202,3 +202,78 @@ def test_build_empty_sample_strips_citation_and_context() -> None:
     assert sample.retrieved_chunk_ids == ()
     assert sample.output == "Понедельник."
     assert "[doc_chunk:" not in sample.output
+
+
+def test_rag_sample_builder_respects_proportions() -> None:
+    from collections import Counter
+
+    from app.services.rag_dataset import RAGSampleBuilder, default_proportions
+
+    seeds = [
+        QAPair(
+            instruction=f"Вопрос {i}?",
+            input="",
+            output=f"Ответ. [doc_chunk:{i}]",
+            source_chunk_id=i,
+        )
+        for i in range(1, 21)
+    ]
+    seed_hits = {i: _FakeHit(chunk_index=i, text=f"Текст {i}") for i in range(1, 21)}
+
+    def retriever(query: str, top_k: int):
+        i = int(query.split()[1].rstrip("?"))
+        return [seed_hits[i]]
+
+    negatives = [_FakeHit(chunk_index=900 + j, text=f"Шум {j}") for j in range(5)]
+    distractors = [_FakeHit(chunk_index=800 + j, text=f"Помеха {j}") for j in range(5)]
+
+    builder = RAGSampleBuilder(
+        retriever=retriever,
+        negative_pool=negatives,
+        distractor_pool=distractors,
+        proportions=default_proportions(),
+    )
+
+    samples = list(builder.build(seeds, total=20))
+    assert len(samples) == 20
+    counts = Counter(s.variant.value for s in samples)
+    assert counts["relevant"] == 14  # 70% of 20
+    assert counts["irrelevant"] == 3  # 15% of 20
+    assert counts["partial"] == 2  # 10% of 20
+    assert counts["empty"] == 1  # 5% of 20
+
+
+def test_rag_sample_builder_skips_relevant_when_source_missing() -> None:
+    """If the retriever can't find the seed chunk, that slot is re-allocated."""
+    from app.services.rag_dataset import RAGSampleBuilder, default_proportions
+
+    seeds = [
+        QAPair(
+            instruction="Q1?",
+            input="",
+            output="A. [doc_chunk:1]",
+            source_chunk_id=1,
+        ),
+        QAPair(
+            instruction="Q2?",
+            input="",
+            output="A. [doc_chunk:2]",
+            source_chunk_id=2,
+        ),
+    ]
+
+    def retriever(query: str, top_k: int):
+        return []  # always empty — every RELEVANT slot should be dropped
+
+    builder = RAGSampleBuilder(
+        retriever=retriever,
+        negative_pool=[_FakeHit(chunk_index=900, text="нет")],
+        distractor_pool=[_FakeHit(chunk_index=800, text="нет")],
+        proportions=default_proportions(),
+    )
+
+    # We asked for 2 — both would have been RELEVANT but retrieval failed;
+    # the builder is allowed to return fewer than requested.
+    samples = list(builder.build(seeds, total=2))
+    for s in samples:
+        assert s.variant.value != "relevant"
