@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from dataclasses import dataclass
 from enum import Enum
 from typing import Callable, Mapping, Sequence
@@ -230,4 +231,25 @@ def build_partial_sample(
         variant=RAGVariant.PARTIAL,
         source_chunk_id=seed.source_chunk_id,
         retrieved_chunk_ids=_chunk_ids(mixed),
+    )
+
+
+_CITATION_RE = re.compile(r"\s*\[doc_chunk:\d+\]\s*")
+
+
+def _strip_citations(text: str) -> str:
+    return _CITATION_RE.sub(" ", text).strip()
+
+
+def build_empty_sample(seed: QAPair) -> RAGSample:
+    """Drop retrieved context and citation suffix from a seed Q&A."""
+
+    return RAGSample(
+        instruction=seed.instruction,
+        input=seed.input,
+        output=_strip_citations(seed.output),
+        retrieved_context="",
+        variant=RAGVariant.EMPTY,
+        source_chunk_id=seed.source_chunk_id,
+        retrieved_chunk_ids=(),
     )

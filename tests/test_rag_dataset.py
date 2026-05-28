@@ -184,3 +184,21 @@ def test_build_partial_sample_mixes_seed_with_distractors() -> None:
     assert "[doc_chunk:7]" in sample.output
     assert sample.retrieved_chunk_ids[0] == 7
     assert 200 in sample.retrieved_chunk_ids
+
+
+def test_build_empty_sample_strips_citation_and_context() -> None:
+    from app.services.rag_dataset import RAGVariant, build_empty_sample
+
+    seed = QAPair(
+        instruction="Какой сегодня день недели по тексту?",
+        input="",
+        output="Понедельник. [doc_chunk:42]",
+        source_chunk_id=42,
+    )
+    sample = build_empty_sample(seed)
+
+    assert sample.variant is RAGVariant.EMPTY
+    assert sample.retrieved_context == ""
+    assert sample.retrieved_chunk_ids == ()
+    assert sample.output == "Понедельник."
+    assert "[doc_chunk:" not in sample.output
