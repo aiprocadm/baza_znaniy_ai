@@ -115,3 +115,40 @@ def test_build_relevant_drops_when_source_chunk_missing() -> None:
     )
 
     assert build_relevant_sample(seed, retriever=retriever, top_k=3) is None
+
+
+def test_build_irrelevant_sample_uses_negative_chunks_and_refusal() -> None:
+    from app.services.rag_dataset import (
+        IRRELEVANT_REFUSAL,
+        RAGVariant,
+        build_irrelevant_sample,
+    )
+
+    seed = QAPair(
+        instruction="Что такое отпуск?",
+        input="",
+        output="Это перерыв. [doc_chunk:7]",
+        source_chunk_id=7,
+    )
+    negative_chunks = [
+        _FakeHit(chunk_index=200, text="Калибровка манометра — раз в год."),
+        _FakeHit(chunk_index=201, text="Поверка средств измерения."),
+    ]
+
+    sample = build_irrelevant_sample(
+        seed,
+        negative_chunks=negative_chunks,
+    )
+
+    assert sample.variant is RAGVariant.IRRELEVANT
+    assert sample.output == IRRELEVANT_REFUSAL
+    assert sample.retrieved_chunk_ids == (200, 201)
+    assert "Калибровка" in sample.retrieved_context
+    assert sample.source_chunk_id == seed.source_chunk_id
+
+
+def test_irrelevant_refusal_is_localised() -> None:
+    """The refusal string mentions documents (not generic AI talk)."""
+    from app.services.rag_dataset import IRRELEVANT_REFUSAL
+
+    assert "документ" in IRRELEVANT_REFUSAL.lower()

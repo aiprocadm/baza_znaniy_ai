@@ -177,3 +177,28 @@ def build_relevant_sample(
         source_chunk_id=seed.source_chunk_id,
         retrieved_chunk_ids=ids,
     )
+
+
+IRRELEVANT_REFUSAL = "Не удалось найти в документах информацию для ответа."
+
+
+def build_irrelevant_sample(
+    seed: QAPair,
+    *,
+    negative_chunks: Sequence[object],
+) -> RAGSample:
+    """Pair the seed question with unrelated context and a refusal answer.
+
+    Caller is responsible for picking truly unrelated ``negative_chunks``
+    (e.g. from a different document). The W3 spec target share is 15 %.
+    """
+
+    return RAGSample(
+        instruction=seed.instruction,
+        input=seed.input,
+        output=IRRELEVANT_REFUSAL,
+        retrieved_context=_join_chunks(negative_chunks),
+        variant=RAGVariant.IRRELEVANT,
+        source_chunk_id=seed.source_chunk_id,
+        retrieved_chunk_ids=_chunk_ids(negative_chunks),
+    )
