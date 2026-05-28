@@ -7,7 +7,7 @@ import types
 from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Iterable, Sequence
+from typing import Any, Iterable, Sequence, cast
 
 import numpy as np
 import pytest
@@ -145,10 +145,16 @@ class _StubEmbedder:
     def get_sentence_embedding_dimension(self) -> int:
         return 3
 
-    def encode(self, texts: Sequence[str], convert_to_numpy: bool = True) -> np.ndarray:
+    def encode(
+        self,
+        texts: Sequence[str] | Iterable[str],
+        *,
+        convert_to_numpy: bool = True,
+    ) -> np.ndarray:
         assert convert_to_numpy is True
-        self.calls.append(tuple(texts))
-        return np.ones((len(texts), 3), dtype=np.float32)
+        materialised = tuple(texts)
+        self.calls.append(materialised)
+        return np.ones((len(materialised), 3), dtype=np.float32)
 
 
 def _make_settings(tmp_path: Path, backend: str, **overrides: object) -> Settings:
@@ -303,10 +309,16 @@ def test_faiss_search_returns_payload(tmp_path: Path, monkeypatch: pytest.Monkey
     settings = _make_settings(tmp_path, backend="faiss")
 
     class _Embedder(_StubEmbedder):
-        def encode(self, texts: Sequence[str], convert_to_numpy: bool = True) -> np.ndarray:
-            base = super().encode(texts, convert_to_numpy)
+        def encode(
+            self,
+            texts: Sequence[str] | Iterable[str],
+            *,
+            convert_to_numpy: bool = True,
+        ) -> np.ndarray:
+            materialised = tuple(texts)
+            base = super().encode(materialised, convert_to_numpy=convert_to_numpy)
             # Produce slightly different vectors for deterministic ordering
-            factors = np.arange(1, len(texts) + 1, dtype=np.float32).reshape(-1, 1)
+            factors = np.arange(1, len(materialised) + 1, dtype=np.float32).reshape(-1, 1)
             return base * factors
 
     store = FaissVectorStore(settings=settings, embedder_factory=_Embedder)
@@ -379,7 +391,7 @@ def test_qdrant_search_builds_filter_parity(
         ),
     )
 
-    sent_filter = client.search_queries[-1]["query_filter"]
+    sent_filter = cast(Any, client.search_queries[-1]["query_filter"])
     keys = [condition.key for condition in sent_filter.must]
     assert keys == [
         "tenant_id",
@@ -479,7 +491,7 @@ def test_qdrant_and_faiss_apply_same_filters(tmp_path: Path) -> None:
     qstore.upsert(chunks)
     qstore.search("alpha", top_k=5, filters=filters)
 
-    qfilter = client.search_queries[-1]["query_filter"]
+    qfilter = cast(Any, client.search_queries[-1]["query_filter"])
     must_keys = [c.key for c in qfilter.must]
     assert "tenant_id" in must_keys and "tags" in must_keys and "reg_number" in must_keys
     assert [h["sha256"] for h in fhits] == ["1"]
