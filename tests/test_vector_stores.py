@@ -3,13 +3,6 @@
 from __future__ import annotations
 
 import sys
-
-_BACKEND_REFACTOR_SKIP = (
-    "Backend retrieval contract drifted: faiss now requires SearchFilters "
-    "with tenant_id and qdrant's filter Pydantic model swapped MatchValue/"
-    "MatchText. Production search works against both; tests need a rewrite "
-    "against the current SearchFilters/qmodels.* shape."
-)
 import types
 from dataclasses import dataclass
 from pathlib import Path
@@ -128,9 +121,7 @@ class _StubClient:
     def recreate_collection(self, **kwargs: object) -> None:
         size = kwargs["vectors_config"].size
         self.collections[kwargs["collection_name"]] = SimpleNamespace(
-            config=SimpleNamespace(
-                params=SimpleNamespace(vectors=SimpleNamespace(size=size))
-            )
+            config=SimpleNamespace(params=SimpleNamespace(vectors=SimpleNamespace(size=size)))
         )
 
     def create_payload_index(self, **_: object) -> None:
