@@ -123,14 +123,7 @@ def _search_fallback(
     query: str,
     top_k: int,
     *,
-    owner: str | None = None,
-    tags: list[str] | None = None,
-    act_type: str | None = None,
-    issuer: str | None = None,
-    reg_number: str | None = None,
-    is_active: bool | None = None,
-    revision_mode: str = "current",
-    tenant_id: str | None = None,
+    filters: SearchFilters,
 ) -> List[dict[str, object]]:
     """Very small substring-based search over the fallback index."""
 
@@ -141,16 +134,6 @@ def _search_fallback(
     with _FALLBACK_LOCK:
         snapshot = list(get_fallback_storage())
 
-    filters = SearchFilters.from_input(
-        tenant_id=tenant_id or "",
-        owner=owner,
-        tags=tags,
-        act_type=act_type,
-        issuer=issuer,
-        reg_number=reg_number,
-        is_active=is_active,
-        revision_mode=revision_mode,
-    )
     normalized_tags = {tag.lower() for tag in filters.tags}
     normalized_tenant = filters.tenant_id.lower()
     normalized_owner = (filters.owner or "").lower()
@@ -249,18 +232,7 @@ def search(
         record_search_operation("vector", "error", duration, 0)
         LOGGER.exception("Falling back to in-memory search", exc_info=exc)
         fallback_start = time.perf_counter()
-        fallback_hits = _search_fallback(
-            query,
-            top_k,
-            owner=filters.owner,
-            tags=list(filters.tags),
-            act_type=filters.act_type,
-            issuer=filters.issuer,
-            reg_number=filters.reg_number,
-            is_active=filters.is_active,
-            revision_mode=filters.revision_mode,
-            tenant_id=filters.tenant_id,
-        )
+        fallback_hits = _search_fallback(query, top_k, filters=filters)
         record_search_operation(
             "fallback",
             "success",
