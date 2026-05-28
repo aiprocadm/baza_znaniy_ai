@@ -311,7 +311,6 @@ def test_qdrant_initialises_embedded_client_when_url_missing(tmp_path: Path) -> 
     assert settings.qdrant_path_resolved.exists()
 
 
-@pytest.mark.skip(reason=_BACKEND_REFACTOR_SKIP)
 def test_faiss_search_returns_payload(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     settings = _make_settings(tmp_path, backend="faiss")
 
@@ -323,9 +322,11 @@ def test_faiss_search_returns_payload(tmp_path: Path, monkeypatch: pytest.Monkey
             return base * factors
 
     store = FaissVectorStore(settings=settings, embedder_factory=_Embedder)
+    # FAISS post-filters by tenant_id (faiss.py:247-251); chunks must carry it
+    # (or owner, which upsert falls back to) for hits to survive filtering.
     chunks: Iterable[dict[str, object]] = [
-        {"sha256": "a", "text": "alpha"},
-        {"sha256": "b", "text": "beta"},
+        {"sha256": "a", "text": "alpha", "tenant_id": "test-tenant"},
+        {"sha256": "b", "text": "beta", "tenant_id": "test-tenant"},
     ]
 
     store.upsert(chunks)
@@ -338,6 +339,7 @@ def test_faiss_search_returns_payload(tmp_path: Path, monkeypatch: pytest.Monkey
     assert hits
     assert hits[0]["sha256"] in {"a", "b"}
     assert "score" in hits[0]
+    assert hits[0]["tenant_id"] == "test-tenant"
 
 
 @pytest.mark.skip(reason=_BACKEND_REFACTOR_SKIP)
