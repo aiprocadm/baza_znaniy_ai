@@ -18,6 +18,7 @@ try:  # pragma: no cover
 except Exception:  # pragma: no cover
     httpx = None  # type: ignore[assignment]
 
+from app.observability.metrics import record_embedder_backend
 from app.services._envutil import env as _env
 from app.services.kb_store import EMBEDDING_DIM, embed as hashing_embed
 
@@ -181,12 +182,14 @@ def _build_from_env(env: Mapping[str, str] | None = None) -> Embedder:
 
     if explicit == "ollama" or (not explicit and ollama_model and httpx is not None):
         if ollama_model:
+            record_embedder_backend("ollama")
             return OllamaEmbedder(base_url=ollama_base, model=ollama_model)
         if explicit == "ollama":
             LOGGER.warning("Ollama backend requested but OLLAMA_EMBED_MODEL missing")
 
     if explicit == "api" or (not explicit and api_base and httpx is not None):
         if api_base:
+            record_embedder_backend("api")
             return OpenAICompatibleEmbedder(
                 api_base=api_base,
                 model=api_model,
@@ -196,6 +199,19 @@ def _build_from_env(env: Mapping[str, str] | None = None) -> Embedder:
         if explicit == "api":
             LOGGER.warning("API backend requested but EMBEDDINGS_API_BASE_URL missing")
 
+    # Implicit hashing fallback in a production-like config (KB_API_KEY set)
+    # is almost always an unintended silent failure: semantic search returns
+    # near-random results while the LLM still answers confidently. Surface it.
+    if not explicit and _env("KB_API_KEY", env):
+        LOGGER.warning(
+            "Falling back to hashing embedder while KB_API_KEY is set — "
+            "semantic search will return near-random results. Set "
+            "KB_EMBEDDINGS_BACKEND=ollama (+ OLLAMA_EMBED_MODEL) or "
+            "KB_EMBEDDINGS_BACKEND=api (+ EMBEDDINGS_API_BASE_URL) for "
+            "real embeddings; set KB_EMBEDDINGS_BACKEND=hash to silence this."
+        )
+
+    record_embedder_backend("hash")
     return HashingEmbedder()
 
 

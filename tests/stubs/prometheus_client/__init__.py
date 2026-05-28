@@ -9,6 +9,7 @@ __all__ = [
     "Gauge",
     "Histogram",
     "CONTENT_TYPE_LATEST",
+    "REGISTRY",
     "generate_latest",
 ]
 
@@ -52,6 +53,7 @@ class CollectorRegistry:
 
 
 _DEFAULT_REGISTRY = CollectorRegistry()
+REGISTRY = _DEFAULT_REGISTRY
 
 
 def generate_latest(registry: CollectorRegistry | None = None) -> bytes:
