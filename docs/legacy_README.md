@@ -855,6 +855,40 @@ python scripts/validate_dataset.py \
     --base-model meta-llama/Llama-3-8b-Instruct
 ```
 
+### RAG-aware датасет (W3)
+
+Сами по себе W1-сиды учат модель отвечать на вопросы по содержимому чанков,
+но **не** учат пользоваться извлечённым контекстом и не учат отказу при
+нерелевантном retrieval'е. Workstream 3 надстраивает над W1 четырёхвариантную
+смесь (relevant / irrelevant / partial / empty в пропорции 70 / 15 / 10 / 5):
+
+```bash
+python -m scripts.generate_rag_dataset \
+    --corpus var/data/kb_mvp.sqlite \
+    --seeds data/lora/synthetic.jsonl \
+    --output data/lora/train_rag.jsonl \
+    --target-pairs 1000
+```
+
+При обучении укажите `--prompt-mode rag`, чтобы трейнер использовал
+`PROMPT_TEMPLATE_RAG` (система + контекст + вопрос) и читал поле
+`retrieved_context` из датасета:
+
+```bash
+python scripts/train_lora.py \
+    --base-model TheBloke/Llama-3-8B-Instruct-AWQ \
+    --train data/lora/train_rag.jsonl \
+    --output adapters/my-rag-lora \
+    --prompt-mode rag
+```
+
+Полезные флаги `generate_rag_dataset`:
+
+- `--top-k N` — сколько чанков извлекать на вопрос (по умолчанию 3).
+- `--negative-document-id N` — брать чанки для IRRELEVANT/PARTIAL пула
+  из конкретного документа (иначе случайная выборка).
+- `--resume` — пропустить сиды, чьи `source_chunk_id` уже в output JSONL.
+
 Ниже — минимальный путь от данных до подключенного адаптера. Все команды
 рассчитаны на Linux/macOS; в PowerShell используйте эквиваленты.
 

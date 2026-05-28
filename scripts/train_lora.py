@@ -27,6 +27,15 @@ from transformers.trainer_callback import TrainerCallback
 
 LOGGER = logging.getLogger(__name__)
 PROMPT_TEMPLATE = "<s>[INST] {instruction}\n{input} [/INST]\n"
+PROMPT_TEMPLATE_RAG = (
+    "<s>[INST] <<SYS>>\n"
+    "Ответь на вопрос, используя контекст и свои знания. Если контекст "
+    "релевантен — приоритизируй его. Указывай источник цитаты в "
+    "формате [doc_chunk:X].\n"
+    "<</SYS>>\n\n"
+    "Контекст:\n{retrieved_context}\n\n"
+    "Вопрос: {instruction} [/INST]\n"
+)
 
 
 @dataclass(slots=True)
@@ -49,6 +58,7 @@ class TrainingConfig:
     use_bf16: bool
     seed: int
     logging_steps: int
+    prompt_mode: str = "generic"
 
 
 class JsonLogCallback(TrainerCallback):
@@ -113,6 +123,12 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     precision.add_argument("--bf16", action="store_true", default=_env_flag("LORA_BF16", False))
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--logging-steps", type=int, default=25)
+    parser.add_argument(
+        "--prompt-mode",
+        choices=["generic", "rag"],
+        default="generic",
+        help="Prompt template selection. 'rag' expects 'retrieved_context' in dataset rows.",
+    )
     return parser.parse_args(list(argv) if argv is not None else None)
 
 
@@ -154,21 +170,42 @@ def _load_config(args: argparse.Namespace) -> TrainingConfig:
         use_bf16=bool(args.bf16),
         seed=args.seed,
         logging_steps=max(1, int(args.logging_steps)),
+        prompt_mode=args.prompt_mode,
     )
 
 
-def _format_prompt(instruction: str, context: str) -> str:
-    context_block = context or ""
-    return PROMPT_TEMPLATE.format(instruction=instruction, input=context_block)
+def format_prompt(
+    instruction: str,
+    context: str,
+    *,
+    retrieved_context: str = "",
+    prompt_mode: str = "generic",
+) -> str:
+    """Return the prefix that precedes the model's response.
+
+    ``prompt_mode='generic'`` keeps the pre-W3 behaviour. ``'rag'`` uses
+    the system+context template defined in PROMPT_TEMPLATE_RAG.
+    """
+
+    if prompt_mode == "rag":
+        return PROMPT_TEMPLATE_RAG.format(
+            instruction=instruction,
+            retrieved_context=retrieved_context or "",
+        )
+    return PROMPT_TEMPLATE.format(instruction=instruction, input=context or "")
+
+
+def _format_prompt(instruction: str, context: str) -> str:  # pragma: no cover - back-compat
+    return format_prompt(instruction, context)
 
 
 from scripts._lora_artifacts import finalise_adapter_artifacts as _finalise_adapter_artifacts
 
 
-def _normalise_example(example: dict[str, Any]) -> tuple[str, str, str]:
+def _normalise_example(example: dict[str, Any]) -> tuple[str, str, str, str]:
     def pick(fields: tuple[str, ...]) -> str:
-        for field in fields:
-            value = example.get(field)
+        for field_name in fields:
+            value = example.get(field_name)
             if value is None:
                 continue
             text = str(value).strip()
@@ -179,16 +216,26 @@ def _normalise_example(example: dict[str, Any]) -> tuple[str, str, str]:
     instruction = pick(("instruction", "prompt", "question"))
     output = pick(("output", "response", "answer"))
     context = pick(("input", "context", "background"))
+    retrieved_context = pick(("retrieved_context",))
     if not instruction or not output:
         raise ValueError("Dataset rows must contain instruction/prompt and output/response fields")
-    return instruction, context, output
+    return instruction, context, output, retrieved_context
 
 
 def _build_feature(
-    example: dict[str, Any], tokenizer: AutoTokenizer, *, max_seq_len: int
+    example: dict[str, Any],
+    tokenizer: AutoTokenizer,
+    *,
+    max_seq_len: int,
+    prompt_mode: str = "generic",
 ) -> dict[str, list[int]]:
-    instruction, context, output = _normalise_example(example)
-    prompt_prefix = _format_prompt(instruction, context)
+    instruction, context, output, retrieved_context = _normalise_example(example)
+    prompt_prefix = format_prompt(
+        instruction,
+        context,
+        retrieved_context=retrieved_context,
+        prompt_mode=prompt_mode,
+    )
     prompt_tokens = tokenizer(prompt_prefix, add_special_tokens=False)["input_ids"]
     response_tokens = tokenizer(output, add_special_tokens=False)["input_ids"]
     if tokenizer.eos_token_id is not None:
@@ -243,7 +290,12 @@ def _load_datasets(config: TrainingConfig, tokenizer: AutoTokenizer):
     raw = load_dataset("json", data_files=data_files)
 
     def _process(example: dict[str, Any]) -> dict[str, Any]:
-        return _build_feature(example, tokenizer, max_seq_len=config.max_seq_len)
+        return _build_feature(
+            example,
+            tokenizer,
+            max_seq_len=config.max_seq_len,
+            prompt_mode=config.prompt_mode,
+        )
 
     train_dataset = raw["train"].map(_process, remove_columns=raw["train"].column_names)
     eval_dataset = None
