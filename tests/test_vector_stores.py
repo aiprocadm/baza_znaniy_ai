@@ -203,12 +203,11 @@ def test_get_vector_store_selects_backend(tmp_path: Path, monkeypatch: pytest.Mo
     vs.get_vector_store.cache_clear()
 
 
-@pytest.mark.skip(reason=_BACKEND_REFACTOR_SKIP)
 def test_qdrant_upsert_batches_embeddings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # embed_batch_size=2 is set via _make_settings; QdrantVectorStore reads it on upsert.
     settings = _make_settings(tmp_path, backend="qdrant")
 
     embedder = _StubEmbedder("stub")
-    settings.embed_batch_size = 2
 
     # Provide lightweight stand-ins for qdrant models
     class _PointStruct:
