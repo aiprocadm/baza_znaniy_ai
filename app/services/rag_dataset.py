@@ -15,7 +15,7 @@ import json
 import logging
 from dataclasses import dataclass
 from enum import Enum
-from typing import Mapping
+from typing import Callable, Mapping, Sequence
 
 LOGGER = logging.getLogger(__name__)
 
@@ -124,3 +124,56 @@ def apportion_counts(
     for i in range(leftover):
         counts[remainders[i][0]] += 1
     return counts
+
+
+from app.services.synthetic_qa import QAPair
+
+# Retriever callbacks receive (query, top_k) and return any sequence
+# of objects exposing ``.chunk_index`` (int) and ``.text`` (str). That
+# is intentionally a subset of ``kb_store.SearchHit`` so unit tests can
+# pass lightweight fakes without importing the heavy real type.
+Retriever = Callable[[str, int], Sequence[object]]
+
+
+def _join_chunks(hits: Sequence[object]) -> str:
+    blocks: list[str] = []
+    for hit in hits:
+        cid = int(getattr(hit, "chunk_index"))
+        text = str(getattr(hit, "text", "")).strip()
+        if text:
+            blocks.append(f"Фрагмент [doc_chunk:{cid}]:\n{text}")
+    return "\n\n".join(blocks)
+
+
+def _chunk_ids(hits: Sequence[object]) -> tuple[int, ...]:
+    return tuple(int(getattr(hit, "chunk_index")) for hit in hits)
+
+
+def build_relevant_sample(
+    seed: QAPair,
+    *,
+    retriever: Retriever,
+    top_k: int = 3,
+) -> RAGSample | None:
+    """Promote a seed Q&A to a RELEVANT variant by attaching retrieved context.
+
+    Returns ``None`` when the seed chunk is not in the top-k retrieval
+    set — that means the seed answer cannot be grounded in the context
+    we plan to feed at inference time, so training on it would teach
+    the model to hallucinate.
+    """
+
+    hits = list(retriever(seed.instruction, top_k))
+    ids = _chunk_ids(hits)
+    if seed.source_chunk_id not in ids:
+        return None
+
+    return RAGSample(
+        instruction=seed.instruction,
+        input=seed.input,
+        output=seed.output,
+        retrieved_context=_join_chunks(hits),
+        variant=RAGVariant.RELEVANT,
+        source_chunk_id=seed.source_chunk_id,
+        retrieved_chunk_ids=ids,
+    )
