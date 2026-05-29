@@ -37,9 +37,7 @@ def test_store_feedback_persists_and_returns_id(store) -> None:
     )
     assert isinstance(fid, str) and len(fid) >= 8
     with s._connect() as conn:
-        row = conn.execute(
-            "SELECT rating, comment FROM kb_feedback WHERE id=?", (fid,)
-        ).fetchone()
+        row = conn.execute("SELECT rating, comment FROM kb_feedback WHERE id=?", (fid,)).fetchone()
     assert row[0] == 1
     assert row[1] is None
 
@@ -147,9 +145,7 @@ def test_iter_feedback_pairs_skips_orphan_assistant_messages(tmp_path) -> None:
 
     s2 = KnowledgeBaseStore(db_path=tmp_path / "kb_orphan.sqlite")
     conv = s2.create_conversation(title="orphan")
-    asst_msg = s2.add_message(
-        conversation_id=conv.id, role="assistant", content="answer"
-    )
+    asst_msg = s2.add_message(conversation_id=conv.id, role="assistant", content="answer")
     s2.store_feedback(
         conversation_id=conv.id,
         message_id=asst_msg.id,
