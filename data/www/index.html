@@ -174,6 +174,11 @@
     .feedback.ok { color: var(--ok); }
     .feedback.muted { color: var(--muted); }
     .sources { display: grid; gap: 0.5rem; }
+    .degraded-banner { border-radius: 8px; padding: 0.7rem 0.9rem; margin: 0 0 0.75rem; font-size: 0.9rem; line-height: 1.35; }
+    .degraded-banner strong { display: block; margin-bottom: 0.2rem; }
+    .degraded-banner ul { margin: 0.3rem 0 0; padding-left: 1.1rem; }
+    .degraded-banner.warning { background: #41360f; border: 1px solid #b8860b; color: #ffe7a3; }
+    .degraded-banner.critical { background: #441616; border: 1px solid #c0392b; color: #ffcfca; }
     .source {
       padding: 0.65rem 0.85rem;
       border-left: 3px solid var(--accent);
@@ -473,6 +478,7 @@
             <span id="ask-feedback" class="feedback" style="flex:1;"></span>
           </div>
         </form>
+        <div id="ask-degraded" class="degraded-banner" role="alert" hidden></div>
         <div id="ask-answer" class="pre" hidden></div>
         <div id="ask-sources" class="sources" style="margin-top: 0.75rem;"></div>
       </div>
@@ -829,6 +835,25 @@
       }).join("");
     }
 
+    function renderDegradation(retrieval) {
+      const el = $("ask-degraded");
+      if (!el) return;
+      const reasons = (retrieval && retrieval.reasons) || [];
+      if (!retrieval || !retrieval.degraded || !reasons.length) {
+        el.hidden = true;
+        el.innerHTML = "";
+        return;
+      }
+      el.className =
+        "degraded-banner " + (retrieval.severity === "critical" ? "critical" : "warning");
+      const title = t("retrieval.banner.title", "Качество поиска снижено");
+      const lines = reasons
+        .map((r) => `<li>${escapeHtml(t("retrieval.reason." + r.reason, r.detail || r.reason))}</li>`)
+        .join("");
+      el.innerHTML = `<strong>${escapeHtml(title)}</strong><ul>${lines}</ul>`;
+      el.hidden = false;
+    }
+
     function renderSources(target, items) {
       const el = $(target);
       if (!items || !items.length) {
@@ -911,6 +936,7 @@
       answerEl.hidden = false;
       setFeedback("ask-feedback", summariseAskMeta(data, data.sources.length, data.elapsed_ms), "ok");
       renderSources("ask-sources", data.sources);
+      renderDegradation(data.retrieval);
       if (data.conversation_id && !activeConversationId) {
         setActiveConversation(data.conversation_id, question.split("\n")[0].slice(0, 60));
       }
@@ -982,6 +1008,7 @@
             sourcesLen = (data.sources || []).length;
             rerankInfo = data.rerank;
             renderSources("ask-sources", data.sources || []);
+            renderDegradation(data.retrieval);
           } else if (event === "token") {
             answerEl.textContent += data.text || "";
           } else if (event === "done") {
@@ -1008,6 +1035,7 @@
       const wantStream = $("ask-stream").checked;
       setFeedback("ask-feedback", wantStream ? "Генерация (поток)…" : "Генерация ответа…", "muted");
       $("ask-answer").hidden = true;
+      $("ask-degraded").hidden = true;
       try {
         if (wantStream) {
           await askStream(question);
