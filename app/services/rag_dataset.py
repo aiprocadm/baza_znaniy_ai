@@ -248,6 +248,16 @@ def _strip_citations(text: str) -> str:
     return _CITATION_RE.sub(" ", text).strip()
 
 
+def strip_citations(text: str) -> str:
+    """Remove ``[doc_chunk:N]`` markers from ``text``.
+
+    Public alias of :func:`_strip_citations`. Used by W4
+    (DPO post-training) to construct the ``NO_CITATION`` reject branch.
+    """
+
+    return _strip_citations(text)
+
+
 def build_empty_sample(seed: QAPair) -> RAGSample:
     """Drop retrieved context and citation suffix from a seed Q&A."""
 
