@@ -286,8 +286,5 @@ def test_strip_citations_is_public_api() -> None:
     assert strip_citations("Ответ. [doc_chunk:7]") == "Ответ."
     # The regex consumes surrounding whitespace, collapsing each marker
     # (and its adjacent spaces) into a single space.
-    assert (
-        strip_citations("До [doc_chunk:1] середина [doc_chunk:2] конец")
-        == "До середина конец"
-    )
+    assert strip_citations("До [doc_chunk:1] середина [doc_chunk:2] конец") == "До середина конец"
     assert strip_citations("без цитат") == "без цитат"

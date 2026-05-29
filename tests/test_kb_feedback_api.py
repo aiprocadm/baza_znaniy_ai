@@ -23,9 +23,7 @@ def app_with_store(tmp_path, monkeypatch):
     store = get_store()
     conv = store.create_conversation(title="test")
     store.add_message(conversation_id=conv.id, role="user", content="hello?")
-    asst = store.add_message(
-        conversation_id=conv.id, role="assistant", content="hi back"
-    )
+    asst = store.add_message(conversation_id=conv.id, role="assistant", content="hi back")
 
     from app.core.app import create_app
 

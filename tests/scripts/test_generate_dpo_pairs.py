@@ -54,9 +54,7 @@ def test_cli_writes_jsonl_endtoend(tmp_path, monkeypatch) -> None:
 
     import scripts.generate_dpo_pairs as cli
 
-    monkeypatch.setattr(
-        cli, "_make_teacher", lambda _args: (lambda _q: "Fake teacher answer.")
-    )
+    monkeypatch.setattr(cli, "_make_teacher", lambda _args: (lambda _q: "Fake teacher answer."))
 
     output = tmp_path / "dpo.jsonl"
     rc = main(
@@ -73,9 +71,7 @@ def test_cli_writes_jsonl_endtoend(tmp_path, monkeypatch) -> None:
     assert rc == 0
 
     lines = [
-        json.loads(line)
-        for line in output.read_text(encoding="utf-8").splitlines()
-        if line.strip()
+        json.loads(line) for line in output.read_text(encoding="utf-8").splitlines() if line.strip()
     ]
     assert len(lines) == 4
     for line in lines:
