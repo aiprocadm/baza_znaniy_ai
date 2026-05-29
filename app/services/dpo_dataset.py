@@ -16,11 +16,11 @@ import json
 import logging
 import random
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
-from typing import Callable
+from typing import Callable, Iterable, Iterator, Mapping
 
-from app.services.rag_dataset import strip_citations
+from app.services.rag_dataset import apportion_counts, strip_citations
 from app.services.synthetic_qa import QAPair
 
 LOGGER = logging.getLogger(__name__)
@@ -192,3 +192,61 @@ def build_hallucination_pair(
         source_chunk_id=seed.source_chunk_id,
         feedback_ids=(),
     )
+
+
+SyntheticProportions = Mapping[RejectStrategy, float]
+
+
+def default_synthetic_proportions() -> dict[RejectStrategy, float]:
+    """Spec defaults: 40 % NO_CITATION (free) / 30 % GENERIC / 30 % HALLUCINATION."""
+
+    return {
+        RejectStrategy.NO_CITATION: 0.40,
+        RejectStrategy.GENERIC: 0.30,
+        RejectStrategy.HALLUCINATION: 0.30,
+    }
+
+
+@dataclass(slots=True)
+class DPOPairBuilder:
+    """Orchestrate preference-pair assembly across synthetic strategies."""
+
+    teacher: TeacherProvider
+    proportions: SyntheticProportions = field(default_factory=default_synthetic_proportions)
+
+    def build(
+        self,
+        seeds: Iterable[QAPair],
+        *,
+        total: int,
+    ) -> Iterator[DPOPair]:
+        counts = apportion_counts(self.proportions, total=total)
+        emitted: dict[RejectStrategy, int] = {s: 0 for s in self.proportions}
+
+        priority = (
+            RejectStrategy.NO_CITATION,
+            RejectStrategy.GENERIC,
+            RejectStrategy.HALLUCINATION,
+        )
+
+        for seed in seeds:
+            if sum(emitted.values()) >= total:
+                return
+            for strategy in priority:
+                if emitted[strategy] >= counts.get(strategy, 0):
+                    continue
+                pair = self._build_one(seed, strategy)
+                if pair is None:
+                    continue
+                emitted[strategy] += 1
+                yield pair
+                break
+
+    def _build_one(self, seed: QAPair, strategy: RejectStrategy) -> DPOPair | None:
+        if strategy is RejectStrategy.NO_CITATION:
+            return build_no_citation_pair(seed)
+        if strategy is RejectStrategy.GENERIC:
+            return build_generic_pair(seed, teacher=self.teacher)
+        if strategy is RejectStrategy.HALLUCINATION:
+            return build_hallucination_pair(seed, teacher=self.teacher)
+        return None
