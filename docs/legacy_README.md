@@ -889,6 +889,49 @@ python scripts/train_lora.py \
   из конкретного документа (иначе случайная выборка).
 - `--resume` — пропустить сиды, чьи `source_chunk_id` уже в output JSONL.
 
+### DPO post-training (W4)
+
+После того как SFT-адаптер W3 обучен, поверх него можно прокрутить DPO
+(Direct Preference Optimization), чтобы модель училась не просто
+отвечать корректно, а **предпочитать** обоснованные ответы со ссылками
+ungrounded'ным или галлюцинирующим. Синтетическая смесь: 40% strip
+цитат (без LLM-вызовов) + 30% «учитель без контекста» + 30%
+«учитель с фейковой ссылкой [doc_chunk:9XX]».
+
+```bash
+python -m scripts.generate_dpo_pairs \
+    --seeds data/lora/synthetic.jsonl \
+    --output data/lora/dpo.jsonl \
+    --target-pairs 1000 \
+    --yes
+
+python -m scripts.train_dpo \
+    --base-model TheBloke/Llama-3-8B-Instruct-AWQ \
+    --train data/lora/dpo.jsonl \
+    --sft-adapter adapters/my-rag-lora \
+    --output adapters/my-dpo \
+    --prompt-mode rag \
+    --max-steps 200
+```
+
+Live-фидбэк собирается через эндпоинт
+`POST /api/kb/messages/{id}/feedback` (rating: 1 / -1 + optional
+`alternative_answer`) и экспортируется в тот же JSONL формат:
+
+```bash
+curl -H "X-API-Key: $KB_API_KEY" \
+    http://localhost:8000/api/kb/feedback/export \
+    -o data/lora/live.jsonl
+
+python -m scripts.train_dpo --train data/lora/live.jsonl ...
+```
+
+Полезные флаги `generate_dpo_pairs`:
+
+- `--max-cost-usd N` — бюджет на teacher-вызовы (по умолчанию $1.00).
+- `--yes` — пропустить cost-prompt и не падать на бюджете.
+- `--resume` — пропустить сиды, чьи `source_chunk_id` уже в output JSONL.
+
 Ниже — минимальный путь от данных до подключенного адаптера. Все команды
 рассчитаны на Linux/macOS; в PowerShell используйте эквиваленты.
 

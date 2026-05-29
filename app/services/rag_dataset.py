@@ -16,7 +16,7 @@ import logging
 import re
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Callable, Iterable, Iterator, Mapping, Sequence
+from typing import Callable, Iterable, Iterator, Mapping, Sequence, TypeVar
 
 from app.services.synthetic_qa import QAPair
 
@@ -88,17 +88,23 @@ def default_proportions() -> dict[RAGVariant, float]:
 
 _PROPORTION_TOLERANCE = 1e-6
 
+_EnumT = TypeVar("_EnumT", bound=Enum)
+
 
 def apportion_counts(
-    proportions: ProportionSpec,
+    proportions: Mapping[_EnumT, float],
     *,
     total: int,
-) -> dict[RAGVariant, int]:
+) -> dict[_EnumT, int]:
     """Hamilton's largest-remainder method.
 
     Given target shares summing to 1.0, return integer counts per
-    variant whose sum equals ``total`` exactly. Deterministic ordering
-    (RELEVANT, IRRELEVANT, PARTIAL, EMPTY) breaks remainder ties.
+    enum member whose sum equals ``total`` exactly. Deterministic
+    ordering — driven by the order of keys in ``proportions`` —
+    breaks remainder ties.
+
+    Generic over any :class:`enum.Enum` subclass so both W3
+    (RAGVariant) and W4 (RejectStrategy) can share this helper.
     """
 
     if total < 0:
@@ -109,21 +115,22 @@ def apportion_counts(
             f"proportions must sum to 1.0 (within {_PROPORTION_TOLERANCE}); got {share_sum}"
         )
 
-    counts: dict[RAGVariant, int] = {v: 0 for v in RAGVariant}
+    ordered = list(proportions.keys())
+    counts: dict[_EnumT, int] = {member: 0 for member in ordered}
     if total == 0:
         return counts
 
-    raw = [(v, proportions.get(v, 0.0) * total) for v in RAGVariant]
-    floors = [(v, int(value)) for v, value in raw]
+    raw = [(member, proportions[member] * total) for member in ordered]
+    floors = [(member, int(value)) for member, value in raw]
     assigned = sum(c for _, c in floors)
     leftover = total - assigned
 
     remainders = sorted(
-        ((v, value - int(value)) for v, value in raw),
-        key=lambda item: (-item[1], list(RAGVariant).index(item[0])),
+        ((member, value - int(value)) for member, value in raw),
+        key=lambda item: (-item[1], ordered.index(item[0])),
     )
-    for v, count in floors:
-        counts[v] = count
+    for member, count in floors:
+        counts[member] = count
     for i in range(leftover):
         counts[remainders[i][0]] += 1
     return counts
@@ -239,6 +246,16 @@ _CITATION_RE = re.compile(r"\s*\[doc_chunk:\d+\]\s*")
 
 def _strip_citations(text: str) -> str:
     return _CITATION_RE.sub(" ", text).strip()
+
+
+def strip_citations(text: str) -> str:
+    """Remove ``[doc_chunk:N]`` markers from ``text``.
+
+    Public alias of :func:`_strip_citations`. Used by W4
+    (DPO post-training) to construct the ``NO_CITATION`` reject branch.
+    """
+
+    return _strip_citations(text)
 
 
 def build_empty_sample(seed: QAPair) -> RAGSample:

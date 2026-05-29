@@ -1,0 +1,201 @@
+"""Tests for app.services.dpo_dataset — pure-logic DPO dataset builder."""
+
+from __future__ import annotations
+
+
+def test_module_imports() -> None:
+    """Module imports without side effects."""
+    from app.services import dpo_dataset
+
+    assert dpo_dataset.__name__ == "app.services.dpo_dataset"
+
+
+def test_reject_strategy_values() -> None:
+    """The three canonical synthetic reject strategies are exposed."""
+    from app.services.dpo_dataset import RejectStrategy
+
+    values = {s.value for s in RejectStrategy}
+    assert {"no_citation", "generic", "hallucination"}.issubset(values)
+
+
+def test_dpo_pair_to_jsonl_line_top_level_keys() -> None:
+    """to_jsonl_line() emits prompt / chosen / rejected at the top level."""
+    import json
+
+    from app.services.dpo_dataset import DPOPair, RejectStrategy
+
+    pair = DPOPair(
+        prompt="Что такое отпуск?",
+        chosen="Это перерыв. [doc_chunk:7]",
+        rejected="Это перерыв.",
+        strategy=RejectStrategy.NO_CITATION,
+        source="synthetic",
+        source_chunk_id=7,
+        feedback_ids=(),
+    )
+    line = pair.to_jsonl_line()
+    assert line.endswith("\n")
+
+    data = json.loads(line)
+    assert data["prompt"] == "Что такое отпуск?"
+    assert data["chosen"].endswith("[doc_chunk:7]")
+    assert data["rejected"] == "Это перерыв."
+    assert data["meta"]["strategy"] == "no_citation"
+    assert data["meta"]["source"] == "synthetic"
+    assert data["meta"]["source_chunk_id"] == 7
+    assert data["meta"]["feedback_ids"] == []
+
+
+def test_build_no_citation_pair_strips_marker() -> None:
+    from app.services.dpo_dataset import RejectStrategy, build_no_citation_pair
+    from app.services.synthetic_qa import QAPair
+
+    seed = QAPair(
+        instruction="Что такое отпуск?",
+        input="",
+        output="Это перерыв. [doc_chunk:7]",
+        source_chunk_id=7,
+    )
+    pair = build_no_citation_pair(seed)
+
+    assert pair.strategy is RejectStrategy.NO_CITATION
+    assert pair.prompt == "Что такое отпуск?"
+    assert pair.chosen == "Это перерыв. [doc_chunk:7]"
+    assert pair.rejected == "Это перерыв."
+    assert "[doc_chunk:" not in pair.rejected
+    assert pair.source == "synthetic"
+    assert pair.source_chunk_id == 7
+
+
+def test_build_no_citation_pair_returns_none_when_no_marker() -> None:
+    """Seeds without a citation marker can't form a meaningful NO_CITATION pair."""
+    from app.services.dpo_dataset import build_no_citation_pair
+    from app.services.synthetic_qa import QAPair
+
+    seed = QAPair(
+        instruction="Q",
+        input="",
+        output="A without marker",
+        source_chunk_id=1,
+    )
+    assert build_no_citation_pair(seed) is None
+
+
+def test_build_generic_pair_calls_teacher_without_context() -> None:
+    from app.services.dpo_dataset import RejectStrategy, build_generic_pair
+    from app.services.synthetic_qa import QAPair
+
+    captured: list[str] = []
+
+    def fake_teacher(prompt: str) -> str:
+        captured.append(prompt)
+        return "Это общий ответ из обучающих данных модели."
+
+    seed = QAPair(
+        instruction="Что такое отпуск?",
+        input="",
+        output="Перерыв. [doc_chunk:7]",
+        source_chunk_id=7,
+    )
+    pair = build_generic_pair(seed, teacher=fake_teacher)
+
+    assert pair is not None
+    assert pair.strategy is RejectStrategy.GENERIC
+    assert pair.chosen == seed.output
+    assert pair.rejected == "Это общий ответ из обучающих данных модели."
+    assert "Что такое отпуск?" in captured[0]
+    assert "[doc_chunk:" not in pair.rejected
+
+
+def test_build_generic_pair_returns_none_when_teacher_returns_empty() -> None:
+    from app.services.dpo_dataset import build_generic_pair
+    from app.services.synthetic_qa import QAPair
+
+    seed = QAPair(
+        instruction="Q?",
+        input="",
+        output="A. [doc_chunk:1]",
+        source_chunk_id=1,
+    )
+    pair = build_generic_pair(seed, teacher=lambda _q: "  ")
+    assert pair is None
+
+
+def test_build_generic_pair_strips_accidental_citations_from_teacher() -> None:
+    """Teacher might paste a fake citation; strip it to keep rejected ungrounded."""
+    from app.services.dpo_dataset import build_generic_pair
+    from app.services.synthetic_qa import QAPair
+
+    seed = QAPair(
+        instruction="Q?",
+        input="",
+        output="Real. [doc_chunk:5]",
+        source_chunk_id=5,
+    )
+    pair = build_generic_pair(
+        seed,
+        teacher=lambda _q: "Generic answer. [doc_chunk:5]",
+    )
+    assert pair is not None
+    assert "[doc_chunk:" not in pair.rejected
+
+
+def test_build_hallucination_pair_injects_fake_citation() -> None:
+    from app.services.dpo_dataset import RejectStrategy, build_hallucination_pair
+    from app.services.synthetic_qa import QAPair
+
+    seed = QAPair(
+        instruction="Что такое отпуск?",
+        input="",
+        output="Перерыв. [doc_chunk:7]",
+        source_chunk_id=7,
+    )
+
+    def fake_teacher(prompt: str) -> str:
+        return "Согласно документу, отпуск — это отдых. [doc_chunk:912]"
+
+    pair = build_hallucination_pair(seed, teacher=fake_teacher)
+    assert pair is not None
+    assert pair.strategy is RejectStrategy.HALLUCINATION
+    assert "[doc_chunk:" in pair.rejected
+    import re
+
+    match = re.search(r"\[doc_chunk:(\d+)\]", pair.rejected)
+    assert match is not None
+    assert int(match.group(1)) >= 900
+
+
+def test_build_hallucination_pair_coerces_teacher_without_marker() -> None:
+    """If the teacher forgot the marker, we append one ourselves."""
+    from app.services.dpo_dataset import build_hallucination_pair
+    from app.services.synthetic_qa import QAPair
+
+    seed = QAPair(
+        instruction="Q?",
+        input="",
+        output="A. [doc_chunk:1]",
+        source_chunk_id=1,
+    )
+    pair = build_hallucination_pair(
+        seed,
+        teacher=lambda _p: "Просто ответ без маркера.",
+    )
+    assert pair is not None
+    import re
+
+    match = re.search(r"\[doc_chunk:(\d+)\]", pair.rejected)
+    assert match is not None
+    assert int(match.group(1)) >= 900
+
+
+def test_build_hallucination_pair_returns_none_on_empty_teacher() -> None:
+    from app.services.dpo_dataset import build_hallucination_pair
+    from app.services.synthetic_qa import QAPair
+
+    seed = QAPair(
+        instruction="Q?",
+        input="",
+        output="A. [doc_chunk:1]",
+        source_chunk_id=1,
+    )
+    assert build_hallucination_pair(seed, teacher=lambda _p: "") is None
