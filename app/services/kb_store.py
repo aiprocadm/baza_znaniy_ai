@@ -279,6 +279,22 @@ class KnowledgeBaseStore:
                     created_at TEXT NOT NULL
                 );
                 CREATE INDEX IF NOT EXISTS idx_kb_messages_conv ON kb_messages(conversation_id, id);
+                CREATE TABLE IF NOT EXISTS kb_feedback (
+                    id TEXT PRIMARY KEY,
+                    conversation_id TEXT NOT NULL
+                        REFERENCES kb_conversations(id) ON DELETE CASCADE,
+                    message_id INTEGER NOT NULL
+                        REFERENCES kb_messages(id) ON DELETE CASCADE,
+                    user_id TEXT,
+                    rating INTEGER NOT NULL CHECK (rating IN (-1, 1)),
+                    comment TEXT,
+                    alternative_answer TEXT,
+                    created_at TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_kb_feedback_message
+                    ON kb_feedback(message_id);
+                CREATE INDEX IF NOT EXISTS idx_kb_feedback_rating_created
+                    ON kb_feedback(rating, created_at);
                 """
             )
 
@@ -769,6 +785,55 @@ class KnowledgeBaseStore:
         """Return the most recent ``limit`` messages in chronological order."""
 
         return self.list_messages(conversation_id, limit=limit)
+
+    # ------------------------------------------------------------------
+    # Feedback (W4 — DPO post-training)
+    # ------------------------------------------------------------------
+
+    def store_feedback(
+        self,
+        *,
+        conversation_id: str,
+        message_id: int,
+        user_id: Optional[str],
+        rating: int,
+        comment: Optional[str],
+        alternative_answer: Optional[str],
+    ) -> str:
+        """Persist one feedback row; returns a new UUID id.
+
+        Raises :class:`ValueError` for out-of-range ``rating`` before the
+        DB CHECK constraint catches it, so the API layer can map it to
+        HTTP 400 without parsing sqlite3 error messages.
+        """
+
+        import uuid
+
+        if rating not in (-1, 1):
+            raise ValueError(f"rating must be -1 or 1, got {rating}")
+
+        fid = uuid.uuid4().hex
+        now = self._now()
+        with self._lock, self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO kb_feedback (
+                    id, conversation_id, message_id, user_id,
+                    rating, comment, alternative_answer, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    fid,
+                    conversation_id,
+                    int(message_id),
+                    user_id,
+                    int(rating),
+                    comment,
+                    alternative_answer,
+                    now,
+                ),
+            )
+        return fid
 
 
 _DEFAULT_STORE: Optional[KnowledgeBaseStore] = None
