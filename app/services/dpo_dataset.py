@@ -14,6 +14,8 @@ from __future__ import annotations
 
 import json
 import logging
+import random
+import re
 from dataclasses import dataclass
 from enum import Enum
 from typing import Callable
@@ -24,6 +26,8 @@ from app.services.synthetic_qa import QAPair
 LOGGER = logging.getLogger(__name__)
 
 _CITATION_MARKER = "[doc_chunk:"
+_FAKE_CITATION_RE = re.compile(r"\[doc_chunk:(\d+)\]")
+_FAKE_CHUNK_RANGE = (900, 999)
 
 TeacherProvider = Callable[[str], str]
 
@@ -31,6 +35,15 @@ TeacherProvider = Callable[[str], str]
 _GENERIC_TEACHER_PROMPT = (
     "Ответь на вопрос пользователя, опираясь только на свои общие знания. "
     "НЕ используй никаких документов или цитат. Не указывай источников.\n\n"
+    "Вопрос: {question}"
+)
+
+
+_HALLUCINATION_TEACHER_PROMPT = (
+    "Сгенерируй правдоподобный ответ на вопрос и обязательно сошлись на "
+    "несуществующий документ в формате [doc_chunk:N] где N >= 900. "
+    "Это специальный обучающий пример: модель должна научиться НЕ давать "
+    "такие выдуманные ссылки.\n\n"
     "Вопрос: {question}"
 )
 
@@ -133,6 +146,48 @@ def build_generic_pair(
         chosen=seed.output,
         rejected=rejected,
         strategy=RejectStrategy.GENERIC,
+        source="synthetic",
+        source_chunk_id=seed.source_chunk_id,
+        feedback_ids=(),
+    )
+
+
+def build_hallucination_pair(
+    seed: QAPair,
+    *,
+    teacher: TeacherProvider,
+    rng: random.Random | None = None,
+) -> DPOPair | None:
+    """Ask the teacher for an answer with an **invented** ``[doc_chunk:9XX]``.
+
+    Coerces the citation into the 900-999 fake range if the teacher
+    cooperated but used a different id; appends a fresh one if the
+    teacher returned no marker at all. Returns ``None`` on empty
+    response.
+    """
+
+    raw = teacher(_HALLUCINATION_TEACHER_PROMPT.format(question=seed.instruction)).strip()
+    if not raw:
+        return None
+
+    rng = rng or random.Random(seed.source_chunk_id)
+    fake_id = rng.randint(*_FAKE_CHUNK_RANGE)
+
+    match = _FAKE_CITATION_RE.search(raw)
+    if match is None:
+        rejected = f"{raw} [doc_chunk:{fake_id}]"
+    else:
+        existing = int(match.group(1))
+        if _FAKE_CHUNK_RANGE[0] <= existing <= _FAKE_CHUNK_RANGE[1]:
+            rejected = raw
+        else:
+            rejected = _FAKE_CITATION_RE.sub(f"[doc_chunk:{fake_id}]", raw, count=1)
+
+    return DPOPair(
+        prompt=seed.instruction,
+        chosen=seed.output,
+        rejected=rejected,
+        strategy=RejectStrategy.HALLUCINATION,
         source="synthetic",
         source_chunk_id=seed.source_chunk_id,
         feedback_ids=(),

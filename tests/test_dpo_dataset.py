@@ -138,3 +138,64 @@ def test_build_generic_pair_strips_accidental_citations_from_teacher() -> None:
     )
     assert pair is not None
     assert "[doc_chunk:" not in pair.rejected
+
+
+def test_build_hallucination_pair_injects_fake_citation() -> None:
+    from app.services.dpo_dataset import RejectStrategy, build_hallucination_pair
+    from app.services.synthetic_qa import QAPair
+
+    seed = QAPair(
+        instruction="Что такое отпуск?",
+        input="",
+        output="Перерыв. [doc_chunk:7]",
+        source_chunk_id=7,
+    )
+
+    def fake_teacher(prompt: str) -> str:
+        return "Согласно документу, отпуск — это отдых. [doc_chunk:912]"
+
+    pair = build_hallucination_pair(seed, teacher=fake_teacher)
+    assert pair is not None
+    assert pair.strategy is RejectStrategy.HALLUCINATION
+    assert "[doc_chunk:" in pair.rejected
+    import re
+
+    match = re.search(r"\[doc_chunk:(\d+)\]", pair.rejected)
+    assert match is not None
+    assert int(match.group(1)) >= 900
+
+
+def test_build_hallucination_pair_coerces_teacher_without_marker() -> None:
+    """If the teacher forgot the marker, we append one ourselves."""
+    from app.services.dpo_dataset import build_hallucination_pair
+    from app.services.synthetic_qa import QAPair
+
+    seed = QAPair(
+        instruction="Q?",
+        input="",
+        output="A. [doc_chunk:1]",
+        source_chunk_id=1,
+    )
+    pair = build_hallucination_pair(
+        seed,
+        teacher=lambda _p: "Просто ответ без маркера.",
+    )
+    assert pair is not None
+    import re
+
+    match = re.search(r"\[doc_chunk:(\d+)\]", pair.rejected)
+    assert match is not None
+    assert int(match.group(1)) >= 900
+
+
+def test_build_hallucination_pair_returns_none_on_empty_teacher() -> None:
+    from app.services.dpo_dataset import build_hallucination_pair
+    from app.services.synthetic_qa import QAPair
+
+    seed = QAPair(
+        instruction="Q?",
+        input="",
+        output="A. [doc_chunk:1]",
+        source_chunk_id=1,
+    )
+    assert build_hallucination_pair(seed, teacher=lambda _p: "") is None
