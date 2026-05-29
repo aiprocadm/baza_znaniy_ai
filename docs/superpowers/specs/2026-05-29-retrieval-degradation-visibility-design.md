@@ -149,7 +149,7 @@ Detection reuses the existing `_VECTOR_ERRORS` tuple (`vectorstore.py:34`, alrea
 
 ## 6. Metric & alert
 
-- New gauge `kb_retrieval_degraded{reason, severity}` in `app/observability/metrics.py`, with a `record_retrieval_degraded(reason, severity, active: bool)` helper mirroring `record_search_operation`. `retrieval_health.report()` calls it, applying the set-active-zero-others idiom of `record_embedder_backend` (`metrics.py:277`).
+- New gauge `kb_retrieval_degraded{reason, severity}` set 1/0 per reason by `retrieval_health.report()`. **Implemented self-contained in `app/observability/retrieval_health.py`** (defensive `prometheus_client` import) rather than in `metrics.py` — importing `metrics.py` would drag its `sqlalchemy` dependency into the light MVP path, violating decision D1. The gauge follows the same set-active-zero-others idiom as `record_embedder_backend`.
 - `docs/observability_slo.md`: document an alert rule — fire when `max_over_time(kb_retrieval_degraded{severity="critical"}[5m]) == 1`.
 
 ## 7. Data flow
