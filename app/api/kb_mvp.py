@@ -642,9 +642,7 @@ def health(request: Request) -> dict[str, Any]:
     extra: list[tuple] = []
     try:
         if kb_embeddings.embedder_status().get("name") == "hash":
-            extra.append(
-                (retrieval_health.RetrievalReason.HASHING_EMBEDDER, "embedder=hash")
-            )
+            extra.append((retrieval_health.RetrievalReason.HASHING_EMBEDDER, "embedder=hash"))
     except Exception:  # pragma: no cover - never let a probe break health
         pass
     if distinct_dims > 1:
