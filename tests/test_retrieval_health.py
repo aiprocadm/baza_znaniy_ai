@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
 from prometheus_client import REGISTRY
 
 import app.observability.retrieval_health as rh
@@ -46,9 +45,7 @@ def test_report_then_snapshot_lists_active_reason():
 
 def test_clean_run_clears_that_sources_reasons():
     rh.reset()
-    rh.report(
-        RetrievalReport(source="vector", reasons=(RetrievalReason.VECTOR_BACKEND_DOWN,))
-    )
+    rh.report(RetrievalReport(source="vector", reasons=(RetrievalReason.VECTOR_BACKEND_DOWN,)))
     rh.report(RetrievalReport(source="vector"))  # clean run
     assert rh.snapshot()["degraded"] is False
 
@@ -64,9 +61,7 @@ def test_ttl_backstop_drops_stale_reason(monkeypatch):
     rh.reset()
     clock = {"t": 1000.0}
     monkeypatch.setattr(rh.time, "monotonic", lambda: clock["t"])
-    rh.report(
-        RetrievalReport(source="vector", reasons=(RetrievalReason.VECTOR_BACKEND_DOWN,))
-    )
+    rh.report(RetrievalReport(source="vector", reasons=(RetrievalReason.VECTOR_BACKEND_DOWN,)))
     assert rh.snapshot(ttl_seconds=300.0)["degraded"] is True
     clock["t"] = 1000.0 + 301.0
     assert rh.snapshot(ttl_seconds=300.0)["degraded"] is False
@@ -77,3 +72,23 @@ def test_snapshot_includes_extra_active_probes():
     snap = rh.snapshot(extra=((RetrievalReason.HASHING_EMBEDDER, "embedder=hash"),))
     assert snap["degraded"] is True
     assert snap["reasons"][0]["reason"] == "hashing_embedder"
+
+
+def test_gauge_set_on_report_and_cleared_on_clean_run():
+    rh.reset()
+    rh.report(RetrievalReport(source="vector", reasons=(RetrievalReason.VECTOR_BACKEND_DOWN,)))
+    assert (
+        REGISTRY.get_sample_value(
+            "kb_retrieval_degraded",
+            {"reason": "vector_backend_down", "severity": "critical"},
+        )
+        == 1.0
+    )
+    rh.report(RetrievalReport(source="vector"))  # clean run clears governed reason
+    assert (
+        REGISTRY.get_sample_value(
+            "kb_retrieval_degraded",
+            {"reason": "vector_backend_down", "severity": "critical"},
+        )
+        == 0.0
+    )

@@ -80,9 +80,7 @@ def _set_gauge(reason: RetrievalReason, active: bool) -> None:
     if _RETRIEVAL_DEGRADED is None:
         return
     severity = _SEVERITY.get(reason, RetrievalSeverity.WARNING).value
-    _RETRIEVAL_DEGRADED.labels(reason=reason.value, severity=severity).set(
-        1.0 if active else 0.0
-    )
+    _RETRIEVAL_DEGRADED.labels(reason=reason.value, severity=severity).set(1.0 if active else 0.0)
 
 
 # ---------------------------------------------------------------------------
