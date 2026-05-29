@@ -835,6 +835,97 @@ class KnowledgeBaseStore:
             )
         return fid
 
+    def iter_feedback_pairs(self):
+        """Yield :class:`app.services.dpo_dataset.DPOPair` from live feedback.
+
+        Pairing rules (W4 spec § 6.3):
+          * Most-recent rating per (message_id, user_id) wins.
+          * thumbs-down + alternative_answer → emit (alt as chosen, assistant as rejected).
+          * thumbs-up + alternative_answer → same shape (alt is the user-provided gold).
+          * thumbs-up alone → look back for a same-message thumbs-down with alt.
+          * Anything else → skip silently.
+          * Orphaned assistant messages (no preceding user) → skip with debug log.
+        """
+
+        from app.services.dpo_dataset import DPOPair, RejectStrategy
+
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT f.id, f.conversation_id, f.message_id, f.user_id,
+                       f.rating, f.alternative_answer, f.created_at,
+                       m.content AS assistant_content
+                FROM kb_feedback f
+                JOIN kb_messages m ON m.id = f.message_id
+                ORDER BY f.message_id, f.user_id, f.created_at DESC
+                """
+            ).fetchall()
+
+            groups: dict[tuple[int, Optional[str]], list] = {}
+            for row in rows:
+                key = (int(row[2]), row[3])
+                groups.setdefault(key, []).append(row)
+
+            for (msg_id, _user_id), group in groups.items():
+                latest = group[0]
+                # latest indices: 0=id, 1=conversation_id, 2=message_id, 3=user_id,
+                # 4=rating, 5=alternative_answer, 6=created_at, 7=assistant_content
+                preceding = conn.execute(
+                    """
+                    SELECT content FROM kb_messages
+                    WHERE conversation_id = ? AND role = 'user' AND id < ?
+                    ORDER BY id DESC LIMIT 1
+                    """,
+                    (latest[1], msg_id),
+                ).fetchone()
+                if preceding is None:
+                    LOGGER.debug(
+                        "Skipping feedback %s — no preceding user message",
+                        latest[0],
+                    )
+                    continue
+                user_prompt = preceding[0]
+                assistant_text = latest[7]
+                rating = latest[4]
+                alt = latest[5]
+
+                if rating == -1 and alt:
+                    yield DPOPair(
+                        prompt=user_prompt,
+                        chosen=alt,
+                        rejected=assistant_text,
+                        strategy=RejectStrategy.LIVE_ALT,
+                        source="live",
+                        source_chunk_id=None,
+                        feedback_ids=(latest[0],),
+                    )
+                elif rating == 1:
+                    if alt:
+                        yield DPOPair(
+                            prompt=user_prompt,
+                            chosen=alt,
+                            rejected=assistant_text,
+                            strategy=RejectStrategy.LIVE_ALT,
+                            source="live",
+                            source_chunk_id=None,
+                            feedback_ids=(latest[0],),
+                        )
+                        continue
+                    downvote = next(
+                        (r for r in group[1:] if r[4] == -1 and r[5]),
+                        None,
+                    )
+                    if downvote:
+                        yield DPOPair(
+                            prompt=user_prompt,
+                            chosen=assistant_text,
+                            rejected=downvote[5],
+                            strategy=RejectStrategy.LIVE_PAIRED,
+                            source="live",
+                            source_chunk_id=None,
+                            feedback_ids=(latest[0], downvote[0]),
+                        )
+
 
 _DEFAULT_STORE: Optional[KnowledgeBaseStore] = None
 _STORE_LOCK = threading.Lock()
