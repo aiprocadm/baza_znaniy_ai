@@ -92,3 +92,12 @@ def test_gauge_set_on_report_and_cleared_on_clean_run():
         )
         == 0.0
     )
+
+
+def test_snapshot_does_not_crash_on_unmapped_reason(monkeypatch):
+    rh.reset()
+    # A reason present in the registry but absent from _SEVERITY (e.g. a future
+    # RetrievalReason added before its severity mapping) must not crash snapshot().
+    monkeypatch.setitem(rh._REGISTRY, rh.RetrievalReason.HEALTHY, (rh.time.monotonic(), "x"))
+    snap = rh.snapshot()
+    assert isinstance(snap["reasons"], list)

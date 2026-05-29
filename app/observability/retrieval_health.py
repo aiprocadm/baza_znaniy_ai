@@ -9,9 +9,14 @@ from __future__ import annotations
 
 import threading
 import time
+from collections.abc import Iterable
 from contextvars import ContextVar
 from dataclasses import dataclass
 from enum import Enum
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:  # pragma: no cover
+    from prometheus_client import Gauge
 
 
 class RetrievalSeverity(str, Enum):
@@ -36,7 +41,7 @@ _SEVERITY: dict[RetrievalReason, RetrievalSeverity] = {
 }
 
 
-def severity_of(reasons) -> RetrievalSeverity:
+def severity_of(reasons: Iterable[RetrievalReason]) -> RetrievalSeverity:
     sev = [_SEVERITY[r] for r in reasons if r in _SEVERITY]
     if RetrievalSeverity.CRITICAL in sev:
         return RetrievalSeverity.CRITICAL
@@ -64,6 +69,7 @@ class RetrievalReport:
 # Gauge (optional prometheus_client)
 # ---------------------------------------------------------------------------
 
+_RETRIEVAL_DEGRADED: "Gauge | None" = None
 try:  # pragma: no cover - prometheus_client is optional in minimal MVP envs
     from prometheus_client import Gauge
 
@@ -73,7 +79,7 @@ try:  # pragma: no cover - prometheus_client is optional in minimal MVP envs
         labelnames=("reason", "severity"),
     )
 except Exception:  # pragma: no cover - gauge becomes a no-op when unavailable
-    _RETRIEVAL_DEGRADED = None
+    pass
 
 
 def _set_gauge(reason: RetrievalReason, active: bool) -> None:
@@ -130,7 +136,10 @@ def current_report() -> RetrievalReport | None:
     return _CURRENT.get()
 
 
-def snapshot(ttl_seconds: float = _DEFAULT_TTL, extra: tuple = ()) -> dict:
+def snapshot(
+    ttl_seconds: float = _DEFAULT_TTL,
+    extra: Iterable[tuple[RetrievalReason, str]] = (),
+) -> dict:
     """Current degradations within *ttl_seconds*, merged with active probes.
 
     *extra* is an iterable of ``(RetrievalReason, detail)`` from cheap
@@ -147,7 +156,7 @@ def snapshot(ttl_seconds: float = _DEFAULT_TTL, extra: tuple = ()) -> dict:
             reasons.append(
                 {
                     "reason": reason.value,
-                    "severity": _SEVERITY[reason].value,
+                    "severity": _SEVERITY.get(reason, RetrievalSeverity.WARNING).value,
                     "detail": detail,
                     "age_s": round(now - ts, 1),
                 }
@@ -158,7 +167,7 @@ def snapshot(ttl_seconds: float = _DEFAULT_TTL, extra: tuple = ()) -> dict:
             reasons.append(
                 {
                     "reason": reason.value,
-                    "severity": _SEVERITY[reason].value,
+                    "severity": _SEVERITY.get(reason, RetrievalSeverity.WARNING).value,
                     "detail": detail,
                     "age_s": 0.0,
                 }
@@ -168,8 +177,11 @@ def snapshot(ttl_seconds: float = _DEFAULT_TTL, extra: tuple = ()) -> dict:
 
 
 def reset() -> None:
-    """Clear all recorded state (test helper)."""
+    """Clear all recorded state (test helper); also zeros the gauge labels."""
 
     with _LOCK:
+        to_clear = list(_REGISTRY.keys())
         _REGISTRY.clear()
+    for reason in to_clear:
+        _set_gauge(reason, False)
     _CURRENT.set(None)
