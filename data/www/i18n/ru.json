@@ -49,5 +49,10 @@
   "admin.header": "Knowledge Base — Admin",
   "admin.section.upload": "Загрузка документа",
   "admin.section.history": "История загрузок",
-  "admin.section.docs": "Управление документами"
+  "admin.section.docs": "Управление документами",
+  "retrieval.banner.title": "Качество поиска снижено",
+  "retrieval.reason.hashing_embedder": "Поиск работает в режиме hashing-эмбеддера — ответы будут нерелевантны. Задайте KB_EMBEDDINGS_BACKEND и выполните kb-cli reindex.",
+  "retrieval.reason.embedding_dim_mismatch": "Индекс рассогласован с активным эмбеддером — поиск ничего не находит. Выполните kb-cli reindex.",
+  "retrieval.reason.search_truncated": "Корпус больше лимита сканирования — ответ мог пропустить релевантные фрагменты.",
+  "retrieval.reason.vector_backend_down": "Векторный бэкенд недоступен — поиск временно работает по подстроке, качество снижено."
 }
