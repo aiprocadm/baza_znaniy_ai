@@ -79,3 +79,62 @@ def test_build_no_citation_pair_returns_none_when_no_marker() -> None:
         source_chunk_id=1,
     )
     assert build_no_citation_pair(seed) is None
+
+
+def test_build_generic_pair_calls_teacher_without_context() -> None:
+    from app.services.dpo_dataset import RejectStrategy, build_generic_pair
+    from app.services.synthetic_qa import QAPair
+
+    captured: list[str] = []
+
+    def fake_teacher(prompt: str) -> str:
+        captured.append(prompt)
+        return "Это общий ответ из обучающих данных модели."
+
+    seed = QAPair(
+        instruction="Что такое отпуск?",
+        input="",
+        output="Перерыв. [doc_chunk:7]",
+        source_chunk_id=7,
+    )
+    pair = build_generic_pair(seed, teacher=fake_teacher)
+
+    assert pair is not None
+    assert pair.strategy is RejectStrategy.GENERIC
+    assert pair.chosen == seed.output
+    assert pair.rejected == "Это общий ответ из обучающих данных модели."
+    assert "Что такое отпуск?" in captured[0]
+    assert "[doc_chunk:" not in pair.rejected
+
+
+def test_build_generic_pair_returns_none_when_teacher_returns_empty() -> None:
+    from app.services.dpo_dataset import build_generic_pair
+    from app.services.synthetic_qa import QAPair
+
+    seed = QAPair(
+        instruction="Q?",
+        input="",
+        output="A. [doc_chunk:1]",
+        source_chunk_id=1,
+    )
+    pair = build_generic_pair(seed, teacher=lambda _q: "  ")
+    assert pair is None
+
+
+def test_build_generic_pair_strips_accidental_citations_from_teacher() -> None:
+    """Teacher might paste a fake citation; strip it to keep rejected ungrounded."""
+    from app.services.dpo_dataset import build_generic_pair
+    from app.services.synthetic_qa import QAPair
+
+    seed = QAPair(
+        instruction="Q?",
+        input="",
+        output="Real. [doc_chunk:5]",
+        source_chunk_id=5,
+    )
+    pair = build_generic_pair(
+        seed,
+        teacher=lambda _q: "Generic answer. [doc_chunk:5]",
+    )
+    assert pair is not None
+    assert "[doc_chunk:" not in pair.rejected

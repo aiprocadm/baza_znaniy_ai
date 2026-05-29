@@ -16,6 +16,7 @@ import json
 import logging
 from dataclasses import dataclass
 from enum import Enum
+from typing import Callable
 
 from app.services.rag_dataset import strip_citations
 from app.services.synthetic_qa import QAPair
@@ -23,6 +24,15 @@ from app.services.synthetic_qa import QAPair
 LOGGER = logging.getLogger(__name__)
 
 _CITATION_MARKER = "[doc_chunk:"
+
+TeacherProvider = Callable[[str], str]
+
+
+_GENERIC_TEACHER_PROMPT = (
+    "Ответь на вопрос пользователя, опираясь только на свои общие знания. "
+    "НЕ используй никаких документов или цитат. Не указывай источников.\n\n"
+    "Вопрос: {question}"
+)
 
 
 class RejectStrategy(str, Enum):
@@ -91,6 +101,38 @@ def build_no_citation_pair(seed: QAPair) -> DPOPair | None:
         chosen=seed.output,
         rejected=rejected,
         strategy=RejectStrategy.NO_CITATION,
+        source="synthetic",
+        source_chunk_id=seed.source_chunk_id,
+        feedback_ids=(),
+    )
+
+
+def _ask_teacher_generic(question: str, teacher: TeacherProvider) -> str:
+    return teacher(_GENERIC_TEACHER_PROMPT.format(question=question))
+
+
+def build_generic_pair(
+    seed: QAPair,
+    *,
+    teacher: TeacherProvider,
+) -> DPOPair | None:
+    """Ask the teacher to answer **without** the retrieved chunk.
+
+    Returns ``None`` when the teacher response is empty or whitespace —
+    that means the call failed silently and the pair would teach noise.
+    """
+
+    raw = _ask_teacher_generic(seed.instruction, teacher).strip()
+    if not raw:
+        return None
+    # Defensive: if the teacher leaked a citation marker, strip it so
+    # the rejected branch stays cleanly ungrounded.
+    rejected = strip_citations(raw)
+    return DPOPair(
+        prompt=seed.instruction,
+        chosen=seed.output,
+        rejected=rejected,
+        strategy=RejectStrategy.GENERIC,
         source="synthetic",
         source_chunk_id=seed.source_chunk_id,
         feedback_ids=(),
