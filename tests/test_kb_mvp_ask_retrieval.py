@@ -65,3 +65,38 @@ def test_ask_omits_retrieval_when_clean(tmp_path: Path, monkeypatch):
     data = client.post("/api/kb/ask", json={"question": "alpha"}).json()
 
     assert data["retrieval"] is None
+
+
+def _read_meta_event(client: TestClient, question: str) -> dict:
+    with client.stream("POST", "/api/kb/ask/stream", json={"question": question}) as resp:
+        assert resp.status_code == 200
+        text = "".join(chunk.decode("utf-8") for chunk in resp.iter_bytes())
+    lines = text.splitlines()
+    for i, line in enumerate(lines):
+        if line.strip() == "event: meta" and i + 1 < len(lines):
+            data_line = lines[i + 1]
+            if data_line.startswith("data: "):
+                return json.loads(data_line[len("data: ") :])
+    raise AssertionError(f"meta event not found:\n{text}")
+
+
+def test_ask_stream_meta_carries_retrieval_when_degraded(tmp_path: Path, monkeypatch):
+    store = KnowledgeBaseStore(tmp_path / "kb.sqlite")  # hashing default
+    store.add_document("doc1", text="alpha beta gamma " * 20)
+    client = _client(store, monkeypatch)
+
+    meta = _read_meta_event(client, "alpha")
+
+    assert meta["retrieval"] is not None
+    assert meta["retrieval"]["severity"] == "critical"
+    assert any(r["reason"] == "hashing_embedder" for r in meta["retrieval"]["reasons"])
+
+
+def test_ask_stream_meta_retrieval_none_when_clean(tmp_path: Path, monkeypatch):
+    store = KnowledgeBaseStore(tmp_path / "kb.sqlite", embedder=_StubEmbedder())
+    store.add_document("doc1", text="alpha beta gamma " * 20)
+    client = _client(store, monkeypatch)
+
+    meta = _read_meta_event(client, "alpha")
+
+    assert meta["retrieval"] is None

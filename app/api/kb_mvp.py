@@ -1024,7 +1024,7 @@ async def ask_stream(payload: AskRequest, request: Request) -> StreamingResponse
 
     Event sequence:
 
-    * ``event: meta``  — ``{conversation_id, sources, rerank}``
+    * ``event: meta``  — ``{conversation_id, sources, rerank, retrieval}``
     * ``event: token`` — ``{text: "<delta>"}`` (multiple)
     * ``event: done``  — ``{provider, model, elapsed_ms}``
     * ``event: error`` — ``{message}`` (on transport failure; stream then closes)
@@ -1052,6 +1052,7 @@ async def ask_stream(payload: AskRequest, request: Request) -> StreamingResponse
     history_text = _format_history(prior) if prior else ""
     hits, rerank_info = _retrieve_with_rerank(store, payload.question, payload.top_k)
     source_payload = [_hit_to_out(hit).model_dump() for hit in hits]
+    retrieval_out = retrieval_health.report_payload(retrieval_health.current_report())
 
     async def event_generator() -> AsyncIterator[str]:
         start = time.perf_counter()
@@ -1060,6 +1061,7 @@ async def ask_stream(payload: AskRequest, request: Request) -> StreamingResponse
             "conversation_id": conversation.id,
             "sources": source_payload,
             "rerank": rerank_info.model_dump() if rerank_info else None,
+            "retrieval": retrieval_out,
         }
         yield _sse_event("meta", meta)
 
