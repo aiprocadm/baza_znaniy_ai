@@ -6,6 +6,7 @@ from typing import Iterable, Iterator, List
 
 import pytest
 
+import app.observability.retrieval_health as retrieval_health
 import app.services.vectorstore as vectorstore
 from app.retriever.vector_store import SearchFilters
 
@@ -184,3 +185,35 @@ def test_fallback_search_filters(monkeypatch: pytest.MonkeyPatch) -> None:
 
     tag_hits = vectorstore.search("replication", top_k=10, tenant_id="t1", tags=["prod", "runbook"])
     assert [item["id"] for item in tag_hits] == [1]
+
+
+@pytest.fixture(autouse=True)
+def _reset_retrieval_health():
+    retrieval_health.reset()
+    yield
+    retrieval_health.reset()
+
+
+def test_search_reports_vector_backend_down_on_fallback(monkeypatch):
+    monkeypatch.setattr(vectorstore, "_VECTOR_STORE", ExplodingVectorStore())
+    vectorstore.index_chunks([{"id": 1, "text": "beta", "tenant_id": "t1"}])
+
+    vectorstore.search("beta", top_k=1, tenant_id="t1")
+
+    rep = retrieval_health.current_report()
+    assert rep is not None
+    assert retrieval_health.RetrievalReason.VECTOR_BACKEND_DOWN in rep.reasons
+    assert retrieval_health.snapshot()["severity"] == "critical"
+
+
+def test_search_reports_healthy_on_vector_success(monkeypatch):
+    dummy = DummyVectorStore()
+    dummy.results = [{"text": "hit"}]
+    monkeypatch.setattr(vectorstore, "_VECTOR_STORE", dummy)
+
+    vectorstore.search("anything", top_k=5, tenant_id="t1")
+
+    rep = retrieval_health.current_report()
+    assert rep is not None
+    assert rep.source == "vector"
+    assert rep.degraded is False
