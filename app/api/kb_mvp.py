@@ -1202,5 +1202,10 @@ def delete_conversation(conv_id: str, request: Request) -> dict[str, Any]:
 router.include_router(public)
 router.include_router(protected)
 
+# W4 — live feedback collection endpoints
+from app.api.kb_feedback import router as kb_feedback_router  # noqa: E402
+
+router.include_router(kb_feedback_router)
+
 
 __all__ = ["router"]

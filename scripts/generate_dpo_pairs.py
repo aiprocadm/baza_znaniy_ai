@@ -107,9 +107,7 @@ def _estimate_cost(target_pairs: int, proportions) -> float:
     from app.services.dpo_dataset import RejectStrategy
 
     paid_share = sum(
-        share
-        for strategy, share in proportions.items()
-        if strategy != RejectStrategy.NO_CITATION
+        share for strategy, share in proportions.items() if strategy != RejectStrategy.NO_CITATION
     )
     teacher_calls = int(round(target_pairs * paid_share))
     return teacher_calls * 0.0005
@@ -151,8 +149,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     cost = _estimate_cost(args.target_pairs, proportions)
     if cost > args.max_cost_usd and not args.yes:
         raise SystemExit(
-            f"Estimated ${cost:.2f} > budget ${args.max_cost_usd:.2f}. "
-            "Pass --yes to override."
+            f"Estimated ${cost:.2f} > budget ${args.max_cost_usd:.2f}. " "Pass --yes to override."
         )
 
     seeds = _load_seeds(args.seeds)
