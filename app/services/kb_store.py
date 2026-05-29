@@ -236,8 +236,48 @@ class KnowledgeBaseStore:
         conn.execute("PRAGMA foreign_keys=ON;")
         return conn
 
+    # Columns appended to the schema after a DB may already have been created
+    # by an older build. ``CREATE TABLE IF NOT EXISTS`` never alters an
+    # existing table, so these are reconciled in place by ``_reconcile_columns``
+    # (below) before the indexes are built — one index (idx_kb_chunks_doc_page)
+    # references ``page_number`` and would raise "no such column" on an old DB.
+    # Keep in sync with the CREATE TABLE statements in ``_init_schema`` AND with
+    # alembic/versions/20260522_02_pdf_citation.py (the full-stack/Postgres path
+    # that the lightweight MVP path deliberately does not run).
+    # Each entry is (table, column, column_definition).
+    _COLUMN_MIGRATIONS: tuple[tuple[str, str, str], ...] = (
+        ("kb_chunks", "page_number", "INTEGER"),
+        ("kb_documents", "has_original_file", "INTEGER NOT NULL DEFAULT 0"),
+        ("kb_documents", "file_relpath", "TEXT"),
+    )
+
+    def _reconcile_columns(self, conn: sqlite3.Connection) -> None:
+        """Add columns that post-date a DB created by an older build.
+
+        ``CREATE TABLE IF NOT EXISTS`` is a no-op for a table that already
+        exists, so it never backfills columns added to the schema later. For
+        each known migration, add the column with ``ALTER TABLE`` when its
+        table exists but lacks it. Tables that don't exist yet are skipped —
+        ``_init_schema`` creates them fresh with the full column set. Idempotent
+        (guarded by a column-presence check), so it is safe on every open.
+
+        Table/column names come from the hardcoded ``_COLUMN_MIGRATIONS``
+        constant, never user input; SQLite cannot bind identifiers in DDL, so
+        interpolation here is both necessary and safe.
+        """
+        for table, column, definition in self._COLUMN_MIGRATIONS:
+            existing = {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
+            if not existing:
+                continue  # fresh DB — CREATE TABLE below includes the column
+            if column not in existing:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+
     def _init_schema(self) -> None:
         with self._lock, self._connect() as conn:
+            # Upgrade any pre-existing tables before running the schema script:
+            # an index below references page_number, which an old DB lacks until
+            # reconciled. On a fresh DB this is a no-op (no tables yet).
+            self._reconcile_columns(conn)
             conn.executescript(
                 """
                 CREATE TABLE IF NOT EXISTS kb_documents (
