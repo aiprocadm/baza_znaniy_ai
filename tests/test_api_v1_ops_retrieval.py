@@ -36,3 +36,19 @@ def test_dependencies_ok_when_no_degradation(monkeypatch):
 
     assert result["checks"]["retrieval"] == "ok"
     assert result["status"] == "ok"
+
+
+def test_dependencies_warning_severity_still_degrades_status(monkeypatch):
+    retrieval_health.reset()
+    monkeypatch.setattr(ops, "get_vector_store", lambda: _OkStore())
+    retrieval_health.report(
+        retrieval_health.RetrievalReport(
+            source="sqlite",
+            reasons=(retrieval_health.RetrievalReason.SEARCH_TRUNCATED,),
+        )
+    )
+
+    result = ops.dependencies()
+
+    assert result["checks"]["retrieval"] == "warning"
+    assert result["status"] == "degraded"
