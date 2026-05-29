@@ -17,7 +17,12 @@ import logging
 from dataclasses import dataclass
 from enum import Enum
 
+from app.services.rag_dataset import strip_citations
+from app.services.synthetic_qa import QAPair
+
 LOGGER = logging.getLogger(__name__)
+
+_CITATION_MARKER = "[doc_chunk:"
 
 
 class RejectStrategy(str, Enum):
@@ -69,3 +74,24 @@ class DPOPair:
 
     def to_jsonl_line(self) -> str:
         return json.dumps(self.to_dict(), ensure_ascii=False) + "\n"
+
+
+def build_no_citation_pair(seed: QAPair) -> DPOPair | None:
+    """Strip the citation suffix from the chosen answer to form ``rejected``.
+
+    Returns ``None`` when the seed has no citation marker — there is
+    no signal to learn from in that case.
+    """
+
+    if _CITATION_MARKER not in seed.output:
+        return None
+    rejected = strip_citations(seed.output)
+    return DPOPair(
+        prompt=seed.instruction,
+        chosen=seed.output,
+        rejected=rejected,
+        strategy=RejectStrategy.NO_CITATION,
+        source="synthetic",
+        source_chunk_id=seed.source_chunk_id,
+        feedback_ids=(),
+    )

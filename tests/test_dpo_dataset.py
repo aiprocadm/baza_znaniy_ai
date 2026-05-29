@@ -44,3 +44,38 @@ def test_dpo_pair_to_jsonl_line_top_level_keys() -> None:
     assert data["meta"]["source"] == "synthetic"
     assert data["meta"]["source_chunk_id"] == 7
     assert data["meta"]["feedback_ids"] == []
+
+
+def test_build_no_citation_pair_strips_marker() -> None:
+    from app.services.dpo_dataset import RejectStrategy, build_no_citation_pair
+    from app.services.synthetic_qa import QAPair
+
+    seed = QAPair(
+        instruction="Что такое отпуск?",
+        input="",
+        output="Это перерыв. [doc_chunk:7]",
+        source_chunk_id=7,
+    )
+    pair = build_no_citation_pair(seed)
+
+    assert pair.strategy is RejectStrategy.NO_CITATION
+    assert pair.prompt == "Что такое отпуск?"
+    assert pair.chosen == "Это перерыв. [doc_chunk:7]"
+    assert pair.rejected == "Это перерыв."
+    assert "[doc_chunk:" not in pair.rejected
+    assert pair.source == "synthetic"
+    assert pair.source_chunk_id == 7
+
+
+def test_build_no_citation_pair_returns_none_when_no_marker() -> None:
+    """Seeds without a citation marker can't form a meaningful NO_CITATION pair."""
+    from app.services.dpo_dataset import build_no_citation_pair
+    from app.services.synthetic_qa import QAPair
+
+    seed = QAPair(
+        instruction="Q",
+        input="",
+        output="A without marker",
+        source_chunk_id=1,
+    )
+    assert build_no_citation_pair(seed) is None
