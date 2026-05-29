@@ -22,6 +22,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field, field_validator
 
 from app.api.kb_auth import auth_status, require_api_key
+from app.observability import retrieval_health
 from app.services import kb_embeddings, kb_llm, kb_rerank
 from app.services.kb_store import (
     Conversation as StoredConversation,
@@ -606,6 +607,7 @@ def health(request: Request) -> dict[str, Any]:
     db_path = Path(store.db_path)
     documents_count = 0
     chunks_count = 0
+    distinct_dims = 0
     db_size_bytes = 0
     last_indexed_at: Optional[str] = None
     if db_path.is_file():
@@ -622,6 +624,8 @@ def health(request: Request) -> dict[str, Any]:
                 row = conn.execute("SELECT MAX(created_at) FROM kb_documents").fetchone()
                 if row and row[0]:
                     last_indexed_at = str(row[0])
+                row = conn.execute("SELECT COUNT(DISTINCT dim) FROM kb_chunks").fetchone()
+                distinct_dims = int(row[0]) if row else 0
             finally:
                 conn.close()
         except _sqlite3.Error:
@@ -635,8 +639,25 @@ def health(request: Request) -> dict[str, Any]:
 
     compliance_mode = os.environ.get("KB_COMPLIANCE_MODE") or None
 
+    extra: list[tuple] = []
+    try:
+        if kb_embeddings.embedder_status().get("name") == "hash":
+            extra.append((retrieval_health.RetrievalReason.HASHING_EMBEDDER, "embedder=hash"))
+    except Exception:  # pragma: no cover - never let a probe break health
+        pass
+    if distinct_dims > 1:
+        extra.append(
+            (
+                retrieval_health.RetrievalReason.EMBEDDING_DIM_MISMATCH,
+                f"{distinct_dims} distinct embedding dims present",
+            )
+        )
+    retrieval = retrieval_health.snapshot(extra=tuple(extra))
+
     return {
         "status": "ok",
+        "degraded": retrieval["degraded"],
+        "retrieval": retrieval,
         "llm": kb_llm.provider_status(),
         "embedder": kb_embeddings.embedder_status(),
         "reranker": kb_rerank.reranker_status(),

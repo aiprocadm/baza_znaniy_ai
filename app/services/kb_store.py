@@ -24,6 +24,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, List, Mapping, Optional, Protocol, Sequence, Tuple
 
+from app.observability import retrieval_health
+
 LOGGER = logging.getLogger(__name__)
 
 DEFAULT_CHUNK_SIZE = 600
@@ -483,6 +485,8 @@ class KnowledgeBaseStore:
         q_dim = len(q_vec)
 
         hard_limit = _search_hard_limit()
+        reasons: list[retrieval_health.RetrievalReason] = []
+        detail = ""
         with self._connect() as conn:
             rows = conn.execute(
                 """
@@ -494,11 +498,30 @@ class KnowledgeBaseStore:
                 """,
                 (q_dim, hard_limit),
             ).fetchall()
+            if not rows:
+                has_chunks = conn.execute("SELECT EXISTS(SELECT 1 FROM kb_chunks)").fetchone()[0]
+                if has_chunks:
+                    dims = [
+                        str(r[0])
+                        for r in conn.execute(
+                            "SELECT DISTINCT dim FROM kb_chunks LIMIT 3"
+                        ).fetchall()
+                    ]
+                    reasons.append(retrieval_health.RetrievalReason.EMBEDDING_DIM_MISMATCH)
+                    detail = f"query dim {q_dim} not in stored dims {{{', '.join(dims)}}}"
         if len(rows) >= hard_limit:
             LOGGER.warning(
                 "kb_store.search hit hard limit (%d chunks). Consider Qdrant for large corpora.",
                 hard_limit,
             )
+            reasons.append(retrieval_health.RetrievalReason.SEARCH_TRUNCATED)
+            detail = detail or f"scan capped at {hard_limit} chunks"
+        if getattr(self._embedder, "name", None) == HASHING_EMBEDDER_NAME:
+            reasons.append(retrieval_health.RetrievalReason.HASHING_EMBEDDER)
+            detail = detail or "embedder=hash (near-random semantic matches)"
+        retrieval_health.report(
+            retrieval_health.RetrievalReport(source="sqlite", reasons=tuple(reasons), detail=detail)
+        )
 
         scored: List[Tuple[float, SearchHit]] = []
         for (

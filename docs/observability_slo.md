@@ -19,3 +19,20 @@
 - `queue_lag_high`: queue lag above SLO limit for 10m.
 - `ingest_throughput_drop`: throughput is near zero during business hours.
 - `llm_token_spike`: sudden token usage growth (possible runaway prompts).
+
+## Alert: retrieval degraded
+
+`kb_retrieval_degraded{reason,severity}` is `1` while a retrieval path is running in a quality-compromised mode and `0` otherwise. Reasons: `vector_backend_down` (Qdrant/FAISS down → grep fallback), `hashing_embedder` (no real embedder configured), `embedding_dim_mismatch` (index incoherent with the active embedder — reindex needed), `search_truncated` (corpus exceeds the scan cap).
+
+Recommended Prometheus rule — page when any critical degradation persists for 5 minutes:
+
+```yaml
+- alert: RetrievalDegradedCritical
+  expr: max_over_time(kb_retrieval_degraded{severity="critical"}[5m]) == 1
+  for: 5m
+  labels:
+    severity: critical
+  annotations:
+    summary: "Retrieval degraded ({{ $labels.reason }})"
+    description: "Answers may be irrelevant or empty. Check embedder config, reindex state, and vector backend health."
+```

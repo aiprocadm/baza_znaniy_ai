@@ -7,6 +7,7 @@ from time import perf_counter
 from fastapi import APIRouter, Request
 
 from app.core.config import get_version_info
+from app.observability import retrieval_health
 from app.retriever.vector_store import get_vector_store
 
 router = APIRouter(prefix="/ops", tags=["ops"])
@@ -43,6 +44,12 @@ def dependencies() -> dict[str, object]:
     except Exception:
         checks["vector_store"] = "degraded"
         status = "degraded"
+    snap = retrieval_health.snapshot()
+    if snap["degraded"]:
+        checks["retrieval"] = snap["severity"]
+        status = "degraded"
+    else:
+        checks["retrieval"] = "ok"
     return {"status": status, "checks": checks, "version": get_version_info()}
 
 

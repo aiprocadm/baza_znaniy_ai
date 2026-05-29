@@ -21,6 +21,7 @@ except Exception:  # pragma: no cover - fallback when qdrant-client not installe
 from app.core.config import get_settings
 from app.retriever.vector_store import SearchFilters, get_vector_store
 from app.observability.metrics import record_index_operation, record_search_operation
+from app.observability import retrieval_health
 
 LOGGER = logging.getLogger(__name__)
 
@@ -231,6 +232,13 @@ def search(
         duration = time.perf_counter() - start
         record_search_operation("vector", "error", duration, 0)
         LOGGER.exception("Falling back to in-memory search", exc_info=exc)
+        retrieval_health.report(
+            retrieval_health.RetrievalReport(
+                source="fallback",
+                reasons=(retrieval_health.RetrievalReason.VECTOR_BACKEND_DOWN,),
+                detail=str(exc),
+            )
+        )
         fallback_start = time.perf_counter()
         fallback_hits = _search_fallback(query, top_k, filters=filters)
         record_search_operation(
@@ -241,6 +249,7 @@ def search(
         )
         return fallback_hits
 
+    retrieval_health.report(retrieval_health.RetrievalReport(source="vector"))
     record_search_operation("vector", "success", time.perf_counter() - start, len(hits))
     return hits
 
