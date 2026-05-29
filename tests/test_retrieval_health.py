@@ -101,3 +101,23 @@ def test_snapshot_does_not_crash_on_unmapped_reason(monkeypatch):
     monkeypatch.setitem(rh._REGISTRY, rh.RetrievalReason.HEALTHY, (rh.time.monotonic(), "x"))
     snap = rh.snapshot()
     assert isinstance(snap["reasons"], list)
+
+
+def test_report_payload_none_when_missing_or_clean():
+    assert rh.report_payload(None) is None
+    assert rh.report_payload(RetrievalReport(source="sqlite")) is None
+
+
+def test_report_payload_mirrors_degraded_report():
+    rep = RetrievalReport(
+        source="sqlite",
+        reasons=(RetrievalReason.HASHING_EMBEDDER, RetrievalReason.SEARCH_TRUNCATED),
+        detail="embedder=hash",
+    )
+    payload = rh.report_payload(rep)
+    assert payload["degraded"] is True
+    assert payload["severity"] == "critical"  # CRITICAL dominates WARNING
+    by_reason = {r["reason"]: r for r in payload["reasons"]}
+    assert by_reason["hashing_embedder"]["severity"] == "critical"
+    assert by_reason["search_truncated"]["severity"] == "warning"
+    assert by_reason["hashing_embedder"]["detail"] == "embedder=hash"

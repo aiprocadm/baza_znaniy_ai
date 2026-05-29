@@ -185,3 +185,29 @@ def reset() -> None:
     for reason in to_clear:
         _set_gauge(reason, False)
     _CURRENT.set(None)
+
+
+def report_payload(rep: "RetrievalReport | None") -> dict | None:
+    """Render a per-query report as a JSON-safe dict, or ``None`` when clean.
+
+    Returns ``None`` when no report was recorded for this request context or
+    the report is clean, so endpoints keep ``retrieval`` absent for healthy
+    queries (backward compatible). When degraded, mirrors the ``snapshot()``
+    reason entries (minus ``age_s``) so a client renders either source
+    identically. ``detail`` is the report-level detail, shared across reasons.
+    """
+
+    if rep is None or not rep.degraded:
+        return None
+    return {
+        "degraded": True,
+        "severity": rep.severity.value,
+        "reasons": [
+            {
+                "reason": reason.value,
+                "severity": _SEVERITY.get(reason, RetrievalSeverity.WARNING).value,
+                "detail": rep.detail,
+            }
+            for reason in rep.reasons
+        ],
+    }
