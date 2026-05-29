@@ -178,6 +178,18 @@ class AskRequest(BaseModel):
         return cleaned or None
 
 
+class RetrievalReasonOut(BaseModel):
+    reason: str
+    severity: str
+    detail: str = ""
+
+
+class RetrievalReportOut(BaseModel):
+    degraded: bool
+    severity: str
+    reasons: List[RetrievalReasonOut] = Field(default_factory=list)
+
+
 class AskResponse(BaseModel):
     question: str
     answer: str
@@ -186,6 +198,7 @@ class AskResponse(BaseModel):
     model: Optional[str] = None
     elapsed_ms: Optional[float] = None
     rerank: Optional[RerankInfo] = None
+    retrieval: Optional[RetrievalReportOut] = None
     conversation_id: str = Field(
         ..., description="Conversation UUID — same as request, or freshly created."
     )
@@ -940,6 +953,7 @@ def ask(payload: AskRequest, request: Request) -> AskResponse:
     history_text = _format_history(prior) if prior else ""
 
     hits, rerank_info = _retrieve_with_rerank(store, payload.question, payload.top_k)
+    retrieval_out = retrieval_health.report_payload(retrieval_health.current_report())
     answer, provider, model, elapsed_ms = _generate_answer(
         payload.question, hits, request, history=history_text
     )
@@ -967,6 +981,7 @@ def ask(payload: AskRequest, request: Request) -> AskResponse:
         model=model,
         elapsed_ms=elapsed_ms,
         rerank=rerank_info,
+        retrieval=RetrievalReportOut(**retrieval_out) if retrieval_out else None,
         conversation_id=conversation.id,
     )
 
@@ -1009,7 +1024,7 @@ async def ask_stream(payload: AskRequest, request: Request) -> StreamingResponse
 
     Event sequence:
 
-    * ``event: meta``  — ``{conversation_id, sources, rerank}``
+    * ``event: meta``  — ``{conversation_id, sources, rerank, retrieval}``
     * ``event: token`` — ``{text: "<delta>"}`` (multiple)
     * ``event: done``  — ``{provider, model, elapsed_ms}``
     * ``event: error`` — ``{message}`` (on transport failure; stream then closes)
@@ -1037,6 +1052,7 @@ async def ask_stream(payload: AskRequest, request: Request) -> StreamingResponse
     history_text = _format_history(prior) if prior else ""
     hits, rerank_info = _retrieve_with_rerank(store, payload.question, payload.top_k)
     source_payload = [_hit_to_out(hit).model_dump() for hit in hits]
+    retrieval_out = retrieval_health.report_payload(retrieval_health.current_report())
 
     async def event_generator() -> AsyncIterator[str]:
         start = time.perf_counter()
@@ -1045,6 +1061,7 @@ async def ask_stream(payload: AskRequest, request: Request) -> StreamingResponse
             "conversation_id": conversation.id,
             "sources": source_payload,
             "rerank": rerank_info.model_dump() if rerank_info else None,
+            "retrieval": retrieval_out,
         }
         yield _sse_event("meta", meta)
 
