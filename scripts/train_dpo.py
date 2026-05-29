@@ -35,9 +35,7 @@ _PROMPT_TEMPLATE_RAG = (
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description="Train a DPO adapter from a JSONL dataset."
-    )
+    parser = argparse.ArgumentParser(description="Train a DPO adapter from a JSONL dataset.")
     parser.add_argument("--base-model", required=True)
     parser.add_argument("--train", required=True, type=Path)
     parser.add_argument("--sft-adapter", required=True, type=Path)
@@ -107,9 +105,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         import trl
     except ImportError as exc:  # pragma: no cover - depends on env
-        raise SystemExit(
-            f"trl is required: {exc}. Install with `pip install trl~=0.11`."
-        )
+        raise SystemExit(f"trl is required: {exc}. Install with `pip install trl~=0.11`.")
 
     rows = _load_dataset(args.train)
     rows = _apply_prompt_mode(rows, args.prompt_mode)

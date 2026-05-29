@@ -63,9 +63,7 @@ class DPOTrainer:
             {
                 "model": self.model,
                 "beta": self.args.beta if self.args is not None else None,
-                "dataset_size": (
-                    len(self.train_dataset) if self.train_dataset is not None else 0
-                ),
+                "dataset_size": (len(self.train_dataset) if self.train_dataset is not None else 0),
             }
         )
 
