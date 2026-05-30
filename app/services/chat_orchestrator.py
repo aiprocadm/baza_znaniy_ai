@@ -13,8 +13,9 @@ from fastapi import HTTPException, status
 from app.chat.store import ChatStoreProtocol, ConversationAccessError
 from app.llm import LoRAAdapterNotFoundError, ModelNotFoundError, ModelNotReadyError
 from app.memory.store import MemoryStore
-from app.models import ChatRequest, ChatResponse, Citation
+from app.models import ChatRequest, ChatResponse, Citation, RetrievalReportOut
 from app.models.user import UserRecord
+from app.observability import retrieval_health
 from app.observability.metrics import record_chat_completion
 from app.rag.context import build_context, select_citations
 from app.services.vectorstore import search
@@ -223,6 +224,7 @@ def handle_chat(
             )
 
         hits = list(search(payload.message, top_k=runtime.retrieve_topk))
+        retrieval_out = retrieval_health.report_payload(retrieval_health.current_report())
         if hits:
             if runtime.rerank_enabled and runtime.reranker is not None:
                 try:
@@ -308,6 +310,7 @@ def handle_chat(
             latency_ms=latency_ms,
             max_context_tokens=runtime.llm_ctx,
             max_generation_tokens=runtime.llm_max_tokens,
+            retrieval=RetrievalReportOut(**retrieval_out) if retrieval_out else None,
         )
     except HTTPException:
         chat_status = "error"
