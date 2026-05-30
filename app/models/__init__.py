@@ -111,6 +111,27 @@ class Citation(BaseModel):
     score: float
 
 
+class RetrievalReasonOut(BaseModel):
+    """A single retrieval-degradation reason surfaced to the v1 client.
+
+    Mirrors one entry of ``retrieval_health.report_payload(...)`` /
+    ``snapshot()``. The v1 path keeps its own copy of this model (separate
+    from the MVP ``kb_mvp.RetrievalReportOut``) per the two-path architecture.
+    """
+
+    reason: str
+    severity: str
+    detail: str = ""
+
+
+class RetrievalReportOut(BaseModel):
+    """Per-query retrieval-degradation summary attached to ``ChatResponse``."""
+
+    degraded: bool
+    severity: str
+    reasons: List[RetrievalReasonOut] = Field(default_factory=list)
+
+
 class ChatResponse(BaseModel):
     """Response payload for chat endpoint."""
 
@@ -125,6 +146,7 @@ class ChatResponse(BaseModel):
     max_generation_tokens: Optional[int] = Field(
         None, description="Upper bound for generated tokens per response"
     )
+    retrieval: Optional[RetrievalReportOut] = None
 
 
 class FileInfo(BaseModel):
