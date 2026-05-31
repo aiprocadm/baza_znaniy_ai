@@ -140,7 +140,9 @@ These are small and were *not* task steps in any plan — they are gaps surfaced
    `audit_log_retention_days` setting (default `0` = disabled/keep-forever, opt-in purging) +
    `purge_audit_log()` helper in `app/core/audit_db.py` + `.env.example` doc. New tests:
    `tests/test_config_audit_retention.py` (3) and 2 added to `tests/test_audit_db.py`. Net-zero mypy (226).
-   *Not yet wired to a scheduled job — an operator/cron calls `purge_audit_log(session, retention_days=settings.audit_log_retention_days)`.*
+   **Wired end-to-end** via `POST /api/v1/admin/audit/purge` (admin-only; uses `AUDIT_LOG_RETENTION_DAYS`,
+   optional `?days=N` override; no-op when disabled) — 3 endpoint tests in `tests/test_admin_audit_endpoint.py`.
+   A cron can hit it the same way the `kb-cli health` command polls the API.
 
 3. **This branch is unmerged.** `chore/mypy-safe-pass-deps-filestats` is 6 commits ahead of `main` and
    complete/green. Per the mypy plan's Task 4 Step 4 it should be finished via
