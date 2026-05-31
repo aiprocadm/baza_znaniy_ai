@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta
+
 import pytest
 from sqlmodel import Session, SQLModel, create_engine, select
 
-from app.core.audit_db import persist_audit_event, query_audit_log
+from app.core.audit_db import persist_audit_event, purge_audit_log, query_audit_log
 from app.models.audit import AuditLog
 
 
@@ -68,3 +70,26 @@ def test_query_audit_log_filter_by_user(session: Session) -> None:
     persist_audit_event(session, event="api_request", user_id="bob")
     rows = query_audit_log(session, user_id="alice")
     assert len(rows) == 1
+
+
+def test_purge_audit_log_removes_entries_older_than_retention(session: Session) -> None:
+    reference = datetime(2026, 5, 31, 12, 0, 0)
+    persist_audit_event(session, event="stale", timestamp=reference - timedelta(days=40))
+    persist_audit_event(session, event="fresh", timestamp=reference - timedelta(days=5))
+
+    removed = purge_audit_log(session, retention_days=30, now=reference)
+
+    assert removed == 1
+    remaining = session.exec(select(AuditLog)).all()
+    assert len(remaining) == 1
+    assert remaining[0].event == "fresh"
+
+
+def test_purge_audit_log_disabled_when_retention_not_positive(session: Session) -> None:
+    reference = datetime(2026, 5, 31, 12, 0, 0)
+    persist_audit_event(session, event="stale", timestamp=reference - timedelta(days=400))
+
+    removed = purge_audit_log(session, retention_days=0, now=reference)
+
+    assert removed == 0
+    assert len(session.exec(select(AuditLog)).all()) == 1

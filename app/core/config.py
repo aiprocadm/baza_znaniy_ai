@@ -894,6 +894,25 @@ class Settings(BaseSettings):
     billing_enabled: bool = Field(default=False, validation_alias=AliasChoices("BILLING_ENABLED"))
     billing_provider: str = Field(default="none", validation_alias=AliasChoices("BILLING_PROVIDER"))
 
+    # Audit log ----------------------------------------------------------
+    audit_log_retention_days: int = Field(
+        default=0,
+        validation_alias=AliasChoices("AUDIT_LOG_RETENTION_DAYS"),
+        description="Days of audit_log history to retain. Zero (default) disables purging.",
+    )
+
+    @field_validator("audit_log_retention_days", mode="before")
+    @classmethod
+    def _validate_audit_retention(cls, value: object) -> int:
+        if value in {None, "", Ellipsis}:
+            return 0
+        if not isinstance(value, (str, int, float)):
+            raise ValueError("audit_log_retention_days must be numeric")
+        candidate = int(value)
+        if candidate < 0:
+            raise ValueError("audit_log_retention_days cannot be negative")
+        return candidate
+
     # Validators ---------------------------------------------------------
     @field_validator("cors_allow_origins", mode="before")
     @classmethod
