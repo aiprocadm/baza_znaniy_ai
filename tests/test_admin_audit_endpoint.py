@@ -109,9 +109,9 @@ def test_purge_removes_entries_older_than_days(app, engine):
     assert data["removed"] == 1
     assert data["retention_days"] == 30
 
-    remaining = client.get("/admin/audit").json()["items"]
-    assert len(remaining) == 1
-    assert remaining[0]["event"] == "fresh"
+    events = {item["event"] for item in client.get("/admin/audit").json()["items"]}
+    assert "fresh" in events
+    assert "stale" not in events
 
 
 def test_purge_defaults_to_configured_retention(app, engine, monkeypatch):
@@ -145,3 +145,30 @@ def test_purge_with_zero_days_is_noop(app, engine):
     assert resp.status_code == 200
     assert resp.json()["removed"] == 0
     assert len(client.get("/admin/audit").json()["items"]) == 1
+
+
+def test_purge_records_audit_event(app, engine):
+    with Session(engine) as s:
+        persist_audit_event(s, event="stale", timestamp=utc_now_naive() - timedelta(days=40))
+        persist_audit_event(s, event="fresh", timestamp=utc_now_naive() - timedelta(days=5))
+
+    client = TestClient(app)
+    resp = client.post("/admin/audit/purge?days=30")
+    assert resp.json()["removed"] == 1
+
+    # Destroying audit history is itself an auditable action.
+    items = client.get("/admin/audit").json()["items"]
+    purges = [item for item in items if item["event"] == "audit_log_purged"]
+    assert len(purges) == 1
+    assert purges[0]["user_id"] == "test-admin"
+
+
+def test_purge_noop_records_no_audit_event(app, engine):
+    with Session(engine) as s:
+        persist_audit_event(s, event="stale", timestamp=utc_now_naive() - timedelta(days=400))
+
+    client = TestClient(app)
+    client.post("/admin/audit/purge?days=0")
+
+    items = client.get("/admin/audit").json()["items"]
+    assert [item["event"] for item in items] == ["stale"]
