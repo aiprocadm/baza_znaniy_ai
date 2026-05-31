@@ -6,7 +6,7 @@ import json
 from datetime import datetime, timedelta
 from typing import Any, Optional
 
-from sqlmodel import Session, select
+from sqlmodel import Session, col, select
 
 from app.core.datetime_utils import utc_now_naive
 from app.models.audit import AuditLog
@@ -68,7 +68,7 @@ def query_audit_log(
         stmt = stmt.where(AuditLog.timestamp >= since)
     if until:
         stmt = stmt.where(AuditLog.timestamp <= until)
-    stmt = stmt.order_by(AuditLog.timestamp.desc()).limit(limit).offset(offset)
+    stmt = stmt.order_by(col(AuditLog.timestamp).desc()).limit(limit).offset(offset)
     return list(session.exec(stmt).all())
 
 
