@@ -45,7 +45,7 @@ py -3 -m scripts.kb_cli health               # ops CLI: also backup/restore/rein
 docker compose -f compose.yml up -d --build  # full stack (README quick start)
 ```
 
-`mypy app` carries a **pre-existing baseline (~103 errors across 16 files)** — judge a change by *new* errors on touched lines, not the total count. Config: `[tool.mypy]` in `pyproject.toml`.
+`mypy app` carries a **pre-existing baseline (244 errors across 48 files)** — judge a change by *new* errors on touched lines, not the total count. (A single-file check like `mypy app/foo.py` reports a *different, smaller* total — it only follows that file's imports; don't compare the two.) Config: `[tool.mypy]` in `pyproject.toml`.
 
 Frontend (in `frontend/`):
 
