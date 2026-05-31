@@ -141,18 +141,18 @@ These are small and were *not* task steps in any plan — they are gaps surfaced
    `purge_audit_log()` helper in `app/core/audit_db.py` + `.env.example` doc. New tests:
    `tests/test_config_audit_retention.py` (3) and 2 added to `tests/test_audit_db.py`. Net-zero mypy (226).
    **Wired end-to-end** via `POST /api/v1/admin/audit/purge` (admin-only; uses `AUDIT_LOG_RETENTION_DAYS`,
-   optional `?days=N` override; no-op when disabled) — 3 endpoint tests in `tests/test_admin_audit_endpoint.py`.
-   A cron can hit it the same way the `kb-cli health` command polls the API.
+   optional `?days=N` override; no-op when disabled) — 5 endpoint tests in `tests/test_admin_audit_endpoint.py`.
+   A cron can hit it the same way the `kb-cli health` command polls the API. A non-empty purge is itself
+   recorded as an `audit_log_purged` audit event (actor + rows-removed), so destroying history leaves a trail.
 
 3. **This branch is unmerged.** `chore/mypy-safe-pass-deps-filestats` is 6 commits ahead of `main` and
    complete/green. Per the mypy plan's Task 4 Step 4 it should be finished via
    **superpowers:finishing-a-development-branch** (push + open PR titled
    `chore(mypy): safe pass — deps.py + file_stats.py to zero`).
 
-4. **Pre-existing mypy error in `app/core/audit_db.py:71`** (discovered, *not* introduced here):
-   `order_by(AuditLog.timestamp.desc())` flags `"datetime" has no attribute "desc" [attr-defined]`.
-   It's in the 226 baseline. A 1-line `col()` wrap (the same idiom already used in `file_stats.py`,
-   commit 6a8e3a8) would drive `audit_db.py` to zero — a natural target for the next clean-files mypy pass.
+4. ~~**Pre-existing mypy error in `app/core/audit_db.py:71`**~~ **DONE 2026-05-31**: wrapped
+   `order_by(col(AuditLog.timestamp).desc())` (the `file_stats.py` idiom). `audit_db.py` is now
+   mypy-clean; whole-package count 226 → **225** (45 files).
 
 ---
 
