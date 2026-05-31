@@ -68,3 +68,17 @@ def test_get_upload_limits_allows_required_extensions(
     limits = deps_module.get_upload_limits()
 
     assert extension in limits.allowed_extensions
+
+
+def test_get_upload_limits_parses_explicit_extensions(
+    deps_module, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An explicit UPLOAD_ALLOWED_EXTS list parses into the expected set."""
+
+    monkeypatch.delenv("MAX_UPLOAD_MB", raising=False)
+    monkeypatch.delenv("UPLOAD_MAX_SIZE", raising=False)
+    monkeypatch.setenv("UPLOAD_ALLOWED_EXTS", "pdf,docx")
+
+    limits = deps_module.get_upload_limits()
+
+    assert limits.allowed_extensions == {"pdf", "docx"}
