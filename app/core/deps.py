@@ -111,7 +111,10 @@ def get_upload_limits() -> UploadLimits:
     )
 
 
-def get_tenant(request: Request | None = None) -> str:
+# FastAPI requires a bare ``Request`` annotation to inject the request object;
+# ``Request | None`` breaks route registration. ``= None`` enables direct calls,
+# so the implicit-Optional default is suppressed intentionally on these deps.
+def get_tenant(request: Request = None) -> str:  # type: ignore[assignment]
     """Resolve tenant identifier from headers (defaulting to ``"default"``)."""
 
     header_value = (
@@ -121,7 +124,7 @@ def get_tenant(request: Request | None = None) -> str:
     return tenant or "default"
 
 
-def get_ingest_service(request: Request | None = None) -> IngestService:
+def get_ingest_service(request: Request = None) -> IngestService:  # type: ignore[assignment]
     """Access the shared :class:`~app.ingest.service.IngestService` instance."""
 
     if request is None:
@@ -129,7 +132,7 @@ def get_ingest_service(request: Request | None = None) -> IngestService:
     return request.app.state.ingest_service
 
 
-def get_ingest_session(request: Request | None = None) -> Iterator[Session]:
+def get_ingest_session(request: Request = None) -> Iterator[Session]:  # type: ignore[assignment]
     """Provide a database session tied to the ingest service engine."""
 
     service = get_ingest_service(request)
@@ -137,7 +140,7 @@ def get_ingest_session(request: Request | None = None) -> Iterator[Session]:
         yield session
 
 
-def get_file_store(request: Request | None = None) -> FileStore:
+def get_file_store(request: Request = None) -> FileStore:  # type: ignore[assignment]
     """Access the in-memory :class:`~app.services.files.FileStore`."""
 
     if request is None:
@@ -151,7 +154,7 @@ def get_file_store(request: Request | None = None) -> FileStore:
     return store
 
 
-def get_ingest_queue(request: Request | None = None) -> IngestQueue:
+def get_ingest_queue(request: Request = None) -> IngestQueue:  # type: ignore[assignment]
     """Access the shared :class:`~app.services.files.IngestQueue` instance."""
 
     if request is None:
@@ -165,7 +168,7 @@ def get_ingest_queue(request: Request | None = None) -> IngestQueue:
     return queue
 
 
-def get_lora_manager(request: Request | None = None) -> LlamaLoraManager:
+def get_lora_manager(request: Request = None) -> LlamaLoraManager:  # type: ignore[assignment]
     """Access the shared LoRA manager instance."""
 
     app_state = None
