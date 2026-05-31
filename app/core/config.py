@@ -19,30 +19,7 @@ from decimal import Decimal
 
 from pydantic import AliasChoices, Field
 
-try:  # pragma: no cover - optional features may be unavailable in tests
-    from pydantic import BaseModel, computed_field, field_validator, model_validator
-except ImportError:  # pragma: no cover - provide light-weight fallbacks
-    from pydantic import BaseModel  # type: ignore[assignment]
-
-    def computed_field(*args, **kwargs):  # type: ignore[misc]
-        def decorator(func):
-            return property(func)
-
-        if args and callable(args[0]):
-            return decorator(args[0])
-        return decorator
-
-    def field_validator(*args, **kwargs):  # type: ignore[misc]
-        def decorator(func):
-            return func
-
-        return decorator
-
-    def model_validator(*args, **kwargs):  # type: ignore[misc]
-        def decorator(func):
-            return func
-
-        return decorator
+from pydantic import BaseModel, computed_field, field_validator, model_validator
 
 
 try:  # pragma: no cover - ``pydantic-settings`` is optional

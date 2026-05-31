@@ -6,8 +6,8 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Dict
 
-from sqlalchemy import func, select
-from sqlmodel import Session
+from sqlalchemy import func
+from sqlmodel import Session, col, select
 
 from app.models.file import FileRecord, FileStatus
 
@@ -53,13 +53,13 @@ def compute_file_stats(session: Session, tenant_id: str) -> FileStats:
 
     aggregation_stmt = (
         select(
-            FileRecord.status,
-            func.count(FileRecord.id),
-            func.coalesce(func.sum(FileRecord.size), 0),
-            func.coalesce(func.sum(FileRecord.chunks), 0),
+            col(FileRecord.status),
+            func.count(col(FileRecord.id)),
+            func.coalesce(func.sum(col(FileRecord.size)), 0),
+            func.coalesce(func.sum(col(FileRecord.chunks)), 0),
         )
-        .where(FileRecord.tenant_id == tenant_id)
-        .group_by(FileRecord.status)
+        .where(col(FileRecord.tenant_id) == tenant_id)
+        .group_by(col(FileRecord.status))
     )
 
     for status, count, size_sum, chunk_sum in session.exec(aggregation_stmt):
@@ -76,9 +76,9 @@ def compute_file_stats(session: Session, tenant_id: str) -> FileStats:
         total_chunks += chunks_int
 
     timestamp_stmt = select(
-        func.min(FileRecord.created_at),
-        func.max(FileRecord.created_at),
-    ).where(FileRecord.tenant_id == tenant_id)
+        func.min(col(FileRecord.created_at)),
+        func.max(col(FileRecord.created_at)),
+    ).where(col(FileRecord.tenant_id) == tenant_id)
     timestamp_row = session.exec(timestamp_stmt).first()
     if timestamp_row:
         oldest_raw, newest_raw = timestamp_row

@@ -37,7 +37,7 @@ class UploadLimits:
         self.allowed_extensions = self._normalise_extensions(self.allowed_extensions)
 
     @staticmethod
-    def _normalise_max_mb(value: object) -> int:
+    def _normalise_max_mb(value: str | int | float) -> int:
         try:
             size = int(float(value))
         except (TypeError, ValueError) as exc:  # pragma: no cover - defensive branch
@@ -47,7 +47,7 @@ class UploadLimits:
         return size
 
     @staticmethod
-    def _bytes_to_mb(value: object) -> int:
+    def _bytes_to_mb(value: str | int | float) -> int:
         try:
             bytes_value = int(float(value))
         except (TypeError, ValueError) as exc:  # pragma: no cover - defensive branch
@@ -92,11 +92,11 @@ def get_upload_limits() -> UploadLimits:
     settings = get_settings()
 
     raw_max_mb = os.getenv("MAX_UPLOAD_MB")
-    if raw_max_mb not in {None, ""}:
+    if raw_max_mb:
         max_upload_mb = UploadLimits._normalise_max_mb(raw_max_mb)
     else:
         legacy = os.getenv("UPLOAD_MAX_SIZE")
-        if legacy not in {None, ""}:
+        if legacy:
             max_upload_mb = UploadLimits._bytes_to_mb(legacy)
         else:
             max_upload_mb = settings.max_upload_mb
@@ -105,20 +105,26 @@ def get_upload_limits() -> UploadLimits:
     raw_extensions = os.getenv("UPLOAD_ALLOWED_EXTS")
     extensions = raw_extensions if raw_extensions not in {None, ""} else default_extensions
 
-    return UploadLimits(max_upload_mb=max_upload_mb, allowed_extensions=extensions)
+    return UploadLimits(
+        max_upload_mb=max_upload_mb,
+        allowed_extensions=UploadLimits._normalise_extensions(extensions),
+    )
 
 
-def get_tenant(request: Request = None) -> str:
+# FastAPI requires a bare ``Request`` annotation to inject the request object;
+# ``Request | None`` breaks route registration. ``= None`` enables direct calls,
+# so the implicit-Optional default is suppressed intentionally on these deps.
+def get_tenant(request: Request = None) -> str:  # type: ignore[assignment]
     """Resolve tenant identifier from headers (defaulting to ``"default"``)."""
 
     header_value = (
         request.headers.get("x-tenant") if request and hasattr(request, "headers") else None
     )
-    tenant = (header_value or os.getenv("DEFAULT_TENANT", "default")).strip()
+    tenant = (header_value or os.getenv("DEFAULT_TENANT", "default") or "default").strip()
     return tenant or "default"
 
 
-def get_ingest_service(request: Request = None) -> IngestService:
+def get_ingest_service(request: Request = None) -> IngestService:  # type: ignore[assignment]
     """Access the shared :class:`~app.ingest.service.IngestService` instance."""
 
     if request is None:
@@ -126,7 +132,7 @@ def get_ingest_service(request: Request = None) -> IngestService:
     return request.app.state.ingest_service
 
 
-def get_ingest_session(request: Request = None) -> Iterator[Session]:
+def get_ingest_session(request: Request = None) -> Iterator[Session]:  # type: ignore[assignment]
     """Provide a database session tied to the ingest service engine."""
 
     service = get_ingest_service(request)
@@ -134,7 +140,7 @@ def get_ingest_session(request: Request = None) -> Iterator[Session]:
         yield session
 
 
-def get_file_store(request: Request = None) -> FileStore:
+def get_file_store(request: Request = None) -> FileStore:  # type: ignore[assignment]
     """Access the in-memory :class:`~app.services.files.FileStore`."""
 
     if request is None:
@@ -148,7 +154,7 @@ def get_file_store(request: Request = None) -> FileStore:
     return store
 
 
-def get_ingest_queue(request: Request = None) -> IngestQueue:
+def get_ingest_queue(request: Request = None) -> IngestQueue:  # type: ignore[assignment]
     """Access the shared :class:`~app.services.files.IngestQueue` instance."""
 
     if request is None:
@@ -162,7 +168,7 @@ def get_ingest_queue(request: Request = None) -> IngestQueue:
     return queue
 
 
-def get_lora_manager(request: Request = None) -> LlamaLoraManager:
+def get_lora_manager(request: Request = None) -> LlamaLoraManager:  # type: ignore[assignment]
     """Access the shared LoRA manager instance."""
 
     app_state = None
