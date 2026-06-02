@@ -56,10 +56,18 @@ from app.services.synthetic_qa import QAPair
 
 @dataclass(frozen=True)
 class _FakeHit:
-    """Minimal stand-in for app.services.kb_store.SearchHit."""
+    """Minimal stand-in for a resolved retrieval hit.
 
-    chunk_index: int
+    ``chunk_id`` is the GLOBAL ``kb_chunks.id`` — the same identity space as
+    ``QAPair.source_chunk_id`` — and is what the dataset builder matches and
+    cites on. ``chunk_index`` is the per-document ordinal; it is kept here (and
+    defaults to a value that does NOT equal ``chunk_id``) so regression tests can
+    prove matching uses the global id, never the ordinal.
+    """
+
+    chunk_id: int
     text: str
+    chunk_index: int = -1
     document_id: int = 1
     document_title: str = "doc"
     score: float = 0.9
@@ -85,8 +93,8 @@ def test_build_relevant_sample_joins_top_k_chunks() -> None:
     retriever = _retriever_with(
         {
             "Что такое отпуск?": [
-                _FakeHit(chunk_index=7, text="Отпуск — это перерыв."),
-                _FakeHit(chunk_index=12, text="Сотрудник имеет право."),
+                _FakeHit(chunk_id=7, text="Отпуск — это перерыв."),
+                _FakeHit(chunk_id=12, text="Сотрудник имеет право."),
             ],
         }
     )
@@ -111,7 +119,65 @@ def test_build_relevant_drops_when_source_chunk_missing() -> None:
         source_chunk_id=7,
     )
     retriever = _retriever_with(
-        {"Что такое отпуск?": [_FakeHit(chunk_index=99, text="Совсем не про отпуск.")]}
+        {"Что такое отпуск?": [_FakeHit(chunk_id=99, text="Совсем не про отпуск.")]}
+    )
+
+    assert build_relevant_sample(seed, retriever=retriever, top_k=3) is None
+
+
+def test_build_relevant_matches_global_chunk_id_not_per_doc_index() -> None:
+    """Regression: match the seed's GLOBAL kb_chunks.id, never the per-doc ordinal.
+
+    ``source_chunk_id`` is the global ``kb_chunks.id`` (what ``iter_chunks``
+    stamps). A hit's ``chunk_index`` is a per-document ordinal that is NOT unique
+    across documents, so comparing the two conflates chunks. Here the correct hit
+    carries ``chunk_id=42`` (its ordinal is 0), and a *different* chunk carries the
+    colliding ordinal ``chunk_index=42``. The match — and the emitted
+    ``retrieved_chunk_ids`` — must follow ``chunk_id``.
+    """
+    from app.services.rag_dataset import build_relevant_sample
+
+    seed = QAPair(
+        instruction="Вопрос про отпуск?",
+        input="",
+        output="Ответ. [doc_chunk:42]",
+        source_chunk_id=42,
+    )
+    retriever = _retriever_with(
+        {
+            "Вопрос про отпуск?": [
+                _FakeHit(chunk_id=42, chunk_index=0, text="Правильный фрагмент."),
+                _FakeHit(chunk_id=7, chunk_index=42, text="Чужой фрагмент с ordinal 42."),
+            ]
+        }
+    )
+
+    sample = build_relevant_sample(seed, retriever=retriever, top_k=3)
+    assert sample is not None
+    # Global ids, in retrieval order — NOT the per-document ordinals (0, 42).
+    assert sample.retrieved_chunk_ids == (42, 7)
+    # The context cites the same global id the seed answer cites.
+    assert "[doc_chunk:42]" in sample.retrieved_context
+
+
+def test_build_relevant_drops_when_only_chunk_index_collides() -> None:
+    """Regression: a per-doc ordinal that merely *equals* source_chunk_id is not a match.
+
+    Before the fix, ``build_relevant_sample`` compared ``source_chunk_id`` (global
+    id 5) against the hit's ``chunk_index`` (5) and produced a sample grounded in
+    the WRONG chunk. The hit's real global id is 99, so the seed is not actually in
+    the retrieval set and the sample must be dropped.
+    """
+    from app.services.rag_dataset import build_relevant_sample
+
+    seed = QAPair(
+        instruction="Что такое отпуск?",
+        input="",
+        output="Это перерыв. [doc_chunk:5]",
+        source_chunk_id=5,
+    )
+    retriever = _retriever_with(
+        {"Что такое отпуск?": [_FakeHit(chunk_id=99, chunk_index=5, text="Чужой фрагмент.")]}
     )
 
     assert build_relevant_sample(seed, retriever=retriever, top_k=3) is None
@@ -131,8 +197,8 @@ def test_build_irrelevant_sample_uses_negative_chunks_and_refusal() -> None:
         source_chunk_id=7,
     )
     negative_chunks = [
-        _FakeHit(chunk_index=200, text="Калибровка манометра — раз в год."),
-        _FakeHit(chunk_index=201, text="Поверка средств измерения."),
+        _FakeHit(chunk_id=200, text="Калибровка манометра — раз в год."),
+        _FakeHit(chunk_id=201, text="Поверка средств измерения."),
     ]
 
     sample = build_irrelevant_sample(
@@ -167,10 +233,10 @@ def test_build_partial_sample_mixes_seed_with_distractors() -> None:
         output="Это перерыв. [doc_chunk:7]",
         source_chunk_id=7,
     )
-    seed_hit = _FakeHit(chunk_index=7, text="Отпуск — это перерыв в работе.")
+    seed_hit = _FakeHit(chunk_id=7, text="Отпуск — это перерыв в работе.")
     distractors = [
-        _FakeHit(chunk_index=200, text="Калибровка манометра — раз в год."),
-        _FakeHit(chunk_index=201, text="Поверка средств измерения."),
+        _FakeHit(chunk_id=200, text="Калибровка манометра — раз в год."),
+        _FakeHit(chunk_id=201, text="Поверка средств измерения."),
     ]
 
     sample = build_partial_sample(
@@ -218,14 +284,14 @@ def test_rag_sample_builder_respects_proportions() -> None:
         )
         for i in range(1, 21)
     ]
-    seed_hits = {i: _FakeHit(chunk_index=i, text=f"Текст {i}") for i in range(1, 21)}
+    seed_hits = {i: _FakeHit(chunk_id=i, text=f"Текст {i}") for i in range(1, 21)}
 
     def retriever(query: str, top_k: int):
         i = int(query.split()[1].rstrip("?"))
         return [seed_hits[i]]
 
-    negatives = [_FakeHit(chunk_index=900 + j, text=f"Шум {j}") for j in range(5)]
-    distractors = [_FakeHit(chunk_index=800 + j, text=f"Помеха {j}") for j in range(5)]
+    negatives = [_FakeHit(chunk_id=900 + j, text=f"Шум {j}") for j in range(5)]
+    distractors = [_FakeHit(chunk_id=800 + j, text=f"Помеха {j}") for j in range(5)]
 
     builder = RAGSampleBuilder(
         retriever=retriever,
@@ -267,8 +333,8 @@ def test_rag_sample_builder_skips_relevant_when_source_missing() -> None:
 
     builder = RAGSampleBuilder(
         retriever=retriever,
-        negative_pool=[_FakeHit(chunk_index=900, text="нет")],
-        distractor_pool=[_FakeHit(chunk_index=800, text="нет")],
+        negative_pool=[_FakeHit(chunk_id=900, text="нет")],
+        distractor_pool=[_FakeHit(chunk_id=800, text="нет")],
         proportions=default_proportions(),
     )
 
@@ -288,3 +354,63 @@ def test_strip_citations_is_public_api() -> None:
     # (and its adjacent spaces) into a single space.
     assert strip_citations("До [doc_chunk:1] середина [doc_chunk:2] конец") == "До середина конец"
     assert strip_citations("без цитат") == "без цитат"
+
+
+def test_relevant_sample_matches_global_id_on_two_document_corpus(tmp_path) -> None:
+    """End-to-end regression on a real 2-document corpus where id != chunk_index.
+
+    Each short document yields a single chunk, so both chunks get
+    ``chunk_index == 0`` while their global ``kb_chunks.id`` values diverge. The
+    CLI's resolving retriever must map a ``SearchHit`` back to its global id so
+    ``build_relevant_sample`` matches the seed by ``source_chunk_id`` (the global
+    id). Before the fix this returned ``None`` — the global id was compared
+    against the per-document ordinal 0.
+    """
+    from app.eval.adapter import _build_id_map, make_retriever
+    from app.services.kb_store import KnowledgeBaseStore, SearchHit
+    from app.services.rag_dataset import build_relevant_sample
+    from app.services.synthetic_qa import QAPair
+
+    store = KnowledgeBaseStore(db_path=tmp_path / "kb.sqlite")
+    store.add_document("Doc A", "Альфа: про ежегодный оплачиваемый отпуск.")
+    store.add_document("Doc B", "Бета: про калибровку манометра раз в год.")
+
+    with store._connect() as conn:  # noqa: SLF001 - test reuse of internal helper
+        rows = list(conn.execute("SELECT id, document_id, chunk_index FROM kb_chunks ORDER BY id"))
+
+    # Single-chunk documents: per-document ordinals collide at 0, global ids are unique.
+    assert len(rows) == 2
+    (id_a, _doc_a, idx_a), (id_b, doc_b, idx_b) = rows
+    assert idx_a == idx_b == 0  # ordinals collide across documents
+    assert id_a != id_b  # global ids are unique
+    assert id_b != idx_b  # the exact divergence the bug confused (e.g. 2 != 0)
+
+    id_map = _build_id_map(store)
+    assert id_map[(doc_b, idx_b)] == id_b  # (document_id, chunk_index) -> global id
+
+    # Deterministic stub search surfacing Doc B's chunk — avoids depending on the
+    # hashing embedder's near-random ranking on a tiny corpus.
+    def fake_search(query: str, top_k: int):
+        return [
+            SearchHit(
+                document_id=doc_b,
+                document_title="Doc B",
+                chunk_index=idx_b,
+                text="Бета: про калибровку манометра раз в год.",
+                score=0.99,
+            )
+        ][:top_k]
+
+    retriever = make_retriever(fake_search, id_map)
+
+    seed = QAPair(
+        instruction="Как часто калибруют манометр?",
+        input="",
+        output=f"Раз в год. [doc_chunk:{id_b}]",
+        source_chunk_id=id_b,  # GLOBAL id, not the per-document ordinal (0)
+    )
+
+    sample = build_relevant_sample(seed, retriever=retriever, top_k=3)
+    assert sample is not None
+    assert sample.retrieved_chunk_ids == (id_b,)
+    assert f"[doc_chunk:{id_b}]" in sample.retrieved_context

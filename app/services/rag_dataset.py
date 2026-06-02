@@ -7,6 +7,12 @@ on :class:`app.services.kb_store.KnowledgeBaseStore` for retrieval.
 
 The module is intentionally I/O free: provider, retriever, and chunk
 source are injected so the logic is deterministic in tests.
+
+Chunk identity throughout is the global ``kb_chunks.id`` — the same id
+``synthetic_qa.iter_chunks`` stamps onto ``QAPair.source_chunk_id`` — never the
+per-document ``SearchHit.chunk_index`` ordinal (which is not unique across
+documents). Retrievers must hand us hits already resolved to that global id; see
+``_hit_chunk_id`` and ``scripts/generate_rag_dataset.make_resolving_retriever``.
 """
 
 from __future__ import annotations
@@ -136,17 +142,35 @@ def apportion_counts(
     return counts
 
 
-# Retriever callbacks receive (query, top_k) and return any sequence
-# of objects exposing ``.chunk_index`` (int) and ``.text`` (str). That
-# is intentionally a subset of ``kb_store.SearchHit`` so unit tests can
-# pass lightweight fakes without importing the heavy real type.
+# Retriever callbacks receive (query, top_k) and return any sequence of objects
+# exposing ``.chunk_id`` (int) and ``.text`` (str). ``chunk_id`` MUST be the
+# global ``kb_chunks.id`` — the same identity ``synthetic_qa.iter_chunks`` stamps
+# onto ``QAPair.source_chunk_id``. Raw ``kb_store.SearchHit`` is NOT a valid hit
+# here: it exposes only ``chunk_index`` (a per-document ordinal, not unique across
+# the corpus). Callers resolve hits to the global id first — see
+# ``scripts/generate_rag_dataset.make_resolving_retriever``.
 Retriever = Callable[[str, int], Sequence[object]]
+
+
+def _hit_chunk_id(hit: object) -> int:
+    """Return a retrieval hit's GLOBAL ``kb_chunks.id``.
+
+    Must be the same identity space as ``QAPair.source_chunk_id``. We
+    deliberately do NOT fall back to ``SearchHit.chunk_index``: that is a
+    per-document ordinal (chunks of every document are numbered from 0), so it
+    collides across documents. Matching ``source_chunk_id`` against it conflates
+    chunks — silently dropping RELEVANT samples or grounding them in the wrong
+    text. A hit without ``chunk_id`` is a programming error (an unresolved hit),
+    so this raises ``AttributeError`` loudly rather than guessing.
+    """
+
+    return int(getattr(hit, "chunk_id"))
 
 
 def _join_chunks(hits: Sequence[object]) -> str:
     blocks: list[str] = []
     for hit in hits:
-        cid = int(getattr(hit, "chunk_index"))
+        cid = _hit_chunk_id(hit)
         text = str(getattr(hit, "text", "")).strip()
         if text:
             blocks.append(f"Фрагмент [doc_chunk:{cid}]:\n{text}")
@@ -154,7 +178,7 @@ def _join_chunks(hits: Sequence[object]) -> str:
 
 
 def _chunk_ids(hits: Sequence[object]) -> tuple[int, ...]:
-    return tuple(int(getattr(hit, "chunk_index")) for hit in hits)
+    return tuple(_hit_chunk_id(hit) for hit in hits)
 
 
 def build_relevant_sample(
@@ -323,7 +347,7 @@ class RAGSampleBuilder:
         if variant is RAGVariant.PARTIAL:
             hits = list(self.retriever(seed.instruction, self.top_k))
             seed_hit = next(
-                (h for h in hits if int(getattr(h, "chunk_index")) == seed.source_chunk_id),
+                (h for h in hits if _hit_chunk_id(h) == seed.source_chunk_id),
                 None,
             )
             if seed_hit is None:

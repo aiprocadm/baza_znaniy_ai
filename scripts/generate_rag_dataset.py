@@ -86,11 +86,13 @@ def _negative_pool(
     exclude_document_id: int | None,
     negative_document_id: int | None,
 ):
-    from app.services.kb_store import SearchHit
+    # EvalHit carries the global kb_chunks.id under ``.chunk_id`` — the identity
+    # the builder matches/cites on (shared with the eval harness adapter).
+    from app.eval.adapter import EvalHit
 
-    pool: list[SearchHit] = []
+    pool: list[EvalHit] = []
     with store._connect() as conn:  # noqa: SLF001
-        sql = "SELECT id, document_id, chunk_index, text FROM kb_chunks"
+        sql = "SELECT id, text FROM kb_chunks"
         params: tuple = ()
         clauses: list[str] = []
         if negative_document_id is not None:
@@ -103,15 +105,7 @@ def _negative_pool(
             sql += " WHERE " + " AND ".join(clauses)
         sql += " ORDER BY id ASC LIMIT 50"
         for row in conn.execute(sql, params):
-            pool.append(
-                SearchHit(
-                    document_id=int(row[1]),
-                    document_title="",
-                    chunk_index=int(row[2]),
-                    text=str(row[3] or ""),
-                    score=0.0,
-                )
-            )
+            pool.append(EvalHit(chunk_id=int(row[0]), text=str(row[1] or "")))
     return pool
 
 
@@ -166,8 +160,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         seeds = [s for s in seeds if s.source_chunk_id not in already]
         LOGGER.info("Resume: skipping %d seeds already in output.", before - len(seeds))
 
-    def retriever(query: str, top_k: int):
-        return store.search(query, top_k=top_k)
+    # Resolve each SearchHit's (document_id, chunk_index) back to its global
+    # kb_chunks.id so the builder matches the seed's source_chunk_id (also a
+    # global id). Shared resolver with the eval harness — see app/eval/adapter.py
+    # and the app.services.rag_dataset module docstring for why.
+    from app.eval.adapter import make_mvp_retriever
+
+    retriever = make_mvp_retriever(store)
 
     pool = _negative_pool(
         store,
