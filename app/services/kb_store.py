@@ -22,7 +22,7 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterable, List, Mapping, Optional, Protocol, Sequence, Tuple
+from typing import Any, Iterable, List, Mapping, Optional, Protocol, Sequence, Tuple, cast
 
 from app.observability import retrieval_health
 
@@ -384,10 +384,10 @@ class KnowledgeBaseStore:
         # virtual page; pages= is used verbatim. Both go through split_text.
         if pages is not None:
             normalised: list[tuple[Optional[int], str]] = []
-            for page_no, page_text in pages:
+            for raw_page_no, page_text in pages:
                 cleaned_page = (page_text or "").strip()
                 if cleaned_page:
-                    normalised.append((int(page_no), cleaned_page))
+                    normalised.append((int(raw_page_no), cleaned_page))
             if not normalised:
                 raise ValueError("Text is empty")
             full_text = "\n\n".join(t for _, t in normalised)
@@ -424,7 +424,7 @@ class KnowledgeBaseStore:
                 """,
                 (cleaned_title, full_text, created_at, source, filename, mime_type),
             )
-            doc_id = int(cur.lastrowid)
+            doc_id = int(cast(int, cur.lastrowid))
             for idx, ((page_no, chunk), blob) in enumerate(zip(chunks_with_pages, embedded_blobs)):
                 conn.execute(
                     """
@@ -772,7 +772,7 @@ class KnowledgeBaseStore:
                     now,
                 ),
             )
-            msg_id = int(cur.lastrowid)
+            msg_id = int(cast(int, cur.lastrowid))
             conn.execute(
                 "UPDATE kb_conversations SET updated_at = ? WHERE id = ?",
                 (now, str(conversation_id)),
