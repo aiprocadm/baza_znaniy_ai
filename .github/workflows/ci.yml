@@ -205,6 +205,9 @@ jobs:
         continue-on-error: true
         run: mypy .
 
+      - name: MyPy ratchet (clean-file regression gate)
+        run: python scripts/check_mypy_ratchet.py
+
       - name: Run pytest with coverage
         run: |
           # Ignore legacy backend/tests/ wholesale: those tests target removed
