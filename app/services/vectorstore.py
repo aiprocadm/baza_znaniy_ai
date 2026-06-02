@@ -156,7 +156,8 @@ def _search_fallback(
             if not normalized_tags.issubset(chunk_tag_set):
                 continue
 
-        meta = chunk.get("meta") if isinstance(chunk.get("meta"), dict) else {}
+        raw_meta = chunk.get("meta")
+        meta = raw_meta if isinstance(raw_meta, dict) else {}
         if (
             filters.act_type
             and str(meta.get("act_type", "")).strip().lower() != filters.act_type.lower()
