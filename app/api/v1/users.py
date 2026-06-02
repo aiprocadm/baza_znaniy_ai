@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import cast
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlmodel import Session, select
 
@@ -24,9 +26,9 @@ def list_users(session: Session = Depends(get_ingest_session)) -> list[UserRespo
     return [
         UserResponse(
             id=user.id or 0,
-            email=user.email,
+            email=cast(str, user.email),
             full_name=user.full_name,
-            role=user.role,
+            role=UserRole(user.role),
             is_active=user.is_active,
             tenant_slug=user.tenant_slug,
             created_at=user.created_at,
@@ -73,13 +75,15 @@ def create_user(
     session.commit()
     session.refresh(record)
     if str(record.role) != UserRole.MEMBER.value:
-        log_security_event("role_change", user_id=record.id, new_role=str(record.role))
+        log_security_event(
+            "role_change", user_id=cast("str | None", record.id), new_role=str(record.role)
+        )
 
     return UserResponse(
         id=record.id or 0,
-        email=record.email,
+        email=cast(str, record.email),
         full_name=record.full_name,
-        role=record.role,
+        role=UserRole(record.role),
         is_active=record.is_active,
         tenant_slug=record.tenant_slug,
         created_at=record.created_at,

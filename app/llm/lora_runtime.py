@@ -8,7 +8,7 @@ import math
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterable
+from typing import Any, Iterable
 
 from app.core.config import get_settings
 from app.llm.cache import get_cached_provider
@@ -91,7 +91,7 @@ class AdapterCompatibilityError(RuntimeError):
     """Raised when an adapter is incompatible with the configured runtime."""
 
 
-def _load_manifest(path: Path) -> dict[str, object]:
+def _load_manifest(path: Path) -> dict[str, Any]:
     try:
         with path.open("r", encoding="utf-8") as handle:
             return json.load(handle)

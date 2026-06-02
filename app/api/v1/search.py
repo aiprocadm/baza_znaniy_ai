@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import cast
+
 from fastapi import APIRouter, Depends, Query, Request
 
 from app.core.auth import (
@@ -65,10 +67,10 @@ def search_endpoint(
     )
     models = [
         SearchHit(
-            file=item.get("file"),
-            page=item.get("page"),
-            score=float(item.get("score", 0.0)),
-            text=item.get("text", ""),
+            file=cast("str | None", item.get("file")),
+            page=cast("int | None", item.get("page")),
+            score=float(cast("float", item.get("score", 0.0))),
+            text=cast("str", item.get("text", "")),
         )
         for item in hits
     ]
@@ -93,6 +95,6 @@ def search_endpoint(
                 subject_type=subject.subject_type,
                 subject_id=subject.subject_id,
                 query=query,
-                sources=models and [item.model_dump() for item in models] or [],
+                sources=[item.model_dump() for item in models] if models else [],
             )
     return SearchResponse(query=query, hits=models)
