@@ -43,3 +43,37 @@ def test_run_refuses_hashing_without_flag(tmp_path, monkeypatch):
     with pytest.raises(SystemExit, match="hashing"):
         cli.cmd_run(cli.build_parser().parse_args(
             ["run", "--golden", str(golden), "--out", str(tmp_path / "run.json")]))
+
+
+def test_run_includes_generation_when_judge_enabled(tmp_path, monkeypatch):
+    import scripts.eval_rag as cli
+    from app.eval.dataset import GoldenItem
+
+    store, _ = _store_with_chunk(tmp_path)
+    monkeypatch.setattr(cli, "get_store", lambda: store)
+
+    class _Resp:
+        def __init__(self, t):
+            self.text = t
+
+    class _Prov:
+        name = model = "fake"
+
+        def __init__(self, t):
+            self._t = t
+
+        def generate(self, prompt, *, system=None, max_tokens=None, temperature=None):
+            return _Resp(self._t)
+
+    monkeypatch.setattr(cli, "_gen_provider", lambda: _Prov("Отпуск — перерыв [1]."))
+    monkeypatch.setattr(cli, "_judge_provider", lambda: _Prov(
+        '{"faithfulness":5,"relevance":5,"completeness":5,"citation":5}'))
+
+    golden = tmp_path / "g.jsonl"
+    golden.write_text(GoldenItem("Что такое отпуск?", (1,), "перерыв").to_jsonl_line(), encoding="utf-8")
+    out = tmp_path / "run.json"
+    cli.cmd_run(cli.build_parser().parse_args(
+        ["run", "--golden", str(golden), "--out", str(out), "--allow-hashing", "--judge"]))
+    import json
+    rep = json.loads(out.read_text(encoding="utf-8"))
+    assert rep["generation"]["faithfulness"] == 1.0

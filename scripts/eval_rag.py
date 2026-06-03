@@ -11,11 +11,26 @@ import argparse
 import json
 from pathlib import Path
 
+from app.eval import generation_eval
 from app.eval import report as report_mod
 from app.eval import retrieval_eval
 from app.eval.adapter import compute_signature, make_mvp_retriever
 from app.eval.dataset import load_golden, read_signature
+from app.eval.metrics import RETRIEVAL_KS
+from app.services.kb_llm import select_provider
 from app.services.kb_store import get_store
+
+
+def _gen_provider():
+    provider = select_provider()
+    if provider is None:
+        raise SystemExit("No LLM provider configured for generation (set DEEPSEEK_API_KEY etc.).")
+    return provider
+
+
+def _judge_provider():
+    # Same provider family by default; override via env in a later PR if needed.
+    return _gen_provider()
 
 
 def cmd_run(args: argparse.Namespace) -> None:
@@ -37,7 +52,18 @@ def cmd_run(args: argparse.Namespace) -> None:
         )
     retriever = make_mvp_retriever(store)
     retrieval = retrieval_eval.evaluate(golden, retriever)
-    rep = report_mod.build_report(surface="mvp", signature=sig.to_dict(), retrieval=retrieval)
+    generation = None
+    if getattr(args, "judge", False):
+        generation = generation_eval.evaluate_generation(
+            golden,
+            retriever,
+            gen_provider=_gen_provider(),
+            judge_provider=_judge_provider(),
+            top_k=max(RETRIEVAL_KS),
+        )
+    rep = report_mod.build_report(
+        surface="mvp", signature=sig.to_dict(), retrieval=retrieval, generation=generation
+    )
     report_mod.save_report(Path(args.out), rep)
     print(report_mod.to_markdown(rep))
 
@@ -56,6 +82,7 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--golden", default="data/eval/golden_curated.jsonl")
     run.add_argument("--out", default="var/data/eval/run.json")
     run.add_argument("--allow-hashing", action="store_true")
+    run.add_argument("--judge", action="store_true", help="also score generation via LLM-judge")
     run.set_defaults(func=cmd_run)
 
     cmp = sub.add_parser("compare", help="diff two run JSONs")
