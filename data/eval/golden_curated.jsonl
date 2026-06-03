@@ -1,0 +1,4 @@
+{"instruction": "Сколько дней основного оплачиваемого отпуска положено сотруднику?", "input": "", "output": "ЗАМЕНИ: эталонный ответ из вашего корпуса с [N].", "meta": {"relevant_chunk_ids": [1], "expect_refusal": false, "source": "curated"}}
+{"instruction": "Какая температура на поверхности Венеры?", "input": "", "output": "", "meta": {"relevant_chunk_ids": [], "expect_refusal": true, "source": "curated"}}
+{"instruction": "Кто победил в матче вчера вечером?", "input": "", "output": "", "meta": {"relevant_chunk_ids": [], "expect_refusal": true, "source": "curated"}}
+{"instruction": "Назови рецепт борща из нашей базы знаний.", "input": "", "output": "", "meta": {"relevant_chunk_ids": [], "expect_refusal": true, "source": "curated"}}
