@@ -7,13 +7,17 @@ def test_build_prompt_includes_sections():
 
 
 def test_parse_verdict_plain_json():
-    v = parse_verdict('{"faithfulness":5,"relevance":4,"completeness":3,"citation":2,"rationale":"ok"}')
+    v = parse_verdict(
+        '{"faithfulness":5,"relevance":4,"completeness":3,"citation":2,"rationale":"ok"}'
+    )
     assert v == Verdict(5, 4, 3, 2, "ok")
     assert v.normalized()["faithfulness"] == 1.0 and v.normalized()["citation"] == 0.25
 
 
 def test_parse_verdict_tolerates_fence_and_prose():
-    raw = "Вот оценка:\n```json\n{\"faithfulness\":1,\"relevance\":1,\"completeness\":1,\"citation\":1}\n```"
+    raw = (
+        'Вот оценка:\n```json\n{"faithfulness":1,"relevance":1,"completeness":1,"citation":1}\n```'
+    )
     v = parse_verdict(raw)
     assert v is not None and v.faithfulness == 1
 

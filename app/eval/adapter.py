@@ -6,10 +6,11 @@ The eval's canonical chunk identity is ``kb_chunks.id`` — the same id
 ``chunk_index`` is only unique *within* a document, so each hit is resolved to
 its global id via a one-time map built from the store.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable, Mapping, Sequence
+from typing import Callable, Mapping, Protocol, Sequence
 
 
 @dataclass(frozen=True, slots=True)
@@ -22,8 +23,16 @@ class EvalHit:
 Retriever = Callable[[str, int], Sequence[EvalHit]]
 
 
+class _SearchHitLike(Protocol):
+    """Structural type for the live MVP ``SearchHit`` fields the eval reads."""
+
+    document_id: int
+    chunk_index: int
+    text: str
+
+
 def make_retriever(
-    search: Callable[[str, int], Sequence[object]],
+    search: Callable[[str, int], Sequence[_SearchHitLike]],
     id_map: Mapping[tuple[int, int], int],
 ) -> Retriever:
     def _retrieve(query: str, top_k: int) -> list[EvalHit]:

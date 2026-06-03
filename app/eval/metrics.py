@@ -1,4 +1,5 @@
 """Pure retrieval-quality metrics. No I/O, no env, no globals."""
+
 from __future__ import annotations
 
 from typing import Collection, Sequence

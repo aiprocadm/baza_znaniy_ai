@@ -5,6 +5,7 @@ Subcommands:
   generate — build a golden set from the corpus (added in a later task)
   compare  — diff two saved run JSONs
 """
+
 from __future__ import annotations
 
 import argparse

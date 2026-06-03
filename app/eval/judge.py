@@ -3,6 +3,7 @@
 Parsing mirrors the tolerance of ``synthetic_qa.parse_qa_response`` (markdown
 fences, surrounding prose). Scores are 1–5, normalized to [0,1] for aggregation.
 """
+
 from __future__ import annotations
 
 import json
@@ -28,7 +29,7 @@ def build_judge_prompt(*, question: str, answer: str, context: str, reference: s
         f"Вопрос:\n{question}\n\n"
         f"Контекст (фрагменты):\n{context}\n{ref_block}\n"
         f"Ответ системы:\n{answer}\n\n"
-        'Верни строго JSON без пояснений: '
+        "Верни строго JSON без пояснений: "
         '{"faithfulness":N,"relevance":N,"completeness":N,"citation":N,"rationale":"кратко"}'
     )
 

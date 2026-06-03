@@ -1,4 +1,5 @@
 """Assemble eval reports (JSON + Markdown) and diff two runs."""
+
 from __future__ import annotations
 
 import json

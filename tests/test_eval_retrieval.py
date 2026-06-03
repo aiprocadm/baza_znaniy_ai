@@ -12,8 +12,8 @@ def test_evaluate_aggregates_over_items():
     retriever = _retriever({"q1": [7, 1, 2], "q2": [1, 2, 3]})  # q1 hits, q2 misses
     result = evaluate(items, retriever)
     assert result["n"] == 2
-    assert result["aggregate"]["hit@1"] == 0.5   # only q1 hits at rank 1
-    assert result["aggregate"]["mrr@5"] == 0.5   # (1.0 + 0.0) / 2
+    assert result["aggregate"]["hit@1"] == 0.5  # only q1 hits at rank 1
+    assert result["aggregate"]["mrr@5"] == 0.5  # (1.0 + 0.0) / 2
     assert len(result["per_item"]) == 2
 
 

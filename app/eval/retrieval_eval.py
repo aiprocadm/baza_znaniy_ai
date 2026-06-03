@@ -1,4 +1,5 @@
 """Run a retriever over golden items and score retrieval quality."""
+
 from __future__ import annotations
 
 from typing import Sequence

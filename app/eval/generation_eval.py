@@ -5,6 +5,7 @@ The answer prompt mirrors the production MVP path (``kb_mvp._build_rag_prompt``
 production constant by a drift test rather than imported at runtime, so this
 module stays free of the FastAPI import chain.
 """
+
 from __future__ import annotations
 
 from typing import Sequence
@@ -56,7 +57,9 @@ def evaluate_generation_item(
     judge_provider: LLMProvider,
 ) -> dict[str, float]:
     context = format_context(hits)
-    answer = _generate(gen_provider, _build_answer_prompt(item.question, context), RAG_SYSTEM_PROMPT)
+    answer = _generate(
+        gen_provider, _build_answer_prompt(item.question, context), RAG_SYSTEM_PROMPT
+    )
     if item.expect_refusal:
         return {"refusal_correct": 1.0 if looks_like_refusal(answer) else 0.0}
     jprompt = build_judge_prompt(

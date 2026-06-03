@@ -4,6 +4,7 @@ A golden line is a superset of the synthetic_qa QAPair layout: top-level
 instruction/input/output is preserved (so scripts/validate_dataset.py stays
 happy) and eval-specific fields live under ``meta``.
 """
+
 from __future__ import annotations
 
 import json
@@ -27,7 +28,9 @@ class GoldenItem:
             "output": self.reference_answer,
             "meta": {
                 "relevant_chunk_ids": [int(c) for c in self.relevant_chunk_ids],
-                "source_chunk_id": int(self.relevant_chunk_ids[0]) if self.relevant_chunk_ids else 0,
+                "source_chunk_id": (
+                    int(self.relevant_chunk_ids[0]) if self.relevant_chunk_ids else 0
+                ),
                 "expect_refusal": bool(self.expect_refusal),
                 "source": self.source,
             },

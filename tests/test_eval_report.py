@@ -7,9 +7,11 @@ def _retrieval():
 
 
 def test_build_and_markdown():
-    rep = build_report(surface="mvp",
-                       signature={"embedder_name": "hash", "dim": 256, "doc_count": 3},
-                       retrieval=_retrieval())
+    rep = build_report(
+        surface="mvp",
+        signature={"embedder_name": "hash", "dim": 256, "doc_count": 3},
+        retrieval=_retrieval(),
+    )
     assert rep["surface"] == "mvp" and rep["n"] == 2
     assert rep["retrieval"]["hit@1"] == 0.5
     md = to_markdown(rep)
@@ -17,8 +19,11 @@ def test_build_and_markdown():
 
 
 def test_save_writes_json_and_md(tmp_path):
-    rep = build_report(surface="mvp", signature={"embedder_name": "ollama", "dim": 384, "doc_count": 1},
-                       retrieval=_retrieval())
+    rep = build_report(
+        surface="mvp",
+        signature={"embedder_name": "ollama", "dim": 384, "doc_count": 1},
+        retrieval=_retrieval(),
+    )
     out = tmp_path / "run.json"
     save_report(out, rep)
     assert json.loads(out.read_text(encoding="utf-8"))["surface"] == "mvp"

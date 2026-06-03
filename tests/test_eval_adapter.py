@@ -17,8 +17,10 @@ def test_make_retriever_resolves_global_chunk_id():
     hits = [_Hit(2, 0, "from doc2", filename="b.pdf"), _Hit(1, 1, "from doc1")]
     retriever = make_retriever(lambda q, k: hits[:k], id_map)
     out = retriever("q", 5)
-    assert out == [EvalHit(chunk_id=200, text="from doc2", title="b.pdf"),
-                   EvalHit(chunk_id=101, text="from doc1", title="doc")]
+    assert out == [
+        EvalHit(chunk_id=200, text="from doc2", title="b.pdf"),
+        EvalHit(chunk_id=101, text="from doc1", title="doc"),
+    ]
 
 
 def test_make_retriever_skips_unmapped_hits():

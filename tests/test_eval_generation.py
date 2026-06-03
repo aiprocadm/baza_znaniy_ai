@@ -2,7 +2,9 @@ from dataclasses import dataclass
 from app.eval.adapter import EvalHit
 from app.eval.dataset import GoldenItem
 from app.eval.generation_eval import (
-    RAG_SYSTEM_PROMPT, looks_like_refusal, evaluate_generation,
+    RAG_SYSTEM_PROMPT,
+    looks_like_refusal,
+    evaluate_generation,
 )
 
 
@@ -13,6 +15,7 @@ class _Resp:
 
 class _Provider:
     """Returns a canned text; records the last prompt it saw."""
+
     def __init__(self, text):
         self.text = text
         self.last_prompt = None
@@ -28,6 +31,7 @@ class _Provider:
 def test_system_prompt_matches_production():
     # Drift guard: the eval must answer with the SAME system prompt as the MVP path.
     from app.api.kb_mvp import _RAG_SYSTEM_PROMPT
+
     assert RAG_SYSTEM_PROMPT == _RAG_SYSTEM_PROMPT
 
 
@@ -39,7 +43,10 @@ def test_looks_like_refusal():
 
 def test_refusal_item_scored_deterministically():
     items = [GoldenItem("Кто выиграл матч?", (), expect_refusal=True)]
-    retriever = lambda q, k: [EvalHit(1, "нерелевантный текст")]
+
+    def retriever(q, k):
+        return [EvalHit(1, "нерелевантный текст")]
+
     gen = _Provider("Не удалось найти в документах информацию для ответа.")
     judge = _Provider("{}")  # must not be consulted for refusal items
     out = evaluate_generation(items, retriever, gen_provider=gen, judge_provider=judge, top_k=5)
@@ -50,7 +57,10 @@ def test_refusal_item_scored_deterministically():
 
 def test_answerable_item_uses_judge():
     items = [GoldenItem("Что такое отпуск?", (7,), reference_answer="перерыв")]
-    retriever = lambda q, k: [EvalHit(7, "Отпуск — перерыв.")]
+
+    def retriever(q, k):
+        return [EvalHit(7, "Отпуск — перерыв.")]
+
     gen = _Provider("Отпуск — это перерыв [1].")
     judge = _Provider('{"faithfulness":5,"relevance":5,"completeness":4,"citation":5}')
     out = evaluate_generation(items, retriever, gen_provider=gen, judge_provider=judge, top_k=5)
