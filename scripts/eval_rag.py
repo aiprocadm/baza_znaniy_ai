@@ -46,8 +46,16 @@ def cmd_run(args: argparse.Namespace) -> None:
         )
     golden_path = Path(args.golden)
     golden = load_golden(golden_path)
+    if not golden:
+        raise SystemExit(f"Golden set is empty: {golden_path}")
     gold_sig = read_signature(golden_path)
-    if gold_sig is not None and gold_sig != sig:
+    if gold_sig is None:
+        print(
+            "WARNING: golden set has no corpus signature (.sig.json) — its chunk-id "
+            "labels are unverified against the live corpus; retrieval metrics may be "
+            "misleading if the corpus differs."
+        )
+    elif gold_sig != sig:
         raise SystemExit(
             f"Corpus signature mismatch — golden was built against {gold_sig.to_dict()} "
             f"but the live corpus is {sig.to_dict()}. Regenerate the golden set."

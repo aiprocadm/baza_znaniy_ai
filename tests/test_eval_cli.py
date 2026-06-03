@@ -130,3 +130,40 @@ def test_generate_builds_golden_from_corpus(tmp_path, monkeypatch):
     assert items and items[0].question == "Что такое отпуск?"
     assert items[0].source == "auto" and items[0].relevant_chunk_ids
     assert read_signature(out) is not None
+
+
+def test_run_refuses_empty_golden(tmp_path, monkeypatch):
+    import scripts.eval_rag as cli
+
+    store, _ = _store_with_chunk(tmp_path)
+    monkeypatch.setattr(cli, "get_store", lambda: store)
+    golden = tmp_path / "empty.jsonl"
+    golden.write_text("", encoding="utf-8")
+    with pytest.raises(SystemExit, match="empty"):
+        cli.cmd_run(
+            cli.build_parser().parse_args(
+                [
+                    "run",
+                    "--golden",
+                    str(golden),
+                    "--out",
+                    str(tmp_path / "run.json"),
+                    "--allow-hashing",
+                ]
+            )
+        )
+
+
+def test_run_warns_when_golden_has_no_signature(tmp_path, monkeypatch, capsys):
+    import scripts.eval_rag as cli
+
+    store, _ = _store_with_chunk(tmp_path)
+    monkeypatch.setattr(cli, "get_store", lambda: store)
+    golden = tmp_path / "g.jsonl"
+    golden.write_text(GoldenItem("Что такое отпуск?", (1,)).to_jsonl_line(), encoding="utf-8")
+    cli.cmd_run(
+        cli.build_parser().parse_args(
+            ["run", "--golden", str(golden), "--out", str(tmp_path / "run.json"), "--allow-hashing"]
+        )
+    )
+    assert "WARNING" in capsys.readouterr().out
