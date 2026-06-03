@@ -15,7 +15,8 @@ from app.eval import generation_eval
 from app.eval import report as report_mod
 from app.eval import retrieval_eval
 from app.eval.adapter import compute_signature, make_mvp_retriever
-from app.eval.dataset import load_golden, read_signature
+from app.eval.dataset import GoldenItem, load_golden, read_signature, save_golden, write_signature
+from app.services import synthetic_qa as sq
 from app.eval.metrics import RETRIEVAL_KS
 from app.services.kb_llm import select_provider
 from app.services.kb_store import get_store
@@ -74,6 +75,51 @@ def cmd_compare(args: argparse.Namespace) -> None:
     print(report_mod.compare(run_a, run_b))
 
 
+def cmd_generate(args: argparse.Namespace) -> None:
+    store = get_store()
+    provider = _gen_provider()
+    chunks = list(sq.iter_chunks(store))
+    if args.limit:
+        chunks = chunks[: args.limit]
+    if not chunks:
+        raise SystemExit("Corpus is empty — ingest documents before generating a golden set.")
+
+    cost = sq.estimate_total_cost_usd(
+        provider=provider.name,
+        model=provider.model,
+        mode=sq.GenerationMode.SINGLE,
+        chunk_chars=[len(t) for _, t in chunks],
+    )
+    if cost is None:
+        print(f"WARNING: no pricing for ({provider.name}, {provider.model}); cost guard disabled.")
+    elif cost > args.budget_usd and not args.yes:
+        raise SystemExit(
+            f"Estimated cost ${cost:.2f} exceeds --budget-usd ${args.budget_usd:.2f}. "
+            f"Re-run with --yes to proceed."
+        )
+
+    generator = sq.SyntheticQAGenerator(provider=provider)
+    items: list[GoldenItem] = []
+    for chunk_id, text in chunks:
+        for pair in generator.generate_for_chunk(
+            chunks=[text], chunk_ids=[chunk_id], mode=sq.GenerationMode.SINGLE
+        ):
+            items.append(
+                GoldenItem(
+                    question=pair.instruction,
+                    relevant_chunk_ids=(pair.source_chunk_id,),
+                    reference_answer=pair.output,
+                    expect_refusal=False,
+                    source="auto",
+                )
+            )
+
+    out = Path(args.out)
+    save_golden(out, items)
+    write_signature(out, compute_signature(store))
+    print(f"Wrote {len(items)} golden items + signature to {out}")
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="eval_rag")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -84,6 +130,13 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--allow-hashing", action="store_true")
     run.add_argument("--judge", action="store_true", help="also score generation via LLM-judge")
     run.set_defaults(func=cmd_run)
+
+    gen = sub.add_parser("generate", help="build a golden set from the corpus")
+    gen.add_argument("--out", default="var/data/eval/golden_auto.jsonl")
+    gen.add_argument("--limit", type=int, default=0, help="max chunks to process (0 = all)")
+    gen.add_argument("--budget-usd", type=float, default=5.0)
+    gen.add_argument("--yes", action="store_true", help="proceed past the budget guard")
+    gen.set_defaults(func=cmd_generate)
 
     cmp = sub.add_parser("compare", help="diff two run JSONs")
     cmp.add_argument("run_a")

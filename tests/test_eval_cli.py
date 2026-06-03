@@ -77,3 +77,36 @@ def test_run_includes_generation_when_judge_enabled(tmp_path, monkeypatch):
     import json
     rep = json.loads(out.read_text(encoding="utf-8"))
     assert rep["generation"]["faithfulness"] == 1.0
+
+
+def test_generate_builds_golden_from_corpus(tmp_path, monkeypatch):
+    import scripts.eval_rag as cli
+
+    store, _ = _store_with_chunk(tmp_path)
+    monkeypatch.setattr(cli, "get_store", lambda: store)
+
+    class _Resp:
+        def __init__(self, t):
+            self.text = t
+
+    class _Teacher:
+        name = "deepseek"
+        model = "deepseek-chat"
+
+        def generate(self, prompt, *, system=None, max_tokens=None, temperature=None):
+            return _Resp(
+                '{"instruction":"Что такое отпуск?","input":"",'
+                '"output":"Отпуск — это оплачиваемый перерыв в работе сотрудника. [doc_chunk:1]"}'
+            )
+
+    monkeypatch.setattr(cli, "_gen_provider", lambda: _Teacher())
+
+    out = tmp_path / "golden_auto.jsonl"
+    cli.cmd_generate(cli.build_parser().parse_args(
+        ["generate", "--out", str(out), "--limit", "5", "--budget-usd", "100", "--yes"]))
+
+    from app.eval.dataset import load_golden, read_signature
+    items = load_golden(out)
+    assert items and items[0].question == "Что такое отпуск?"
+    assert items[0].source == "auto" and items[0].relevant_chunk_ids
+    assert read_signature(out) is not None
