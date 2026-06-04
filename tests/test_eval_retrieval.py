@@ -19,3 +19,25 @@ def test_evaluate_aggregates_over_items():
 
 def test_evaluate_empty_items():
     assert evaluate([], _retriever({}))["aggregate"] == {}
+
+
+def test_evaluate_threads_top_k_as_retrieval_depth():
+    seen_k: list[int] = []
+
+    def spy(q, k):
+        seen_k.append(k)
+        return [EvalHit(1, "t")]
+
+    evaluate([GoldenItem("q", (1,))], spy, top_k=7)
+    assert seen_k == [7]
+
+
+def test_evaluate_defaults_retrieval_depth_to_max_ks():
+    seen_k: list[int] = []
+
+    def spy(q, k):
+        seen_k.append(k)
+        return [EvalHit(1, "t")]
+
+    evaluate([GoldenItem("q", (1,))], spy)
+    assert seen_k == [10]  # max(RETRIEVAL_KS) == 10
