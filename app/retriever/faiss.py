@@ -44,6 +44,7 @@ except Exception:  # pragma: no cover - lightweight fallback used in tests
 
 
 from app.core.config import Settings, get_settings
+from app.retriever.e5 import e5_prefix
 from app.retriever.embedding_protocol import EmbedderProtocol
 from app.retriever.vector_store import SearchFilters
 
@@ -148,7 +149,15 @@ class FaissVectorStore:
                 pass
             return
 
-        texts = [str(self._payloads[item]["text"]) for item in self._ordered_ids]
+        texts = [
+            e5_prefix(
+                str(self._payloads[item]["text"]),
+                role="passage",
+                model=self.settings.vector_embed_model,
+                enabled=self.settings.vector_e5_prefix,
+            )
+            for item in self._ordered_ids
+        ]
         embeddings = self._batched_encode(texts)
         if not len(embeddings):
             self._ordered_ids = []
@@ -226,7 +235,16 @@ class FaissVectorStore:
         if self._index is None or not self._ordered_ids:
             return []
 
-        query_vector = self._batched_encode([query])
+        query_vector = self._batched_encode(
+            [
+                e5_prefix(
+                    query,
+                    role="query",
+                    model=self.settings.vector_embed_model,
+                    enabled=self.settings.vector_e5_prefix,
+                )
+            ]
+        )
         if not len(query_vector):
             return []
 
