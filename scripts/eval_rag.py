@@ -57,7 +57,8 @@ def cmd_run(args: argparse.Namespace) -> None:
             f"but the live corpus is {sig.to_dict()}. Regenerate the golden set."
         )
     retriever = make_mvp_retriever(store)
-    retrieval = retrieval_eval.evaluate(golden, retriever)
+    top_k = args.top_k if args.top_k is not None else max(RETRIEVAL_KS)
+    retrieval = retrieval_eval.evaluate(golden, retriever, top_k=top_k)
     generation = None
     if getattr(args, "judge", False):
         generation = generation_eval.evaluate_generation(
@@ -65,7 +66,7 @@ def cmd_run(args: argparse.Namespace) -> None:
             retriever,
             gen_provider=_gen_provider(),
             judge_provider=_judge_provider(),
-            top_k=max(RETRIEVAL_KS),
+            top_k=top_k,
         )
     rep = report_mod.build_report(
         surface="mvp", signature=sig.to_dict(), retrieval=retrieval, generation=generation
@@ -134,6 +135,12 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--out", default="var/data/eval/run.json")
     run.add_argument("--allow-hashing", action="store_true")
     run.add_argument("--judge", action="store_true", help="also score generation via LLM-judge")
+    run.add_argument(
+        "--top-k",
+        type=int,
+        default=None,
+        help="retrieval depth / generation context budget (default: max(RETRIEVAL_KS))",
+    )
     run.set_defaults(func=cmd_run)
 
     gen = sub.add_parser("generate", help="build a golden set from the corpus")
