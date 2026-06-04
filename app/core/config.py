@@ -730,6 +730,15 @@ class Settings(BaseSettings):
         default=64,
         validation_alias=AliasChoices("EMBED_BATCH_SIZE", "VECTOR_EMBED_BATCH_SIZE"),
     )
+    vector_e5_prefix: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("VECTOR_E5_PREFIX"),
+        description=(
+            "Prepend e5 'query:'/'passage:' prefixes at encode time. Only affects "
+            "e5-family models (no-op otherwise) and REQUIRES a reindex so passages "
+            "are embedded with the 'passage:' prefix."
+        ),
+    )
     qdrant_url: str = Field(
         default="",
         validation_alias=AliasChoices("QDRANT_URL"),

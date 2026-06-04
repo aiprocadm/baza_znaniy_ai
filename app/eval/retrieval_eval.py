@@ -19,7 +19,10 @@ def evaluate(
     items: Sequence[GoldenItem],
     retriever: Retriever,
     ks: Sequence[int] = RETRIEVAL_KS,
+    *,
+    top_k: int | None = None,
 ) -> dict[str, object]:
-    max_k = max(ks) if ks else 0
+    # ``top_k`` overrides retrieval depth for sweeps; otherwise use max(ks).
+    max_k = top_k if top_k is not None else (max(ks) if ks else 0)
     per_item = [evaluate_item(it, retriever, max_k=max_k) for it in items]
     return {"n": len(items), "per_item": per_item, "aggregate": aggregate(per_item)}

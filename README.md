@@ -77,6 +77,14 @@ OLLAMA_EMBED_MODEL=nomic-embed-text
 KB_API_KEY=$(openssl rand -hex 32)
 ```
 
+> **Перед прогоном eval-харнесса** (`scripts/eval_rag.py generate` / `run`)
+> настройте реальный embedder — Ollama (`KB_EMBEDDINGS_BACKEND=ollama` +
+> `OLLAMA_EMBED_MODEL`) или API (`KB_EMBEDDINGS_BACKEND=api` +
+> `EMBEDDINGS_API_BASE_URL`). На hashing fallback метрики near-random, поэтому
+> `run` намеренно откажется стартовать (`app/eval/guards.py:ensure_real_embedder`;
+> `--allow-hashing` — только для одноразового smoke-прогона). Переключение
+> backend'а требует реиндекса: `kb-cli reindex --embedder <name>`.
+
 Подробный список переменных, продвинутая конфигурация (LoRA, llama.cpp, Qdrant,
 Postgres) — см. [`docs/legacy_README.md`](docs/legacy_README.md).
 

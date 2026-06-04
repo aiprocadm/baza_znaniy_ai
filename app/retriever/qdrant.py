@@ -52,6 +52,7 @@ except Exception:  # pragma: no cover - lightweight fallback used in tests
 
 
 from app.core.config import Settings, get_settings
+from app.retriever.e5 import e5_prefix
 from app.retriever.embedding_protocol import EmbedderProtocol
 from app.retriever.vector_store import SearchFilters
 
@@ -212,7 +213,13 @@ class QdrantVectorStore:
                 return
 
             texts = [
-                str(item.get("text") or item.get("content") or "") for item in pending.values()
+                e5_prefix(
+                    str(item.get("text") or item.get("content") or ""),
+                    role="passage",
+                    model=self.settings.vector_embed_model,
+                    enabled=self.settings.vector_e5_prefix,
+                )
+                for item in pending.values()
             ]
             embeddings = self._batched_encode(texts)
             if not len(embeddings):
@@ -270,7 +277,16 @@ class QdrantVectorStore:
             return []
 
         self.ensure_ready()
-        query_vector = self._batched_encode([query])
+        query_vector = self._batched_encode(
+            [
+                e5_prefix(
+                    query,
+                    role="query",
+                    model=self.settings.vector_embed_model,
+                    enabled=self.settings.vector_e5_prefix,
+                )
+            ]
+        )
         if not len(query_vector):
             return []
 

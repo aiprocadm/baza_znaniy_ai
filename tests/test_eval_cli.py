@@ -132,6 +132,13 @@ def test_generate_builds_golden_from_corpus(tmp_path, monkeypatch):
     assert read_signature(out) is not None
 
 
+def test_run_accepts_top_k_arg():
+    import scripts.eval_rag as cli
+
+    assert cli.build_parser().parse_args(["run", "--top-k", "8"]).top_k == 8
+    assert cli.build_parser().parse_args(["run"]).top_k is None
+
+
 def test_run_refuses_empty_golden(tmp_path, monkeypatch):
     import scripts.eval_rag as cli
 
