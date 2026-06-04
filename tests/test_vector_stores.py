@@ -342,6 +342,44 @@ def test_faiss_search_returns_payload(tmp_path: Path, monkeypatch: pytest.Monkey
     assert hits[0]["tenant_id"] == "test-tenant"
 
 
+def test_faiss_applies_e5_prefixes_when_enabled(tmp_path: Path) -> None:
+    """With VECTOR_E5_PREFIX on + an e5 model, passages and queries reach the encoder prefixed."""
+    settings = _make_settings(
+        tmp_path,
+        backend="faiss",
+        vector_embed_model="intfloat/multilingual-e5-small",
+        vector_e5_prefix=True,
+    )
+    embedder = _StubEmbedder("intfloat/multilingual-e5-small")
+    store = FaissVectorStore(settings=settings, embedder_factory=lambda _: embedder)
+
+    store.upsert([{"sha256": "a", "text": "альфа", "tenant_id": "t"}])
+    store.search("бета", top_k=1, filters=vs.SearchFilters.from_input(tenant_id="t"))
+
+    seen = [text for call in embedder.calls for text in call]
+    assert "passage: альфа" in seen
+    assert "query: бета" in seen
+
+
+def test_faiss_no_prefix_when_disabled(tmp_path: Path) -> None:
+    """Default (flag off): raw text reaches the encoder, never e5-prefixed."""
+    settings = _make_settings(
+        tmp_path,
+        backend="faiss",
+        vector_embed_model="intfloat/multilingual-e5-small",
+        vector_e5_prefix=False,
+    )
+    embedder = _StubEmbedder("intfloat/multilingual-e5-small")
+    store = FaissVectorStore(settings=settings, embedder_factory=lambda _: embedder)
+
+    store.upsert([{"sha256": "a", "text": "альфа", "tenant_id": "t"}])
+    store.search("бета", top_k=1, filters=vs.SearchFilters.from_input(tenant_id="t"))
+
+    seen = [text for call in embedder.calls for text in call]
+    assert "альфа" in seen and "бета" in seen
+    assert not any(text.startswith(("passage:", "query:")) for text in seen)
+
+
 def test_qdrant_search_builds_filter_parity(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
