@@ -18,27 +18,34 @@ reindex_app = typer.Typer(
 def _make_embedder(name: str) -> Callable[[str], tuple[bytes, str, int]]:
     """Return a function that embeds a single chunk text.
 
-    For now we only support 'hash' (deterministic, no external dep). Other
-    embedders can be wired by importing from app.services.kb_embeddings —
-    deferred until needed.
+    ``hash`` uses the deterministic, dependency-free fallback. Any other name
+    (``ollama`` / ``api`` / …) resolves the real embedder from the environment
+    via the canonical builder; ``--embedder`` then asserts which backend we
+    expect, so a misconfigured env fails loudly instead of silently
+    re-embedding with the hashing fallback (near-random vectors).
     """
     import struct
 
     from app.services import kb_embeddings
 
+    embedder: kb_embeddings.Embedder
     if name.startswith("hash"):
         embedder = kb_embeddings.HashingEmbedder()
+    else:
+        embedder = kb_embeddings.get_embedder()
+        if embedder.name != name:
+            raise typer.BadParameter(
+                f"--embedder {name!r} but the configured backend resolved to "
+                f"{embedder.name!r}. Set KB_EMBEDDINGS_BACKEND={name} "
+                f"(+ model/base env) before reindexing."
+            )
 
-        def _embed(text: str) -> tuple[bytes, str, int]:
-            vec = embedder.embed(text)
-            blob = struct.pack(f"{len(vec)}f", *vec)
-            return blob, embedder.name, len(vec)
+    def _embed(text: str) -> tuple[bytes, str, int]:
+        vec = embedder.embed(text)
+        blob = struct.pack(f"{len(vec)}f", *vec)
+        return blob, embedder.name, len(vec)
 
-        return _embed
-    raise typer.BadParameter(
-        f"Unknown embedder {name!r}. Only 'hash' is wired in this MVP. "
-        "Extend scripts/cli/reindex.py::_make_embedder for ollama/api backends."
-    )
+    return _embed
 
 
 @reindex_app.callback(invoke_without_command=True)
