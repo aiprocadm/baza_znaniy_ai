@@ -113,3 +113,44 @@ def test_reindex_resume_skips_done_documents(runner: CliRunner, populated_db: Pa
     )
     assert result.exit_code == 0, result.output
     assert "processed 2 document" in result.output.lower() or "doc 2" in result.output.lower()
+
+
+def test_make_embedder_delegates_to_real_backend(monkeypatch):
+    """Non-hash names re-embed via the canonical env-driven embedder builder."""
+    import struct
+
+    from scripts.cli import reindex
+
+    class _FakeOllama:
+        name = "ollama"
+        dimension = 4
+
+        def embed(self, text):  # noqa: ANN001 - test double
+            return [0.1, 0.2, 0.3, 0.4]
+
+    monkeypatch.setattr("app.services.kb_embeddings.get_embedder", lambda: _FakeOllama())
+
+    embed = reindex._make_embedder("ollama")
+    blob, name, dim = embed("привет")
+    assert name == "ollama"
+    assert dim == 4
+    assert struct.unpack("4f", blob) == pytest.approx((0.1, 0.2, 0.3, 0.4))
+
+
+def test_make_embedder_rejects_backend_mismatch(monkeypatch):
+    """--embedder ollama but env resolves to hash → loud error, never silent hash."""
+    import typer
+
+    from scripts.cli import reindex
+
+    class _FakeHash:
+        name = "hash"
+        dimension = 256
+
+        def embed(self, text):  # noqa: ANN001 - test double
+            return [0.0] * 256
+
+    monkeypatch.setattr("app.services.kb_embeddings.get_embedder", lambda: _FakeHash())
+
+    with pytest.raises(typer.BadParameter, match="resolved to"):
+        reindex._make_embedder("ollama")
