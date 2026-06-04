@@ -13,6 +13,7 @@ import json
 from pathlib import Path
 
 from app.eval import generation_eval
+from app.eval import guards
 from app.eval import report as report_mod
 from app.eval import retrieval_eval
 from app.eval.adapter import compute_signature, make_mvp_retriever
@@ -38,12 +39,7 @@ def _judge_provider():
 def cmd_run(args: argparse.Namespace) -> None:
     store = get_store()
     sig = compute_signature(store)
-    if sig.embedder_name == "hash" and not args.allow_hashing:
-        raise SystemExit(
-            "Refusing to produce a baseline on the hashing embedder (near-random "
-            "results). Configure KB_EMBEDDINGS_BACKEND=ollama|api (+ model/base), or "
-            "pass --allow-hashing for a throwaway smoke run."
-        )
+    guards.ensure_real_embedder(sig, allow_hashing=args.allow_hashing)
     golden_path = Path(args.golden)
     golden = load_golden(golden_path)
     if not golden:
