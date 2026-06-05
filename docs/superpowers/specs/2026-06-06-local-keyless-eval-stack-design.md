@@ -28,14 +28,21 @@ The reranker already loads its model **in-process** through them — keyless,
 one-time download ([`app/retriever/rerank.py`](../../../app/retriever/rerank.py)).
 But the **embedder** ([`app/services/kb_embeddings.py`](../../../app/services/kb_embeddings.py))
 has only three backends — `ollama` (needs the daemon), `api` (needs a key), and
-`hash` (near-random, rejected by the guard). The **LLM** layer
-([`app/services/kb_llm.py`](../../../app/services/kb_llm.py)) is OpenAI-HTTP only;
-its single keyless-local option is *Ollama-the-daemon*. There is **no in-process
-local backend** for either, even though the libraries to provide one are already
-installed.
+`hash` (near-random, rejected by the guard) — **no in-process backend at all**.
 
-That asymmetry — the reranker is in-process, the embedder and LLM are not — is the
-whole blocker.
+The **LLM** is split across two modules. The eval calls the MVP layer
+([`app/services/kb_llm.py`](../../../app/services/kb_llm.py)), which is OpenAI-HTTP
+only (keyless-local = Ollama-the-daemon). But a fully in-process GGUF provider
+**already exists** in [`app/llm/llama_cpp_provider.py`](../../../app/llm/llama_cpp_provider.py)
+(the v1/general stack), with a matching downloader in
+[`scripts/download_model.py`](../../../scripts/download_model.py) and config in
+`Settings` (`llm_model_path`, `llm_ctx`, …). It is simply **not wired into the
+eval's provider selection**, and its `generate(prompt, *, context) -> str` signature
+differs from the eval's `generate(prompt, *, system, …) -> obj.text` contract.
+
+So the blocker is narrower than it first looks: build **one** new in-process
+embedder backend, and **adapt** the existing in-process LLM provider into the
+eval's interface — no new LLM engine, no new dependency.
 
 ## 3. Goals / non-goals
 
@@ -97,44 +104,52 @@ selected by `KB_EMBEDDINGS_BACKEND=st`.
   is a deliberate edit that the operator already knows requires a reindex
   (documented in CLAUDE.md). Residual risk: two different same-`dim` models would
   share a signature — accepted, pre-existing.
-- **Guard / stub:** `try: from sentence_transformers import SentenceTransformer
-  except Exception: SentenceTransformer = None`, raising a clear error only when
-  `st` is actually selected. The `sentence_transformers` test stub
-  ([`tests/service_stubs.py`](../../../tests/service_stubs.py)) gains a
-  `SentenceTransformer` class returning deterministic vectors (per the repo's
-  stub-drift discipline).
+- **Guard / lazy import:** `import sentence_transformers` happens **inside** the
+  lazy loader (not at module top), so importing `kb_embeddings` stays light and a
+  clear error is raised only when `st` is selected *and* a real model is needed.
+  Unit tests inject a fake model (DI) and never import the real library — note that
+  `tests/stubs/` has **no** `sentence_transformers` stub and `install_service_stubs`
+  is not global, so a non-DI unit test would pull the real 2.2 GB model. DI is
+  therefore mandatory in unit tests.
 - **Reindex integration:** none beyond the name match — `_make_embedder("st")`
   already routes any non-`hash` name through `get_embedder()`.
 
-### 5.2 Component B — `LlamaCppProvider`
+### 5.2 Component B — `GgufEvalProvider` (adapter over the existing engine)
 
-New provider in [`app/services/kb_llm.py`](../../../app/services/kb_llm.py),
-selected by `KB_LLM_PROVIDER=gguf`.
+A thin adapter in [`app/services/kb_llm.py`](../../../app/services/kb_llm.py),
+selected by `KB_LLM_PROVIDER=gguf`. It does **not** re-implement llama.cpp — it
+wraps the existing [`app/llm/llama_cpp_provider.LlamaCppProvider`](../../../app/llm/llama_cpp_provider.py)
+and exposes the eval's interface.
 
-- **Interface:** matches the duck-typed `LLMProvider` Protocol the eval already
-  depends on ([`synthetic_qa.py:389`](../../../app/services/synthetic_qa.py)) —
-  `name`, `model`, `generate(prompt, *, system=None, max_tokens=None,
-  temperature=None)` returning an object with `.text`. Reuses the existing
-  `LLMResponse` dataclass.
-- **Weights:** pinned default `repo_id="Qwen/Qwen2.5-3B-Instruct-GGUF"`,
-  `filename="qwen2.5-3b-instruct-q4_k_m.gguf"` (exact filename confirmed against
-  the repo at implementation; overridable via `GGUF_REPO_ID` / `GGUF_FILENAME`).
-  Fetched once with `huggingface_hub.hf_hub_download` (keyless,
-  public) into the HF cache; the path is handed to `llama_cpp.Llama`.
-- **Inference:** `Llama(model_path=..., n_ctx=4096, verbose=False)` loaded once
-  into a module-level cache (heavy). `generate` builds chat messages and calls
-  `create_chat_completion(messages, temperature=temperature or 0.0, max_tokens=...)`,
-  extracting `choices[0].message.content`. **Temperature 0 by default** for stable
-  judge verdicts; `parse_verdict` is already tolerant of fences/prose/out-of-range
-  ([`app/eval/judge.py`](../../../app/eval/judge.py)).
-- **Selection wiring:** `select_provider` / `build_provider` branch on
-  `provider == "gguf"` and return `LlamaCppProvider` instead of the
-  `OpenAICompatibleProvider` path (the `KNOWN_PRESETS` machinery is HTTP-specific
-  and is bypassed for `gguf`). Default is **explicit** (`KB_LLM_PROVIDER=gguf`); an
-  optional `KB_LLM_LOCAL_FALLBACK=true` may auto-select it when no key is set, so
-  the eval "just works" offline. (We do not silently load a 2 GB model by default.)
-- **Guard / stub:** `try: from llama_cpp import Llama except Exception: Llama =
-  None`; a `llama_cpp` test stub so unit tests never import the real heavy lib.
+- **Interface:** matches the duck-typed `LLMProvider` Protocol the eval depends on
+  ([`synthetic_qa.py:389`](../../../app/services/synthetic_qa.py)) — `name="gguf"`,
+  `model` (the GGUF filename), `generate(prompt, *, system=None, max_tokens=None,
+  temperature=None)` returning the existing `LLMResponse` dataclass.
+- **Adaptation:** the inner provider's `generate(prompt, *, context) -> str` takes
+  no `system` and returns a bare string. The adapter folds system+prompt into one
+  text prompt (`f"{system}\n\n{prompt}"`) and passes
+  `context={"temperature": temperature if temperature is not None else 0.0,
+  "max_tokens": max_tokens or 512}`, then wraps the returned string as
+  `LLMResponse(text=…, provider="gguf", model=…, elapsed_ms=…)`. **Temperature 0**
+  by default for stable judge verdicts; `parse_verdict` already tolerates
+  fences/prose/out-of-range ([`app/eval/judge.py`](../../../app/eval/judge.py)).
+- **Weights / download:** reuse [`scripts/download_model.py`](../../../scripts/download_model.py)
+  (HF-hub or HTTP, skip-if-present, manifest-driven). Add a `qwen2.5-3b-instruct`
+  entry to [`models/model_manifest.json`](../../../models/model_manifest.json)
+  (`model_id="Qwen/Qwen2.5-3B-Instruct-GGUF"`, `filename="qwen2.5-3b-instruct-q4_k_m.gguf"`
+  — exact filename confirmed against the repo at implementation). One-time
+  `py -3 scripts/download_model.py --target qwen2.5-3b-instruct …`; the adapter
+  points `Settings.llm_model_path` at the result via `KB_LLM_GGUF_PATH`
+  (default `./models/qwen2.5-3b-instruct-q4_k_m.gguf`). The current manifest
+  `default` (TinyLlama-1.1B) is too weak for an RU judge — hence a dedicated entry.
+- **Selection wiring:** `select_provider` / `build_provider` in `kb_llm.py` branch
+  on `provider == "gguf"` and return `GgufEvalProvider`, bypassing the
+  HTTP-specific `KNOWN_PRESETS` path. Default is **explicit** (`KB_LLM_PROVIDER=gguf`);
+  optional `KB_LLM_LOCAL_FALLBACK=true` auto-selects it when no key is set. (We do
+  not silently load a multi-GB model by default.)
+- **Guard:** the inner provider already guards `llama_cpp` import and validates the
+  GGUF magic bytes. The adapter lazily constructs the inner provider so importing
+  `kb_llm` stays cheap.
 
 ### 5.3 Wiring — reranker, env, e5 prefixing
 
@@ -210,12 +225,17 @@ Qdrant.
 ## 9. Testing strategy
 
 - **Unit:** dependency-injection everywhere — the embedder accepts a preloaded
-  model, the provider accepts a preloaded `Llama`; the eval already takes
+  model, the adapter accepts a preloaded inner provider; the eval already takes
   `gen_provider`/`judge_provider`/`retriever` as arguments. No real weights in unit
-  tests; deterministic fakes via the extended stubs.
-- **Stub drift:** extend the `sentence_transformers` stub with `SentenceTransformer`;
-  add a `llama_cpp` stub. (Repo discipline: a stub `AttributeError` usually means
-  stub drift, not a code bug.)
+  tests; deterministic fakes injected directly. **DI is mandatory** because
+  `tests/stubs/` ships no `sentence_transformers`/`llama_cpp` stub and
+  `install_service_stubs` is opt-in, so a non-DI test would load real multi-GB
+  models.
+- **No stub changes required:** the unit path never imports the heavy libraries
+  (lazy import + DI), so the `service_stubs.py` `DummySentenceTransformer` /
+  `DummyLlama` are left untouched. (If a future integration-stub test needs them,
+  `DummySentenceTransformer.encode` would need a `normalize_embeddings`/`str`-input
+  fix — out of scope here.)
 - **Integration (`@pytest.mark.integration`, not `skip`):** real-model smoke tests
   gated off the default CI run (CONTRIBUTING.md prefers markers over `skip`).
 - **No new drift surface:** `RAG_SYSTEM_PROMPT` stays byte-identical (existing
