@@ -521,7 +521,8 @@ class KnowledgeBaseStore:
             return []
         top_k = min(top_k, 50)
 
-        q_vec = self._embedder.embed(cleaned)
+        _embed_query = getattr(self._embedder, "embed_query", None)
+        q_vec = _embed_query(cleaned) if callable(_embed_query) else self._embedder.embed(cleaned)
         q_dim = len(q_vec)
 
         hard_limit = _search_hard_limit()
