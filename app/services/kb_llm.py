@@ -13,6 +13,7 @@ import json
 import logging
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Mapping, Optional
 
 try:  # pragma: no cover - tests run without httpx in some matrices
@@ -421,6 +422,71 @@ def _extract_text(data: Any) -> str:
     return str(text) if isinstance(text, str) else ""
 
 
+class GgufEvalProvider:
+    """Adapter exposing the in-process llama.cpp provider via the eval interface.
+
+    Wraps :class:`app.llm.llama_cpp_provider.LlamaCppProvider` (constructed lazily
+    so importing this module stays cheap). Folds ``system`` into the prompt and
+    returns the shared :class:`LLMResponse`. Temperature defaults to 0 for stable
+    judge verdicts. Pass ``inner=`` to inject a fake in tests.
+    """
+
+    def __init__(self, *, model_path: str, inner: object | None = None) -> None:
+        self.name = "gguf"
+        self.model = Path(model_path).name
+        self._model_path = model_path
+        self._inner = inner
+
+    def _ensure_inner(self) -> object:
+        if self._inner is None:
+            from app.core.config import Settings
+            from app.llm.llama_cpp_provider import LlamaCppProvider
+
+            settings = Settings(llm_provider="llama-cpp", llm_model_path=self._model_path)
+            self._inner = LlamaCppProvider(settings)
+        return self._inner
+
+    def is_available(self) -> bool:
+        return Path(self._model_path).is_file()
+
+    def generate(
+        self,
+        prompt: str,
+        *,
+        system: Optional[str] = None,
+        max_tokens: Optional[int] = None,
+        temperature: Optional[float] = None,
+    ) -> LLMResponse:
+        inner = self._ensure_inner()
+        full_prompt = f"{system}\n\n{prompt}" if system else prompt
+        context = {
+            "temperature": 0.0 if temperature is None else float(temperature),
+            "max_tokens": int(max_tokens) if max_tokens else 512,
+        }
+        started = time.perf_counter()
+        text = inner.generate(full_prompt, context=context)  # type: ignore[attr-defined]
+        elapsed_ms = (time.perf_counter() - started) * 1000.0
+        return LLMResponse(
+            text=(text or "").strip(),
+            provider="gguf",
+            model=self.model,
+            elapsed_ms=round(elapsed_ms, 2),
+        )
+
+
+def _build_gguf_provider(env: Mapping[str, str] | None = None) -> Optional[GgufEvalProvider]:
+    path = _env("KB_LLM_GGUF_PATH", env) or "./models/qwen2.5-3b-instruct-q4_k_m.gguf"
+    provider = GgufEvalProvider(model_path=path)
+    if not provider.is_available():
+        LOGGER.warning(
+            "GGUF model not found at %s — run scripts/download_model.py "
+            "--target qwen2.5-3b-instruct to fetch it.",
+            path,
+        )
+        return None
+    return provider
+
+
 def build_provider(provider: str, env: Mapping[str, str] | None = None) -> OpenAICompatibleProvider:
     """Construct a provider by short name, raising :class:`LLMUnavailable`.
 
@@ -442,6 +508,8 @@ def select_provider(
 
     explicit = _env("KB_LLM_PROVIDER", env)
     if explicit:
+        if explicit.strip().lower() == "gguf":
+            return _build_gguf_provider(env)
         try:
             return build_provider(explicit, env=env)
         except LLMUnavailable as exc:
@@ -462,6 +530,9 @@ def select_provider(
                 return build_provider(name, env=env)
             except LLMUnavailable:
                 continue
+
+    if (_env("KB_LLM_LOCAL_FALLBACK", env) or "").strip().lower() in {"1", "true", "yes", "on"}:
+        return _build_gguf_provider(env)
 
     return None
 
@@ -509,6 +580,7 @@ def provider_status(env: Mapping[str, str] | None = None) -> dict[str, Any]:
 
 __all__ = [
     "KNOWN_PRESETS",
+    "GgufEvalProvider",
     "LLMConfig",
     "LLMResponse",
     "LLMTransportError",
