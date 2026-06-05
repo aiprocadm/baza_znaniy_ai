@@ -18,6 +18,22 @@ def _is_stub_module(module: ModuleType) -> bool:
 
     module_file = getattr(module, "__file__", None)
     if not module_file:
+        # A PEP 420 namespace package (e.g. ``app.services``, which has no
+        # ``__init__.py``) also reports ``__file__ is None`` — yet it is the real
+        # package, not a stub. Purging it from ``sys.modules`` orphans its
+        # already-imported submodules: the namespace is rebuilt lazily and never
+        # re-binds them as attributes, so a later
+        # ``monkeypatch.setattr("app.services.kb_embeddings.get_embedder")`` can
+        # no longer resolve the dotted path. Treat a module backed by on-disk
+        # source directories outside ``tests/`` as genuine; only bare stub
+        # modules (without a real ``__path__``) are stubs.
+        for entry in getattr(module, "__path__", None) or ():
+            try:
+                resolved = Path(entry).resolve()
+            except Exception:  # pragma: no cover - defensive
+                continue
+            if resolved.is_dir() and _TESTS_ROOT not in resolved.parents:
+                return False
         return True
 
     try:
