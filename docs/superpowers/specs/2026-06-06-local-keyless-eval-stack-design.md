@@ -243,6 +243,13 @@ Qdrant.
 
 ## 10. Risks & mitigations
 
+- **Deps declared but not installed here.** `sentence-transformers`, `torch`,
+  `llama-cpp-python`, `huggingface-hub` are pinned in `requirements.txt` but this
+  dev machine has only `faiss-cpu` + `numpy` installed (the rest is stubbed under
+  pytest). "Zero new dependencies" means nothing is *added* to `requirements.txt`
+  — but a one-time `pip install` is required before the real eval runs. The
+  feature code and its unit tests run without them (DI + lazy imports), so this
+  only gates Tasks 5–9, not Tasks 1–4.
 - **llama-cpp-python on Windows** may need a prebuilt wheel / MSVC runtime —
   verified at Step 0; documented fallback is `python -m llama_cpp.server` +
   the `custom` HTTP provider if the in-process import proves unworkable.

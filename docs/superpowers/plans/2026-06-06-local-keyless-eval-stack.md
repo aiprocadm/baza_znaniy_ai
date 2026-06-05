@@ -26,21 +26,31 @@
 
 ---
 
-## Task 0: Platform de-risk (verify the heavy libs import)
+## Task 0: Platform setup (install the ML deps, then verify)
 
-This is the one real platform risk (`llama-cpp-python` on Windows). Confirm before building on it.
+The heavy ML stack is **declared in `requirements.txt` but NOT installed** in this dev env (only `faiss-cpu` + `numpy` are present). The code in Tasks 1–4 and its unit tests run **without** these libs (DI + lazy imports), so do this task only when you are ready to run the real eval (Tasks 5–9). `llama-cpp-python` on Windows is the one real risk.
 
-- [ ] **Step 1: Verify imports under `py -3`**
+- [ ] **Step 1: Install the in-process stack (one-time, ~1.5 GB incl. CPU torch)**
 
 Run:
 ```powershell
-py -3 -c "import sentence_transformers, torch; print('st', sentence_transformers.__version__)"
-py -3 -c "import llama_cpp; print('llama_cpp ok')"
-py -3 -c "import huggingface_hub; print('hub', huggingface_hub.__version__)"
+py -3 -m pip install sentence-transformers torch llama-cpp-python huggingface-hub
 ```
-Expected: three lines printed, no traceback. If `import llama_cpp` fails, STOP and resolve the wheel (e.g. `py -3 -m pip install --upgrade --force-reinstall llama-cpp-python`) before continuing — the rest of the LLM half depends on it.
+Expected: installs complete. If `llama-cpp-python` fails to build, install a prebuilt CPU wheel instead:
+`py -3 -m pip install llama-cpp-python --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu`
+(Versions are pinned in `requirements.txt`; `py -3 -m pip install -r requirements.txt` installs the whole declared set if you prefer.)
 
-- [ ] **Step 2: Confirm the eval suite is green at baseline**
+- [ ] **Step 2: Verify the imports**
+
+Run:
+```powershell
+py -3 -c "import sentence_transformers, torch; print('st ok')"
+py -3 -c "import llama_cpp; print('llama_cpp ok')"
+py -3 -c "import huggingface_hub; print('hub ok')"
+```
+Expected: `st ok` / `llama_cpp ok` / `hub ok`, no traceback. If `import llama_cpp` fails, STOP and resolve the wheel before continuing — the LLM half depends on it.
+
+- [ ] **Step 3: Confirm the eval suite is green at baseline**
 
 Run: `py -3 -m pytest tests/test_eval_metrics.py tests/test_eval_retrieval.py -q`
 Expected: all pass (this is the untouched harness we build against).
