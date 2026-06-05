@@ -68,3 +68,20 @@ def test_answerable_item_uses_judge():
     assert out["n_answerable"] == 1
     # The judge saw the generated answer and the retrieved context.
     assert "Отпуск — это перерыв [1]." in judge.last_prompt
+
+
+def test_prompt_requires_per_claim_citation():
+    from app.api.kb_mvp import _RAG_SYSTEM_PROMPT
+
+    assert "[N]" in _RAG_SYSTEM_PROMPT
+    assert "Каждое утверждение" in _RAG_SYSTEM_PROMPT
+
+
+def test_prompt_prescribes_canonical_refusal():
+    from app.api.kb_mvp import _RAG_SYSTEM_PROMPT
+    from app.services.rag_dataset import IRRELEVANT_REFUSAL
+
+    # The prescribed refusal phrase must be exactly the one the deterministic
+    # refusal detector (looks_like_refusal) recognises, so refusal_correct is
+    # meaningful once an LLM is configured.
+    assert IRRELEVANT_REFUSAL in _RAG_SYSTEM_PROMPT
