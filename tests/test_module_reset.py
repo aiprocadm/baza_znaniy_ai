@@ -90,6 +90,31 @@ def test_is_stub_module_within_tests_directory(tmp_path):
         _module_reset._TESTS_ROOT = original_root
 
 
+def test_is_stub_module_keeps_namespace_package(tmp_path):
+    """A real PEP 420 namespace package must NOT be treated as a stub.
+
+    ``app.services`` has no ``__init__.py``, so its module object reports
+    ``__file__ is None`` — exactly like a lightweight ``types.ModuleType`` stub.
+    Purging it from ``sys.modules`` orphans already-imported submodules (the
+    rebuilt namespace never re-binds them), which breaks later
+    ``monkeypatch.setattr("app.services.kb_embeddings.get_embedder")`` lookups.
+    A module backed by an on-disk ``__path__`` outside ``tests/`` is genuine.
+    """
+    source_dir = tmp_path / "app" / "services"
+    source_dir.mkdir(parents=True, exist_ok=True)
+
+    module = ModuleType("app.services")
+    module.__path__ = [str(source_dir)]  # namespace packages carry a real search path
+    assert getattr(module, "__file__", None) is None
+
+    original_root = _module_reset._TESTS_ROOT
+    try:
+        _module_reset._TESTS_ROOT = tmp_path / "tests"
+        assert not _module_reset._is_stub_module(module)
+    finally:
+        _module_reset._TESTS_ROOT = original_root
+
+
 def test_is_stub_module_outside_tests_directory(tmp_path):
     file_path = tmp_path / "app" / "core" / "module.py"
     file_path.parent.mkdir(parents=True, exist_ok=True)
