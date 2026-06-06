@@ -15,7 +15,7 @@ except Exception:  # pragma: no cover - dependency not installed
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from sentence_transformers import CrossEncoder as _CrossEncoder
 
-DEFAULT_MODEL_NAME = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+DEFAULT_MODEL_NAME = "BAAI/bge-reranker-v2-m3"
 
 
 def is_rerank_enabled(

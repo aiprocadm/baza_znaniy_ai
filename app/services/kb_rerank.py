@@ -29,7 +29,7 @@ from app.services.kb_store import SearchHit
 
 LOGGER = logging.getLogger(__name__)
 
-DEFAULT_MODEL_NAME = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+DEFAULT_MODEL_NAME = "BAAI/bge-reranker-v2-m3"
 DEFAULT_CANDIDATES = 20
 DEFAULT_TOP_N = 5
 
