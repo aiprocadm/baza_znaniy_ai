@@ -74,16 +74,22 @@ def _reranking_search(store, config):
 
 
 def make_mvp_reranking_retriever(store, config=None) -> Retriever:
-    """Eval Retriever that applies the cross-encoder reranker (for gate C).
+    """Eval Retriever that ALWAYS applies the cross-encoder reranker (for gate C).
 
     ``make_mvp_retriever`` returns the raw bi-encoder order (``store.search``);
     reranking lives in ``kb_mvp.ask``, not the store — so this mirrors that path
-    to make the reranker measurable via the eval harness. Reranker config comes
-    from ``KB_RERANK_*`` unless ``config`` is supplied.
+    to make the reranker measurable via the eval harness. ``enabled`` is forced on
+    (this retriever exists to rerank — avoids a silent passthrough when
+    ``KB_RERANK_ENABLED`` is unset); ``config`` overrides model/candidates/top_n,
+    otherwise ``KB_RERANK_*`` is used.
     """
+    from dataclasses import replace
+
     from app.services import kb_rerank
 
     cfg = config if config is not None else kb_rerank.load_config()
+    if not cfg.enabled:
+        cfg = replace(cfg, enabled=True)
     return make_retriever(_reranking_search(store, cfg), _build_id_map(store))
 
 
