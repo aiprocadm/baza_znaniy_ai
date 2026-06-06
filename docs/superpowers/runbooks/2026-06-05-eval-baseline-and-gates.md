@@ -55,10 +55,11 @@ Each: apply the change, re-run `run ... --out var/data/eval/<task>.json`, then
 Paste the delta table into the PR.
 
 - **C — Russian reranker.** `DEFAULT_MODEL_NAME` in `app/services/kb_rerank.py`
-  and `app/retriever/rerank.py` → `BAAI/bge-reranker-v2-m3`; enable
-  (`KB_RERANK_ENABLED=true`). Gate: `mrr@k` / `hit@5` ↑ **and** latency
-  acceptable. (~600 MB model download; this is the win that genuinely needs a
-  number before shipping.)
+  and `app/retriever/rerank.py` → `BAAI/bge-reranker-v2-m3`. Measure with
+  `eval_rag run --rerank` (forces rerank on regardless of `KB_RERANK_ENABLED`;
+  for the live `ask` path set `KB_RERANK_ENABLED=true`). Gate: `mrr@k` / `hit@5`
+  ↑ **and** latency acceptable. (~600 MB model download; this is the win that
+  genuinely needs a number before shipping.)
   - **RESULT (2026-06-06 — in-process bge-m3 + bge-reranker-v2-m3, curated golden
     n=21).** **QUALITY: PASS** — hit@1 0.619→0.714 (+0.095), recall@1 0.548→0.643,
     mrr@5 0.659→0.738 (+0.079), recall@5 0.714→0.762 (+0.048); every k improves.
@@ -69,7 +70,7 @@ Paste the delta table into the PR.
     **default false** — enable only on GPU or for batch/offline; keep off for
     interactive CPU. NB: measured via a reranking-aware eval retriever — the stock
     `make_mvp_retriever` calls raw `store.search` while rerank lives in `kb_mvp.ask`
-    (search → `rerank_hits`); a `--rerank` flag on `eval_rag run` would make it repeatable.
+    (search → `rerank_hits`); now repeatable via `eval_rag run --rerank`.
 - **D — top_k.** `py -3 -m scripts.eval_sweep --golden data/eval/golden_curated.jsonl --values 5,8,10,12 --judge`.
   Pick argmax `completeness` without dropping `faithfulness`; set the MVP `ask`
   `top_k` (and/or v1 `RETRIEVE_TOPK`). Commit with the table.
