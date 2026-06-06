@@ -19,6 +19,7 @@ except Exception:  # pragma: no cover
     httpx = None  # type: ignore[assignment]
 
 from app.observability.metrics import record_embedder_backend
+from app.retriever.e5 import e5_prefix
 from app.services._envutil import env as _env
 from app.services.kb_store import EMBEDDING_DIM, embed as hashing_embed
 
@@ -150,6 +151,62 @@ class OllamaEmbedder:
         return _normalise([float(v) for v in vec])
 
 
+class SentenceTransformerEmbedder:
+    """In-process embedder backed by a local sentence-transformers model.
+
+    Keyless: weights are fetched once from the HuggingFace hub into the local
+    cache on first use, then reused offline. ``embed`` applies the e5
+    ``passage: `` prefix and ``embed_query`` the ``query: `` prefix when the
+    model is e5-family and prefixing is enabled (no-op otherwise — see
+    ``app.retriever.e5``). The heavy import is lazy so importing this module
+    stays cheap; pass ``model=`` to inject a fake in tests.
+    """
+
+    def __init__(
+        self,
+        *,
+        model_name: str,
+        e5_prefix_enabled: bool = False,
+        model: object | None = None,
+    ) -> None:
+        self.name = "st"
+        self.model = model_name
+        self._e5_enabled = e5_prefix_enabled
+        self._model = model
+        self._dimension: Optional[int] = None
+
+    def _ensure_model(self) -> object:
+        if self._model is None:
+            from sentence_transformers import SentenceTransformer  # heavy; lazy
+
+            self._model = SentenceTransformer(self.model)
+        return self._model
+
+    @property
+    def dimension(self) -> int:
+        if self._dimension is None:
+            model = self._ensure_model()
+            getter = getattr(model, "get_sentence_embedding_dimension", None)
+            dim = getter() if callable(getter) else None
+            self._dimension = int(dim) if dim else len(self._encode("dim-probe"))
+        return self._dimension
+
+    def _encode(self, text: str) -> list[float]:
+        model = self._ensure_model()
+        vec = model.encode(text, normalize_embeddings=True, convert_to_numpy=True)
+        tolist = getattr(vec, "tolist", None)
+        seq = tolist() if callable(tolist) else vec
+        return [float(v) for v in seq]
+
+    def embed(self, text: str) -> list[float]:
+        prepared = e5_prefix(text, role="passage", model=self.model, enabled=self._e5_enabled)
+        return self._encode(prepared)
+
+    def embed_query(self, text: str) -> list[float]:
+        prepared = e5_prefix(text, role="query", model=self.model, enabled=self._e5_enabled)
+        return self._encode(prepared)
+
+
 def _extract_first_embedding(data: object) -> list[float]:
     if not isinstance(data, dict):
         return []
@@ -170,8 +227,19 @@ def _build_from_env(env: Mapping[str, str] | None = None) -> Embedder:
     explicit = (_env("KB_EMBEDDINGS_BACKEND", env) or "").lower()
     if explicit == "hash" or explicit == "":
         pass  # decide below
-    elif explicit not in {"ollama", "api", "hash"}:
+    elif explicit not in {"ollama", "api", "hash", "st"}:
         LOGGER.warning("Unknown KB_EMBEDDINGS_BACKEND=%r; falling back", explicit)
+
+    if explicit == "st":
+        st_model = _env("ST_EMBED_MODEL", env) or "BAAI/bge-m3"
+        e5_enabled = (_env("VECTOR_E5_PREFIX", env) or "").strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }
+        record_embedder_backend("st")
+        return SentenceTransformerEmbedder(model_name=st_model, e5_prefix_enabled=e5_enabled)
 
     ollama_base = _env("OLLAMA_BASE_URL", env) or "http://localhost:11434"
     ollama_model = _env("OLLAMA_EMBED_MODEL", env)
@@ -261,6 +329,7 @@ __all__ = [
     "HashingEmbedder",
     "OllamaEmbedder",
     "OpenAICompatibleEmbedder",
+    "SentenceTransformerEmbedder",
     "embedder_status",
     "get_embedder",
     "reset_embedder",

@@ -298,3 +298,35 @@ def test_history_aware_rewrite_applied_when_enabled(sample_hits: List[dict[str, 
     assert "кто подписант?" in captured_question["question"]
     assert response.answer.startswith("LC ответ")
     assert response.citations and response.citations[0].file == "doc-lc.pdf"
+
+
+def test_rerank_module_binds_hermetic_cross_encoder() -> None:
+    """Regression guard for cross-test pollution via the real cross-encoder.
+
+    ``app.retriever.rerank`` resolves ``from sentence_transformers import
+    CrossEncoder`` at *import time*, so whichever test imports that module first
+    decides — for the whole session — whether the binding is the real
+    weight-loading class or a lightweight stub. When the real
+    ``sentence-transformers`` wheel is installed and this module is imported
+    before any stub is registered, the real class used to leak in and run real
+    inference inside the chat path, making reranking order-dependent (it broke
+    ``tests/test_service_api.py`` only when paired with this file). The hermetic
+    ``tests/stubs/sentence_transformers`` stub must shadow the real package on
+    ``sys.path`` so the binding is deterministic regardless of test order.
+
+    The stub package is itself named ``sentence_transformers`` (so the dotted
+    module name is no help); the real cross-encoder lives in the submodule
+    ``sentence_transformers.cross_encoder.model``. We therefore assert on the
+    *file location* of the bound class — it must come from ``tests/stubs``.
+    """
+    import sys
+
+    from app.retriever import rerank
+
+    defining_module = sys.modules.get(getattr(rerank.CrossEncoder, "__module__", "") or "")
+    source = (getattr(defining_module, "__file__", "") or "").replace("\\", "/")
+    assert "/tests/stubs/" in source, (
+        "app.retriever.rerank.CrossEncoder is not the hermetic tests/stubs stub "
+        f"(resolved to {source or rerank.CrossEncoder!r}); the real "
+        "sentence_transformers cross-encoder leaked into the test session."
+    )
