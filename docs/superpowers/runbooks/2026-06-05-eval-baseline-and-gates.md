@@ -69,3 +69,22 @@ Paste the delta table into the PR.
 
 There is no CLI to rewrite *only* the sidecar; `scripts/build_curated_golden.py`
 re-emits it (chunk-ids are reindex-stable — only `embedder_name`/`dim` change).
+
+## Tracked-file hygiene (what dirties git — and what doesn't)
+
+Three committed fixtures are written **only by the manual ops scripts above**,
+never by `pytest`:
+
+- `data/eval/golden_curated.jsonl` + `data/eval/golden_curated.sig.json` ←
+  `scripts/build_curated_golden.py` (step 1). With a real embedder the `.sig.json`
+  flips to e.g. `embedder_name="st"`/`dim 1024`; the `.jsonl` is re-emitted
+  byte-identically, so usually only the sidecar shows in `git diff`.
+- `models/model_manifest.json` ← `scripts/download_model.py --target <model>`
+  (the one-time GGUF fetch: nulls `model_id`/`filename`, adds `sha256`, `sort_keys`).
+
+So after running either script, `git diff` and commit (or `git checkout --`) the
+change deliberately. If you ever see those files dirty after *just* a test run,
+it isn't the suite: `tests/conftest.py::_protect_committed_fixtures` (session
+autouse) snapshots them and **fails loudly while restoring the bytes** if any
+test writes one. Run the suite with `KB_TEST_LOCK_FIXTURES=1` to instead lock
+them read-only and get a `PermissionError` traceback naming the offending test.
