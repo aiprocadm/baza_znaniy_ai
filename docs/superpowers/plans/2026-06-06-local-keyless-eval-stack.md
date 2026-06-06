@@ -32,13 +32,24 @@ The heavy ML stack is **declared in `requirements.txt` but NOT installed** in th
 
 - [ ] **Step 1: Install the in-process stack (one-time, ~1.5 GB incl. CPU torch)**
 
-Run:
+Install in TWO commands — do **not** put `llama-cpp-python` in the same command as
+the others. On a machine without a C/C++ compiler (no MSVC/CMake — the common
+Windows case here) `pip install llama-cpp-python` tries to build from source and
+fails, and the new pip resolver then **aborts the whole transaction** (nothing
+installs). Verified working on this box (Python 3.13, Windows):
+
 ```powershell
-py -3 -m pip install sentence-transformers torch llama-cpp-python huggingface-hub
+# 1) Embedder stack — normal wheels, no compiler needed:
+py -3 -m pip install sentence-transformers torch huggingface-hub
+# 2) llama.cpp — PREBUILT CPU wheel (avoids the source build):
+py -3 -m pip install --only-binary=:all: llama-cpp-python `
+  --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu
 ```
-Expected: installs complete. If `llama-cpp-python` fails to build, install a prebuilt CPU wheel instead:
-`py -3 -m pip install llama-cpp-python --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu`
-(Versions are pinned in `requirements.txt`; `py -3 -m pip install -r requirements.txt` installs the whole declared set if you prefer.)
+Expected: both complete; the second pulls e.g. `llama_cpp_python-0.3.26-py3-none-win_amd64.whl`.
+NOTE: pip installs versions *newer* than `requirements.txt` pins (torch 2.12 vs
+2.5.1, transformers 5.x vs 4.57, hub 1.x vs 0.35) — fine for bge-m3/Qwen runs. Do
+NOT `pip install -r requirements.txt` to "fix" the pins: it re-triggers the
+llama-cpp source build and fails the same way.
 
 - [ ] **Step 2: Verify the imports**
 
