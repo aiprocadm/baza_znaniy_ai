@@ -117,7 +117,7 @@ def cmd_generate(args: argparse.Namespace) -> None:
             items.append(
                 GoldenItem(
                     question=pair.instruction,
-                    relevant_chunk_ids=(pair.source_chunk_id,),
+                    relevant_chunks=(str(pair.source_chunk_id),),
                     reference_answer=pair.output,
                     expect_refusal=False,
                     source="auto",
