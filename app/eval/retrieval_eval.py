@@ -11,8 +11,8 @@ from app.eval.metrics import RETRIEVAL_KS, aggregate, score_item
 
 def evaluate_item(item: GoldenItem, retriever: Retriever, *, max_k: int) -> dict[str, float]:
     hits = retriever(item.question, max_k)
-    retrieved_ids = [h.chunk_id for h in hits]
-    return score_item(item.relevant_chunks, retrieved_ids)
+    retrieved = [h.chunk_key for h in hits]
+    return score_item(item.relevant_chunks, retrieved)
 
 
 def evaluate(

@@ -31,8 +31,8 @@ def test_mvp_retriever_and_signature_on_real_store(tmp_path):
     retriever = make_mvp_retriever(store)
     hits = retriever("Что такое отпуск?", 5)
     assert hits and isinstance(hits[0], EvalHit)
-    # Single short sentence → single chunk; chunk_id may be 1 or any positive int
-    assert hits[0].chunk_id >= 1
+    # Single short sentence → single chunk; chunk_key is a composite "filename:index" string
+    assert ":" in hits[0].chunk_key
     # The retrieved chunk must contain the key word from the document
     assert "Отпуск" in hits[0].text or "отпуск" in hits[0].text
 

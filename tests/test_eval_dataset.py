@@ -61,7 +61,6 @@ def test_read_signature_missing_returns_none(tmp_path):
 
 
 def test_golden_item_round_trips_composite_keys():
-    from app.eval.dataset import GoldenItem
     item = GoldenItem(
         question="Сколько стоит услуга?",
         relevant_chunks=("contract.md:3", "contract.md:4"),
@@ -77,7 +76,6 @@ def test_golden_item_round_trips_composite_keys():
 def test_golden_item_reads_legacy_int_labels_as_strings():
     # Old QAPair / int-labelled lines must still load (stringified, won't match
     # composite hits, but must not crash).
-    from app.eval.dataset import GoldenItem
     legacy = '{"instruction":"q","input":"","output":"a","meta":{"relevant_chunk_ids":[7,12]}}'
     item = GoldenItem.from_jsonl_line(legacy)
     assert item.relevant_chunks == ("7", "12")
