@@ -59,6 +59,40 @@ def make_mvp_retriever(store) -> Retriever:
     return make_retriever(lambda q, k: store.search(q, top_k=k), _build_id_map(store))
 
 
+def _reranking_search(store, config):
+    """A ``(query, k)`` search fn mirroring ``kb_mvp.ask``: bi-encoder shortlist
+    then cross-encoder rerank. Module-level (not a closure inside the retriever)
+    so it is unit-testable with a fake store + injected reranker, no model load.
+    """
+    from app.services import kb_rerank
+
+    def _search(query: str, k: int):
+        shortlist = store.search(query, top_k=max(config.candidates, k))
+        return kb_rerank.rerank_hits(query, shortlist, config=config, top_n=k).hits
+
+    return _search
+
+
+def make_mvp_reranking_retriever(store, config=None) -> Retriever:
+    """Eval Retriever that ALWAYS applies the cross-encoder reranker (for gate C).
+
+    ``make_mvp_retriever`` returns the raw bi-encoder order (``store.search``);
+    reranking lives in ``kb_mvp.ask``, not the store — so this mirrors that path
+    to make the reranker measurable via the eval harness. ``enabled`` is forced on
+    (this retriever exists to rerank — avoids a silent passthrough when
+    ``KB_RERANK_ENABLED`` is unset); ``config`` overrides model/candidates/top_n,
+    otherwise ``KB_RERANK_*`` is used.
+    """
+    from dataclasses import replace
+
+    from app.services import kb_rerank
+
+    cfg = config if config is not None else kb_rerank.load_config()
+    if not cfg.enabled:
+        cfg = replace(cfg, enabled=True)
+    return make_retriever(_reranking_search(store, cfg), _build_id_map(store))
+
+
 def compute_signature(store):
     """Snapshot the live corpus for golden-set pinning.
 

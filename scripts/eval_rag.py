@@ -16,7 +16,7 @@ from app.eval import generation_eval
 from app.eval import guards
 from app.eval import report as report_mod
 from app.eval import retrieval_eval
-from app.eval.adapter import compute_signature, make_mvp_retriever
+from app.eval.adapter import compute_signature, make_mvp_retriever, make_mvp_reranking_retriever
 from app.eval.dataset import GoldenItem, load_golden, read_signature, save_golden, write_signature
 from app.services import synthetic_qa as sq
 from app.eval.metrics import RETRIEVAL_KS
@@ -56,7 +56,11 @@ def cmd_run(args: argparse.Namespace) -> None:
             f"Corpus signature mismatch — golden was built against {gold_sig.to_dict()} "
             f"but the live corpus is {sig.to_dict()}. Regenerate the golden set."
         )
-    retriever = make_mvp_retriever(store)
+    retriever = (
+        make_mvp_reranking_retriever(store)
+        if getattr(args, "rerank", False)
+        else make_mvp_retriever(store)
+    )
     top_k = args.top_k if args.top_k is not None else max(RETRIEVAL_KS)
     retrieval = retrieval_eval.evaluate(golden, retriever, top_k=top_k)
     generation = None
@@ -135,6 +139,11 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--out", default="var/data/eval/run.json")
     run.add_argument("--allow-hashing", action="store_true")
     run.add_argument("--judge", action="store_true", help="also score generation via LLM-judge")
+    run.add_argument(
+        "--rerank",
+        action="store_true",
+        help="apply the cross-encoder reranker (KB_RERANK_* config) — measures gate C",
+    )
     run.add_argument(
         "--top-k",
         type=int,
