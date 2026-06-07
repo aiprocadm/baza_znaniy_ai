@@ -12,10 +12,56 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Sequence
 
 LOGGER = logging.getLogger("scripts.generate_rag_dataset")
+
+
+@dataclass(frozen=True, slots=True)
+class ResolvedHit:
+    """A retrieval hit carrying the GLOBAL ``kb_chunks.id`` — the RAG-dataset identity.
+
+    Distinct from the eval harness's composite-key ``EvalHit``: the RAG-dataset
+    builder matches ``QAPair.source_chunk_id``, which IS the global ``kb_chunks.id``.
+    """
+
+    chunk_id: int
+    text: str
+
+
+def _build_global_id_map(store) -> dict[tuple[int, int], int]:
+    """(document_id, chunk_index) -> global ``kb_chunks.id``."""
+    with store._connect() as conn:  # noqa: SLF001
+        rows = conn.execute("SELECT id, document_id, chunk_index FROM kb_chunks").fetchall()
+    return {(int(doc_id), int(idx)): int(cid) for cid, doc_id, idx in rows}
+
+
+def build_resolving_retriever(search, id_map):
+    """Wrap a ``(query, top_k)`` search fn so each ``SearchHit`` is resolved to its
+    global ``kb_chunks.id`` (via ``id_map``) and returned as a ``ResolvedHit``."""
+
+    def _retrieve(query: str, top_k: int):
+        out = []
+        for h in search(query, top_k):
+            cid = id_map.get((int(h.document_id), int(h.chunk_index)))
+            if cid is None:
+                continue
+            out.append(ResolvedHit(chunk_id=cid, text=h.text))
+        return out
+
+    return _retrieve
+
+
+def make_resolving_retriever(store):
+    """Store-based convenience: resolve ``store.search`` hits to global ids.
+
+    Referenced by ``app/services/rag_dataset.py``'s Retriever-contract docstring.
+    """
+    return build_resolving_retriever(
+        lambda q, k: store.search(q, top_k=k), _build_global_id_map(store)
+    )
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
@@ -86,11 +132,9 @@ def _negative_pool(
     exclude_document_id: int | None,
     negative_document_id: int | None,
 ):
-    # EvalHit carries the global kb_chunks.id under ``.chunk_id`` — the identity
-    # the builder matches/cites on (shared with the eval harness adapter).
-    from app.eval.adapter import EvalHit
-
-    pool: list[EvalHit] = []
+    # ResolvedHit carries the global kb_chunks.id under ``.chunk_id`` — the identity
+    # the builder matches/cites on.
+    pool: list[ResolvedHit] = []
     with store._connect() as conn:  # noqa: SLF001
         sql = "SELECT id, text FROM kb_chunks"
         params: tuple = ()
@@ -105,7 +149,7 @@ def _negative_pool(
             sql += " WHERE " + " AND ".join(clauses)
         sql += " ORDER BY id ASC LIMIT 50"
         for row in conn.execute(sql, params):
-            pool.append(EvalHit(chunk_id=int(row[0]), text=str(row[1] or "")))
+            pool.append(ResolvedHit(chunk_id=int(row[0]), text=str(row[1] or "")))
     return pool
 
 
@@ -162,11 +206,8 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     # Resolve each SearchHit's (document_id, chunk_index) back to its global
     # kb_chunks.id so the builder matches the seed's source_chunk_id (also a
-    # global id). Shared resolver with the eval harness — see app/eval/adapter.py
-    # and the app.services.rag_dataset module docstring for why.
-    from app.eval.adapter import make_mvp_retriever
-
-    retriever = make_mvp_retriever(store)
+    # global id). See app/services/rag_dataset.py's Retriever-contract docstring.
+    retriever = make_resolving_retriever(store)
 
     pool = _negative_pool(
         store,
