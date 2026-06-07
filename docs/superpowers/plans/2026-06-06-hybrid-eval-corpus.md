@@ -519,6 +519,10 @@ git commit -m "test(eval): finish composite-key migration across eval tests"
 4. `py -3 -m scripts.build_frozen_embeddings`. Acceptance: `.npz` loads **without `allow_pickle`** and holds only float arrays; `.keys.json` `passage_keys` length = corpus chunk count; vectors L2-normalized.
 5. Retire contract golden to private; commit.
 
+**Deferred from PR1 (carry into this PR — flagged by the PR1 final review):**
+- `scripts/build_curated_golden.py:22-139` still passes **int** tuples to `GoldenItem.relevant_chunks` (now `tuple[str, ...]`). Harmless today (`to_dict` coerces via `str(...)`, reproducing the int-format file; it lives under `scripts/` so the gated `mypy app` doesn't see it), but migrate to composite keys (or convert via `build_global_id_key_map`) when this script is retired/repointed here.
+- `tests/test_eval_generation.py:48,59,62` still constructs `EvalHit(1, ...)` / `GoldenItem(..., (7,))` with ints — inert (generation_eval never matches on `chunk_key`/`relevant_chunks`), but tidy to string keys here.
+
 **Acceptance for the PR:** a fresh clone has the public `.md` + golden + `.npz` + `.keys.json`; nothing private is committed; `build_*` scripts are added to fixture protection in PR4.
 
 > Expand this section into bite-sized TDD tasks once PR1 is merged and the real
