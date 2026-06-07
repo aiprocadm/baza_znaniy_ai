@@ -16,7 +16,12 @@ from app.eval import generation_eval
 from app.eval import guards
 from app.eval import report as report_mod
 from app.eval import retrieval_eval
-from app.eval.adapter import compute_signature, make_mvp_retriever, make_mvp_reranking_retriever
+from app.eval.adapter import (
+    build_global_id_key_map,
+    compute_signature,
+    make_mvp_retriever,
+    make_mvp_reranking_retriever,
+)
 from app.eval.dataset import GoldenItem, load_golden, read_signature, save_golden, write_signature
 from app.services import synthetic_qa as sq
 from app.eval.metrics import RETRIEVAL_KS
@@ -109,15 +114,19 @@ def cmd_generate(args: argparse.Namespace) -> None:
         )
 
     generator = sq.SyntheticQAGenerator(provider=provider)
+    key_map = build_global_id_key_map(store)
     items: list[GoldenItem] = []
     for chunk_id, text in chunks:
         for pair in generator.generate_for_chunk(
             chunks=[text], chunk_ids=[chunk_id], mode=sq.GenerationMode.SINGLE
         ):
+            key = key_map.get(pair.source_chunk_id)
+            if key is None:
+                continue
             items.append(
                 GoldenItem(
                     question=pair.instruction,
-                    relevant_chunks=(str(pair.source_chunk_id),),
+                    relevant_chunks=(key,),
                     reference_answer=pair.output,
                     expect_refusal=False,
                     source="auto",

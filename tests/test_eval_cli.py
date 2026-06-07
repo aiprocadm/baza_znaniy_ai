@@ -174,3 +174,56 @@ def test_run_warns_when_golden_has_no_signature(tmp_path, monkeypatch, capsys):
         )
     )
     assert "WARNING" in capsys.readouterr().out
+
+
+def test_generate_emits_composite_keys(monkeypatch, tmp_path):
+    """generate command must write composite 'filename:index' chunk keys, not raw int ids."""
+    from app.services.kb_store import KnowledgeBaseStore
+    import app.services.kb_store as kb_store_mod
+    import scripts.eval_rag as cli
+    from app.eval.adapter import build_global_id_key_map
+
+    store = KnowledgeBaseStore(str(tmp_path / "kb.sqlite"))
+    store.add_document(title="Doc", text="первый абзац про оплату услуг.", filename="doc.md")
+    monkeypatch.setattr(kb_store_mod, "get_store", lambda: store)
+    monkeypatch.setattr(cli, "get_store", lambda: store)
+
+    # Robustly look up the real global id of the first chunk in the store
+    key_map = build_global_id_key_map(store)
+    assert key_map, "store must have at least one chunk after add_document"
+    first_chunk_id = next(iter(key_map))
+
+    class _Pair:
+        instruction = "Сколько стоит?"
+        output = "45000"
+        source_chunk_id = first_chunk_id
+
+    class _FakeProvider:
+        """Minimal provider so _gen_provider() returns something with name/model."""
+
+        name = "fake"
+        model = "fake"
+
+    class _FakeGenerator:
+        """Replaces SyntheticQAGenerator: always returns _Pair for any chunk."""
+
+        def __init__(self, provider):
+            pass
+
+        def generate_for_chunk(self, *, chunks, chunk_ids, mode):
+            return [_Pair()]
+
+    monkeypatch.setattr(cli, "_gen_provider", lambda: _FakeProvider())
+    monkeypatch.setattr(cli.sq, "SyntheticQAGenerator", _FakeGenerator)
+    monkeypatch.setattr(cli.sq, "estimate_total_cost_usd", lambda **kw: 0.0)
+
+    out = tmp_path / "golden_auto.jsonl"
+    cli.main(["generate", "--out", str(out), "--limit", "1", "--yes"])
+
+    from app.eval.dataset import load_golden
+
+    items = load_golden(out)
+    assert items, "generate must produce at least one golden item"
+    assert all(
+        ":" in k for it in items for k in it.relevant_chunks
+    ), f"All relevant_chunks must be composite keys; got: {[it.relevant_chunks for it in items]}"
