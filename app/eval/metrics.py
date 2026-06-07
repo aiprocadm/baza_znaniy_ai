@@ -1,4 +1,4 @@
-"""Pure retrieval-quality metrics. No I/O, no env, no globals."""
+"""Pure retrieval-quality metrics over chunk keys. No I/O, no env, no globals."""
 
 from __future__ import annotations
 
@@ -7,13 +7,13 @@ from typing import Collection, Sequence
 RETRIEVAL_KS: tuple[int, ...] = (1, 3, 5, 10)
 
 
-def hit_at_k(relevant: Collection[int], retrieved: Sequence[int], k: int) -> float:
+def hit_at_k(relevant: Collection[str], retrieved: Sequence[str], k: int) -> float:
     if k <= 0 or not relevant:
         return 0.0
     return 1.0 if any(cid in relevant for cid in retrieved[:k]) else 0.0
 
 
-def recall_at_k(relevant: Collection[int], retrieved: Sequence[int], k: int) -> float:
+def recall_at_k(relevant: Collection[str], retrieved: Sequence[str], k: int) -> float:
     rel = set(relevant)
     if k <= 0 or not rel:
         return 0.0
@@ -21,7 +21,7 @@ def recall_at_k(relevant: Collection[int], retrieved: Sequence[int], k: int) -> 
     return sum(1 for cid in rel if cid in topk) / len(rel)
 
 
-def mrr_at_k(relevant: Collection[int], retrieved: Sequence[int], k: int) -> float:
+def mrr_at_k(relevant: Collection[str], retrieved: Sequence[str], k: int) -> float:
     rel = set(relevant)
     if k <= 0 or not rel:
         return 0.0
@@ -32,8 +32,8 @@ def mrr_at_k(relevant: Collection[int], retrieved: Sequence[int], k: int) -> flo
 
 
 def score_item(
-    relevant: Collection[int],
-    retrieved: Sequence[int],
+    relevant: Collection[str],
+    retrieved: Sequence[str],
     ks: Sequence[int] = RETRIEVAL_KS,
 ) -> dict[str, float]:
     out: dict[str, float] = {}

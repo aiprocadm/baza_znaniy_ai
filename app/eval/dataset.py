@@ -16,7 +16,7 @@ from typing import Iterable
 @dataclass(frozen=True, slots=True)
 class GoldenItem:
     question: str
-    relevant_chunk_ids: tuple[int, ...]
+    relevant_chunks: tuple[str, ...]
     reference_answer: str = ""
     expect_refusal: bool = False
     source: str = "auto"  # "auto" | "curated"
@@ -27,10 +27,7 @@ class GoldenItem:
             "input": "",
             "output": self.reference_answer,
             "meta": {
-                "relevant_chunk_ids": [int(c) for c in self.relevant_chunk_ids],
-                "source_chunk_id": (
-                    int(self.relevant_chunk_ids[0]) if self.relevant_chunk_ids else 0
-                ),
+                "relevant_chunks": [str(c) for c in self.relevant_chunks],
                 "expect_refusal": bool(self.expect_refusal),
                 "source": self.source,
             },
@@ -43,14 +40,16 @@ class GoldenItem:
     def from_jsonl_line(cls, line: str) -> "GoldenItem":
         data = json.loads(line)
         meta = data.get("meta") or {}
-        if "relevant_chunk_ids" in meta:
-            ids = [int(c) for c in meta["relevant_chunk_ids"]]
+        if "relevant_chunks" in meta:
+            keys = [str(c) for c in meta["relevant_chunks"]]
+        elif "relevant_chunk_ids" in meta:  # legacy int labels
+            keys = [str(int(c)) for c in meta["relevant_chunk_ids"]]
         else:
             sid = meta.get("source_chunk_id")
-            ids = [int(sid)] if sid is not None else []
+            keys = [str(int(sid))] if sid is not None else []
         return cls(
             question=str(data["instruction"]),
-            relevant_chunk_ids=tuple(int(c) for c in ids),
+            relevant_chunks=tuple(keys),
             reference_answer=str(data.get("output", "")),
             expect_refusal=bool(meta.get("expect_refusal", False)),
             source=str(meta.get("source", "auto")),

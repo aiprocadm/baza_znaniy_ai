@@ -1,10 +1,10 @@
-"""Bridge the eval to the live MVP retriever using a stable global chunk id.
+"""Bridge the eval to the live MVP retriever using stable composite chunk keys.
 
-The eval's canonical chunk identity is ``kb_chunks.id`` — the same id
-``synthetic_qa.iter_chunks`` stamps onto ``QAPair.source_chunk_id``. The MVP
-``SearchHit`` exposes ``(document_id, chunk_index)`` but NOT the row id, and
-``chunk_index`` is only unique *within* a document, so each hit is resolved to
-its global id via a one-time map built from the store.
+The eval's canonical chunk identity is the composite string key
+``"<filename>:<chunk_index>"`` — human-readable and stable across re-ingests of
+the same file. The MVP ``SearchHit`` exposes ``(document_id, chunk_index)`` but
+NOT the filename directly, so each hit is resolved to its composite key via a
+one-time map built from the store.
 """
 
 from __future__ import annotations
@@ -15,7 +15,7 @@ from typing import Callable, Mapping, Protocol, Sequence
 
 @dataclass(frozen=True, slots=True)
 class EvalHit:
-    chunk_id: int
+    chunk_key: str  # composite "<filename>:<chunk_index>"
     text: str
     title: str = ""
 
@@ -31,32 +31,52 @@ class _SearchHitLike(Protocol):
     text: str
 
 
+def _chunk_key(filename, document_id: int, chunk_index: int) -> str:
+    base = filename or f"doc{document_id}"
+    return f"{base}:{chunk_index}"
+
+
 def make_retriever(
-    search: Callable[[str, int], Sequence[_SearchHitLike]],
-    id_map: Mapping[tuple[int, int], int],
+    search: Callable[[str, int], Sequence["_SearchHitLike"]],
+    key_map: Mapping[tuple[int, int], str],
 ) -> Retriever:
     def _retrieve(query: str, top_k: int) -> list[EvalHit]:
         out: list[EvalHit] = []
         for h in search(query, top_k):
-            cid = id_map.get((int(h.document_id), int(h.chunk_index)))
-            if cid is None:
+            key = key_map.get((int(h.document_id), int(h.chunk_index)))
+            if key is None:
                 continue
             title = getattr(h, "filename", "") or getattr(h, "document_title", "") or ""
-            out.append(EvalHit(chunk_id=cid, text=h.text, title=title))
+            out.append(EvalHit(chunk_key=key, text=h.text, title=title))
         return out
 
     return _retrieve
 
 
-def _build_id_map(store) -> dict[tuple[int, int], int]:
-    with store._connect() as conn:  # noqa: SLF001 — reuse store connection conventions
-        rows = conn.execute("SELECT id, document_id, chunk_index FROM kb_chunks").fetchall()
-    return {(int(doc_id), int(idx)): int(cid) for cid, doc_id, idx in rows}
+def _build_key_map(store) -> dict[tuple[int, int], str]:
+    with store._connect() as conn:  # noqa: SLF001
+        rows = conn.execute(
+            "SELECT c.document_id, c.chunk_index, d.filename "
+            "FROM kb_chunks c JOIN kb_documents d ON d.id = c.document_id"
+        ).fetchall()
+    return {
+        (int(doc_id), int(idx)): _chunk_key(fn, int(doc_id), int(idx)) for doc_id, idx, fn in rows
+    }
+
+
+def build_global_id_key_map(store) -> dict[int, str]:
+    """global kb_chunks.id -> composite key. For converting int-labelled goldens."""
+    with store._connect() as conn:  # noqa: SLF001
+        rows = conn.execute(
+            "SELECT c.id, c.document_id, c.chunk_index, d.filename "
+            "FROM kb_chunks c JOIN kb_documents d ON d.id = c.document_id"
+        ).fetchall()
+    return {int(cid): _chunk_key(fn, int(doc_id), int(idx)) for cid, doc_id, idx, fn in rows}
 
 
 def make_mvp_retriever(store) -> Retriever:
     """Wrap a live ``KnowledgeBaseStore`` as an eval Retriever."""
-    return make_retriever(lambda q, k: store.search(q, top_k=k), _build_id_map(store))
+    return make_retriever(lambda q, k: store.search(q, top_k=k), _build_key_map(store))
 
 
 def _reranking_search(store, config):
@@ -90,7 +110,7 @@ def make_mvp_reranking_retriever(store, config=None) -> Retriever:
     cfg = config if config is not None else kb_rerank.load_config()
     if not cfg.enabled:
         cfg = replace(cfg, enabled=True)
-    return make_retriever(_reranking_search(store, cfg), _build_id_map(store))
+    return make_retriever(_reranking_search(store, cfg), _build_key_map(store))
 
 
 def compute_signature(store):

@@ -366,7 +366,7 @@ def test_relevant_sample_matches_global_id_on_two_document_corpus(tmp_path) -> N
     id). Before the fix this returned ``None`` — the global id was compared
     against the per-document ordinal 0.
     """
-    from app.eval.adapter import _build_id_map, make_retriever
+    from scripts.generate_rag_dataset import _build_global_id_map, build_resolving_retriever
     from app.services.kb_store import KnowledgeBaseStore, SearchHit
     from app.services.rag_dataset import build_relevant_sample
     from app.services.synthetic_qa import QAPair
@@ -385,7 +385,7 @@ def test_relevant_sample_matches_global_id_on_two_document_corpus(tmp_path) -> N
     assert id_a != id_b  # global ids are unique
     assert id_b != idx_b  # the exact divergence the bug confused (e.g. 2 != 0)
 
-    id_map = _build_id_map(store)
+    id_map = _build_global_id_map(store)
     assert id_map[(doc_b, idx_b)] == id_b  # (document_id, chunk_index) -> global id
 
     # Deterministic stub search surfacing Doc B's chunk — avoids depending on the
@@ -401,7 +401,7 @@ def test_relevant_sample_matches_global_id_on_two_document_corpus(tmp_path) -> N
             )
         ][:top_k]
 
-    retriever = make_retriever(fake_search, id_map)
+    retriever = build_resolving_retriever(fake_search, id_map)
 
     seed = QAPair(
         instruction="Как часто калибруют манометр?",
