@@ -1,6 +1,8 @@
 """Keyless auto-selection: local GGUF is the DEFAULT fallback (opt-out, not opt-in)."""
 from __future__ import annotations
 
+import pytest
+
 import app.services.kb_llm as kb_llm
 
 
@@ -10,9 +12,10 @@ def test_gguf_used_by_default_when_no_keys(monkeypatch):
     assert kb_llm.select_provider(env={}) is sentinel  # no env at all → GGUF
 
 
-def test_gguf_disabled_explicitly(monkeypatch):
+@pytest.mark.parametrize("val", ["0", "false", "no", "off", "FALSE", "Off", "NO"])
+def test_gguf_disabled_explicitly(monkeypatch, val):
     monkeypatch.setattr(kb_llm, "_build_gguf_provider", lambda env=None: object())
-    assert kb_llm.select_provider(env={"KB_LLM_LOCAL_FALLBACK": "0"}) is None
+    assert kb_llm.select_provider(env={"KB_LLM_LOCAL_FALLBACK": val}) is None
 
 
 def test_none_when_no_keys_and_no_model(monkeypatch):
