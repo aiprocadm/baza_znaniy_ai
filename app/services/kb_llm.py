@@ -473,6 +473,33 @@ class GgufEvalProvider:
             elapsed_ms=round(elapsed_ms, 2),
         )
 
+    async def generate_stream(
+        self,
+        prompt: str,
+        *,
+        system: Optional[str] = None,
+        max_tokens: Optional[int] = None,
+        temperature: Optional[float] = None,
+    ):
+        """Async generator that yields the full GGUF response as a single chunk.
+
+        Local CPU inference cannot truly stream token-by-token, so we run the
+        blocking :meth:`generate` call off the event loop via
+        :func:`asyncio.to_thread` and yield the result as one delta.
+        """
+        import asyncio
+
+        resp = await asyncio.to_thread(
+            self.generate,
+            prompt,
+            system=system,
+            max_tokens=max_tokens,
+            temperature=temperature,
+        )
+        text = (resp.text or "").strip()
+        if text:
+            yield text
+
 
 def _build_gguf_provider(env: Mapping[str, str] | None = None) -> Optional[GgufEvalProvider]:
     path = _env("KB_LLM_GGUF_PATH", env) or "./models/qwen2.5-3b-instruct-q4_k_m.gguf"
