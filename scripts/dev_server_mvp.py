@@ -22,6 +22,7 @@ Then open:
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -34,6 +35,40 @@ ROOT = Path(__file__).resolve().parent.parent  # repo root (scripts/../)
 STATIC_DIR = ROOT / "data" / "www"
 
 app = FastAPI(title="kb-mvp-dev", description="MVP-only dev server for /api/kb/*")
+
+
+@app.on_event("startup")
+async def _startup_preflight() -> None:
+    """Log one status line (LLM / embedder / mode) at server boot.
+
+    Entirely best-effort: any failure is swallowed to a debug log so it
+    can never prevent the server from starting.
+    """
+    try:
+        import os
+
+        from app.services.hardware_probe import probe_system
+        from app.services.startup_preflight import log_preflight
+        from app.services import kb_llm
+        from app.services.kb_embeddings import get_embedder
+
+        probe_system()  # logs a low-RAM warning if applicable
+        _prov = kb_llm.select_provider()
+        _emb = get_embedder()
+        _mode = (
+            "api"
+            if os.environ.get("KB_LLM_LOCAL_FALLBACK", "").lower() in {"0", "false", "no", "off"}
+            else "bundled"
+        )
+        log_preflight(
+            llm_name=getattr(_prov, "name", None),
+            llm_model=getattr(_prov, "model", None),
+            embedder_name=getattr(_emb, "name", "unknown"),
+            mode=_mode,
+        )
+    except Exception:  # preflight is best-effort; never break startup
+        logging.getLogger(__name__).debug("preflight logging skipped", exc_info=True)
+
 
 # Permissive CORS for local dev — production locks this down via Settings.
 app.add_middleware(
