@@ -360,6 +360,18 @@ class KnowledgeBaseStore:
             )
 
     def _verify_embedder_signature(self) -> None:
+        stored = self._kv_load("sig")
+        if stored is None:
+            # No signature row yet.  Check whether the index is truly empty or
+            # was built before kv_meta existed (upgrade path).
+            with self._lock, self._connect() as conn:
+                row = conn.execute("SELECT embedder, dim FROM kb_chunks LIMIT 1").fetchone()
+            if row is not None:
+                # Populated pre-kv_meta DB: backfill the legacy signature so
+                # verify_or_store can detect a mismatch with the active embedder.
+                legacy_name = row[0] if row[0] else "legacy"
+                legacy_dim = int(row[1]) if row[1] else EMBEDDING_DIM
+                self._kv_save("sig", f"{legacy_name}:{legacy_dim}")
         verify_or_store(
             self._embedder,
             load=self._kv_load,
