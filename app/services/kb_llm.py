@@ -503,7 +503,7 @@ def build_provider(provider: str, env: Mapping[str, str] | None = None) -> OpenA
 
 def select_provider(
     env: Mapping[str, str] | None = None,
-) -> Optional[OpenAICompatibleProvider]:
+) -> Optional[OpenAICompatibleProvider | GgufEvalProvider]:
     """Pick the most appropriate provider for the current environment."""
 
     explicit = _env("KB_LLM_PROVIDER", env)

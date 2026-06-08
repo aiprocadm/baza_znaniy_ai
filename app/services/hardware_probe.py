@@ -43,7 +43,7 @@ def probe_system(model_needs_gb: float = 4.0) -> ProbeResult:
     """Thin OS wrapper: gather real facts, then call the pure core."""
     ram_gb: Optional[float] = None
     try:
-        import psutil  # optional
+        import psutil  # type: ignore[import-untyped]  # optional dep
 
         ram_gb = psutil.virtual_memory().total / (1024**3)
     except Exception:

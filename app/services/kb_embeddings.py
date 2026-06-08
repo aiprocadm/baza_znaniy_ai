@@ -11,7 +11,7 @@ from __future__ import annotations
 import logging
 import math
 from dataclasses import dataclass
-from typing import Mapping, Optional, Protocol
+from typing import Any, Mapping, Optional, Protocol
 
 try:  # pragma: no cover
     import httpx
@@ -28,7 +28,10 @@ LOGGER = logging.getLogger(__name__)
 
 class Embedder(Protocol):
     name: str
-    dimension: int
+
+    @property
+    def dimension(self) -> int:  # pragma: no cover - protocol
+        ...
 
     def embed(self, text: str) -> list[float]:  # pragma: no cover - protocol
         ...
@@ -175,7 +178,7 @@ class SentenceTransformerEmbedder:
         self._model = model
         self._dimension: Optional[int] = None
 
-    def _ensure_model(self) -> object:
+    def _ensure_model(self) -> Any:
         if self._model is None:
             from sentence_transformers import SentenceTransformer  # heavy; lazy
 
