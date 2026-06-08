@@ -655,7 +655,12 @@ def health(request: Request) -> dict[str, Any]:
 
     extra: list[tuple] = []
     try:
-        if kb_embeddings.embedder_status().get("name") == "hash":
+        # Prefer the store's own embedder to detect degradation; fall back to global.
+        _store_embedder = getattr(store, "embedder", None)
+        _embedder_name = getattr(_store_embedder, "name", None)
+        if _embedder_name is None:
+            _embedder_name = kb_embeddings.embedder_status().get("name")
+        if _embedder_name == "hash":
             extra.append((retrieval_health.RetrievalReason.HASHING_EMBEDDER, "embedder=hash"))
     except Exception:  # pragma: no cover - never let a probe break health
         pass
