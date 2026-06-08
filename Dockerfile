@@ -12,9 +12,9 @@ ARG DOWNLOAD_MODEL=0
 ARG LLM_MODEL_TARGET=default
 ARG LLM_MODEL_OUTPUT=models/model.gguf
 ARG INSTALL_DEV=0
-# Set BUNDLE_MODEL=true to bake the default LLM and e5-small embedder into the image at build time.
-# The resulting image is self-contained (no network at runtime) but ~4 GB larger.
-ARG BUNDLE_MODEL=false
+# By default, the image bundles the LLM and e5-small embedder at build time for a self-contained,
+# air-gap-ready image (~4 GB larger). Override with --build-arg BUNDLE_MODEL=false for lightweight/CI builds.
+ARG BUNDLE_MODEL=true
 
 ENV HUGGINGFACE_HUB_TOKEN=${HUGGINGFACE_HUB_TOKEN}
 
@@ -57,13 +57,7 @@ RUN if [ "${DOWNLOAD_MODEL}" = "1" ]; then \
         echo "Skipping GGUF download during build"; \
     fi
 
-# BUNDLE_MODEL=true: fetch the default qwen2.5-3b LLM and warm the e5-small sentence-transformers
-# model cache into the image so the container starts fully offline. Skipped by default to keep
-# the base image lightweight. Override at build time:
-#   docker build --build-arg BUNDLE_MODEL=true .
-# The BUNDLE_MODEL ARG must be re-declared here so it is in scope after the FROM-level declaration
-# (Docker ARG scoping rule: each ARG declared before FROM is out of scope inside RUN layers unless
-# re-declared after FROM).
+# Re-declare BUNDLE_MODEL so it's in scope for the following RUN block.
 ARG BUNDLE_MODEL
 RUN if [ "${BUNDLE_MODEL}" = "true" ]; then \
         python -m scripts.download_model \
