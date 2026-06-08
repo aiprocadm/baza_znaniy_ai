@@ -15,11 +15,17 @@ def format_preflight(
     embedder_name: str,
     mode: str,
 ) -> str:
-    llm = f"{llm_name}({llm_model})" if llm_name else "none -> extractive fallback"
+    llm = f"{llm_name}({llm_model or '?'})" if llm_name else "none -> extractive fallback"
     return f"KB.AI ready · LLM={llm} · Embedder={embedder_name} · Mode={mode}"
 
 
-def log_preflight(*, llm_name, llm_model, embedder_name, mode) -> None:
+def log_preflight(
+    *,
+    llm_name: Optional[str],
+    llm_model: Optional[str],
+    embedder_name: str,
+    mode: str,
+) -> None:
     LOGGER.info(
         format_preflight(
             llm_name=llm_name,

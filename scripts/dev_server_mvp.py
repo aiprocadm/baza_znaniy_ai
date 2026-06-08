@@ -60,6 +60,8 @@ async def _startup_preflight() -> None:
             if os.environ.get("KB_LLM_LOCAL_FALLBACK", "").lower() in {"0", "false", "no", "off"}
             else "bundled"
         )
+        if _prov is None:
+            _mode = "degraded"
         log_preflight(
             llm_name=getattr(_prov, "name", None),
             llm_model=getattr(_prov, "model", None),
