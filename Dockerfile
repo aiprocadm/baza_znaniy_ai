@@ -12,6 +12,9 @@ ARG DOWNLOAD_MODEL=0
 ARG LLM_MODEL_TARGET=default
 ARG LLM_MODEL_OUTPUT=models/model.gguf
 ARG INSTALL_DEV=0
+# Set BUNDLE_MODEL=true to bake the default LLM and e5-small embedder into the image at build time.
+# The resulting image is self-contained (no network at runtime) but ~4 GB larger.
+ARG BUNDLE_MODEL=false
 
 ENV HUGGINGFACE_HUB_TOKEN=${HUGGINGFACE_HUB_TOKEN}
 
@@ -52,6 +55,25 @@ RUN if [ "${DOWNLOAD_MODEL}" = "1" ]; then \
             --allow-missing-hash --max-retries 5; \
     else \
         echo "Skipping GGUF download during build"; \
+    fi
+
+# BUNDLE_MODEL=true: fetch the default qwen2.5-3b LLM and warm the e5-small sentence-transformers
+# model cache into the image so the container starts fully offline. Skipped by default to keep
+# the base image lightweight. Override at build time:
+#   docker build --build-arg BUNDLE_MODEL=true .
+# The BUNDLE_MODEL ARG must be re-declared here so it is in scope after the FROM-level declaration
+# (Docker ARG scoping rule: each ARG declared before FROM is out of scope inside RUN layers unless
+# re-declared after FROM).
+ARG BUNDLE_MODEL
+RUN if [ "${BUNDLE_MODEL}" = "true" ]; then \
+        python -m scripts.download_model \
+            --manifest ./models/model_manifest.json \
+            --target qwen2.5-3b-instruct \
+            --output ./models/qwen2.5-3b-instruct-q4_k_m.gguf \
+            --max-retries 5 && \
+        python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('intfloat/multilingual-e5-small')"; \
+    else \
+        echo "Skipping model bundle (BUNDLE_MODEL != true)"; \
     fi
 
 EXPOSE 8000
