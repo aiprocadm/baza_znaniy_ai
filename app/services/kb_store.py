@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Any, Iterable, List, Mapping, Optional, Protocol, Sequence, Tuple, cast
 
 from app.observability import retrieval_health
+from app.services.embedder_signature import verify_or_store
 
 LOGGER = logging.getLogger(__name__)
 
@@ -225,6 +226,7 @@ class KnowledgeBaseStore:
         self._lock = threading.RLock()
         self._embedder = _resolve_embedder(embedder)
         self._init_schema()
+        self._verify_embedder_signature()
 
     @property
     def embedder(self) -> _EmbedderLike:
@@ -337,8 +339,32 @@ class KnowledgeBaseStore:
                     ON kb_feedback(message_id);
                 CREATE INDEX IF NOT EXISTS idx_kb_feedback_rating_created
                     ON kb_feedback(rating, created_at);
+                CREATE TABLE IF NOT EXISTS kv_meta (
+                    key TEXT PRIMARY KEY,
+                    value TEXT NOT NULL
+                );
                 """
             )
+
+    def _kv_load(self, key: str) -> Optional[str]:
+        with self._connect() as conn:
+            row = conn.execute("SELECT value FROM kv_meta WHERE key = ?", (key,)).fetchone()
+        return row[0] if row is not None else None
+
+    def _kv_save(self, key: str, value: str) -> None:
+        with self._lock, self._connect() as conn:
+            conn.execute(
+                "INSERT INTO kv_meta(key, value) VALUES(?, ?) "
+                "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                (key, value),
+            )
+
+    def _verify_embedder_signature(self) -> None:
+        verify_or_store(
+            self._embedder,
+            load=self._kv_load,
+            save=lambda s: self._kv_save("sig", s),
+        )
 
     @staticmethod
     def _pack(vec: Sequence[float]) -> bytes:
