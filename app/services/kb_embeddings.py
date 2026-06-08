@@ -223,21 +223,34 @@ def _extract_first_embedding(data: object) -> list[float]:
     return []
 
 
-
 def _try_build_st_embedder(env: Mapping[str, str] | None) -> Optional[Embedder]:
     """Return the implicit-default ST e5 embedder, or None if unavailable.
 
     Unavailable = optional dependency missing OR weights not on disk. Never raises —
     absence simply means 'fall through to hash'. Light e5-small with prefixing on.
+
+    NOTE: the implicit default deliberately uses lightweight
+    ``intfloat/multilingual-e5-small`` (out-of-box product default).
+    The EXPLICIT ``KB_EMBEDDINGS_BACKEND=st`` path in ``_build_from_env``
+    keeps ``BAAI/bge-m3`` (heavier, eval/power-user choice) — intentional split.
     """
+    # Implicit default: lightweight e5-small (out-of-box product default).
+    # The explicit KB_EMBEDDINGS_BACKEND=st path uses BAAI/bge-m3 (heavier,
+    # eval/power-user choice) — intentional divergence, not a mistake.
     model_name = _env("ST_EMBED_MODEL", env) or "intfloat/multilingual-e5-small"
     try:
         candidate = SentenceTransformerEmbedder(model_name=model_name, e5_prefix_enabled=True)
+        # SentenceTransformerEmbedder.__init__ is LAZY — it never imports
+        # sentence_transformers or loads weights until first use. Force a probe
+        # NOW so that a missing dependency or missing weights is caught here and
+        # converted to None, rather than crashing later at query time.
+        _ = candidate.dimension  # triggers _ensure_model() → ImportError / OSError if missing
     except Exception as exc:  # dependency or weights missing — advisory, not fatal
         LOGGER.info("ST embedder unavailable (%s); using fallback embedder", exc)
         return None
     record_embedder_backend("st")
     return candidate
+
 
 def _build_from_env(env: Mapping[str, str] | None = None) -> Embedder:
     explicit = (_env("KB_EMBEDDINGS_BACKEND", env) or "").lower()

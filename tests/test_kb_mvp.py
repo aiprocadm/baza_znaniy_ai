@@ -557,12 +557,13 @@ def test_no_hashing_warning_when_st_available(
 
     for name in ("KB_EMBEDDINGS_BACKEND", "OLLAMA_EMBED_MODEL", "EMBEDDINGS_API_BASE_URL"):
         monkeypatch.delenv(name, raising=False)
-    monkeypatch.setenv("KB_API_KEY", "any-key")
     kb_embeddings.reset_embedder()
 
     sentinel = kb_embeddings.HashingEmbedder()
     sentinel.name = "st"  # stand in for a real ST embedder
-    monkeypatch.setattr(kb_embeddings, "_try_build_st_embedder", lambda env: sentinel, raising=False)
+    monkeypatch.setattr(
+        kb_embeddings, "_try_build_st_embedder", lambda env: sentinel, raising=False
+    )
 
     with caplog.at_level("WARNING", logger="app.services.kb_embeddings"):
         chosen = kb_embeddings._build_from_env(env={"KB_API_KEY": "k"})
@@ -609,7 +610,9 @@ def test_st_default_silent_when_no_api_key(
     # ST is the new implicit default; no hashing warning should fire
     assert embedder.name == "st"
     matching = [r for r in caplog.records if "hashing" in r.message.lower()]
-    assert not matching, f"unexpected hashing warning in dev mode: {[r.message for r in caplog.records]}"
+    assert (
+        not matching
+    ), f"unexpected hashing warning in dev mode: {[r.message for r in caplog.records]}"
 
 
 def test_hashing_silent_when_explicitly_requested(
