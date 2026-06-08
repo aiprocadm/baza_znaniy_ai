@@ -12,6 +12,7 @@ from fastapi.testclient import TestClient
 import app.observability.retrieval_health as retrieval_health
 from app.api.kb_mvp import router
 from app.services import kb_llm
+from app.services.kb_embeddings import HashingEmbedder
 from app.services.kb_store import KnowledgeBaseStore
 
 
@@ -43,8 +44,8 @@ def _client(store: KnowledgeBaseStore, monkeypatch) -> TestClient:
 
 
 def test_ask_reports_hashing_embedder_as_critical(tmp_path: Path, monkeypatch):
-    # Default store -> hashing embedder (no KB_EMBEDDINGS_BACKEND) -> CRITICAL
-    store = KnowledgeBaseStore(tmp_path / "kb.sqlite")
+    # Explicit hashing embedder -> CRITICAL (ST is now the implicit default)
+    store = KnowledgeBaseStore(tmp_path / "kb.sqlite", embedder=HashingEmbedder())
     store.add_document("doc1", text="alpha beta gamma " * 20)
     client = _client(store, monkeypatch)
 
@@ -81,7 +82,7 @@ def _read_meta_event(client: TestClient, question: str) -> dict:
 
 
 def test_ask_stream_meta_carries_retrieval_when_degraded(tmp_path: Path, monkeypatch):
-    store = KnowledgeBaseStore(tmp_path / "kb.sqlite")  # hashing default
+    store = KnowledgeBaseStore(tmp_path / "kb.sqlite", embedder=HashingEmbedder())  # explicit hashing to test degradation path
     store.add_document("doc1", text="alpha beta gamma " * 20)
     client = _client(store, monkeypatch)
 

@@ -223,6 +223,22 @@ def _extract_first_embedding(data: object) -> list[float]:
     return []
 
 
+
+def _try_build_st_embedder(env: Mapping[str, str] | None) -> Optional[Embedder]:
+    """Return the implicit-default ST e5 embedder, or None if unavailable.
+
+    Unavailable = optional dependency missing OR weights not on disk. Never raises —
+    absence simply means 'fall through to hash'. Light e5-small with prefixing on.
+    """
+    model_name = _env("ST_EMBED_MODEL", env) or "intfloat/multilingual-e5-small"
+    try:
+        candidate = SentenceTransformerEmbedder(model_name=model_name, e5_prefix_enabled=True)
+    except Exception as exc:  # dependency or weights missing — advisory, not fatal
+        LOGGER.info("ST embedder unavailable (%s); using fallback embedder", exc)
+        return None
+    record_embedder_backend("st")
+    return candidate
+
 def _build_from_env(env: Mapping[str, str] | None = None) -> Embedder:
     explicit = (_env("KB_EMBEDDINGS_BACKEND", env) or "").lower()
     if explicit == "hash" or explicit == "":
@@ -278,6 +294,11 @@ def _build_from_env(env: Mapping[str, str] | None = None) -> Embedder:
             "KB_EMBEDDINGS_BACKEND=api (+ EMBEDDINGS_API_BASE_URL) for "
             "real embeddings; set KB_EMBEDDINGS_BACKEND=hash to silence this."
         )
+
+    if not explicit:
+        st = _try_build_st_embedder(env)
+        if st is not None:
+            return st
 
     record_embedder_backend("hash")
     return HashingEmbedder()

@@ -43,6 +43,8 @@ def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
         "KB_SEARCH_HARD_LIMIT",
     ):
         monkeypatch.delenv(name, raising=False)
+    # Force hashing embedder so tests are fast and don't attempt ST weight loading
+    monkeypatch.setenv("KB_EMBEDDINGS_BACKEND", "hash")
     kb_store.reset_default_store()
     kb_embeddings.reset_embedder()
     kb_rerank.reset_cache()
@@ -504,7 +506,8 @@ def test_openai_compatible_provider_generate_calls_http(monkeypatch: pytest.Monk
 # ----------------------------------------------------------------------
 
 
-def test_hashing_embedder_is_default(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_st_embedder_is_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    # ST (e5-small) is now the implicit default when no backend is configured
     for name in (
         "KB_EMBEDDINGS_BACKEND",
         "OLLAMA_EMBED_MODEL",
@@ -513,9 +516,9 @@ def test_hashing_embedder_is_default(monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv(name, raising=False)
     kb_embeddings.reset_embedder()
     embedder = kb_embeddings.get_embedder()
-    assert embedder.name == "hash"
+    assert embedder.name == "st"
     vec = embedder.embed("text")
-    assert len(vec) == kb_store.EMBEDDING_DIM
+    assert len(vec) == 384  # ST stub/real model returns 384-dim vectors
 
 
 def test_ollama_embedder_constructs(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -544,7 +547,7 @@ def test_api_embedder_constructs(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_hashing_fallback_warns_when_production_like(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """KB_API_KEY set + no real embedder = silent failure. Warn loudly."""
+    """KB_API_KEY set + no explicit backend → warning fires; ST is attempted (and succeeds here via stub)."""
 
     for name in ("KB_EMBEDDINGS_BACKEND", "OLLAMA_EMBED_MODEL", "EMBEDDINGS_API_BASE_URL"):
         monkeypatch.delenv(name, raising=False)
@@ -554,17 +557,18 @@ def test_hashing_fallback_warns_when_production_like(
     with caplog.at_level("WARNING", logger="app.services.kb_embeddings"):
         embedder = kb_embeddings.get_embedder()
 
-    assert isinstance(embedder, kb_embeddings.HashingEmbedder)
+    # ST is the new implicit default (stub succeeds); warning still fires for KB_API_KEY
+    assert embedder.name == "st"
     matching = [r for r in caplog.records if "hashing" in r.message.lower()]
     assert (
         matching
     ), f"expected hashing-fallback warning, got: {[r.message for r in caplog.records]}"
 
 
-def test_hashing_default_silent_when_no_api_key(
+def test_st_default_silent_when_no_api_key(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """Pure dev mode (no KB_API_KEY) — hashing is expected, no warning."""
+    """Pure dev mode (no KB_API_KEY) — ST is the new default, no hashing warning."""
 
     for name in (
         "KB_EMBEDDINGS_BACKEND",
@@ -578,9 +582,10 @@ def test_hashing_default_silent_when_no_api_key(
     with caplog.at_level("WARNING", logger="app.services.kb_embeddings"):
         embedder = kb_embeddings.get_embedder()
 
-    assert isinstance(embedder, kb_embeddings.HashingEmbedder)
+    # ST is the new implicit default; no hashing warning should fire
+    assert embedder.name == "st"
     matching = [r for r in caplog.records if "hashing" in r.message.lower()]
-    assert not matching, f"unexpected warning in dev mode: {[r.message for r in caplog.records]}"
+    assert not matching, f"unexpected hashing warning in dev mode: {[r.message for r in caplog.records]}"
 
 
 def test_hashing_silent_when_explicitly_requested(
@@ -622,8 +627,9 @@ def test_embedder_backend_metric_records_active_kind(
 
     kb_embeddings.get_embedder()
 
-    hash_value = REGISTRY.get_sample_value("kb_embedder_backend_active", labels={"kind": "hash"})
-    assert hash_value == 1.0
+    # Default is now ST, so the `st` gauge is set, not `hash`
+    st_value = REGISTRY.get_sample_value("kb_embedder_backend_active", labels={"kind": "st"})
+    assert st_value == 1.0
 
 
 # ----------------------------------------------------------------------

@@ -11,17 +11,17 @@ from fastapi.testclient import TestClient
 import app.observability.retrieval_health as retrieval_health
 import app.services.kb_embeddings as kb_embeddings
 from app.api.kb_mvp import router
+from app.services.kb_embeddings import HashingEmbedder
 from app.services.kb_store import KnowledgeBaseStore
 
 
 @pytest.fixture
 def app_with_hashing_store(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.delenv("KB_EMBEDDINGS_BACKEND", raising=False)
-    kb_embeddings.reset_embedder()  # force re-resolution to the hashing default
     retrieval_health.reset()
 
-    store = KnowledgeBaseStore(tmp_path / "kb.sqlite")
+    # Explicit HashingEmbedder so the store is always 'hashing' regardless of default
+    store = KnowledgeBaseStore(tmp_path / "kb.sqlite", embedder=HashingEmbedder())
     store.add_document("doc1", text="alpha " * 50)
     fastapi_app = FastAPI()
     fastapi_app.include_router(router, prefix="/api/kb")
