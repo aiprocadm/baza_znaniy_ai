@@ -544,25 +544,43 @@ def test_api_embedder_constructs(monkeypatch: pytest.MonkeyPatch) -> None:
     assert embedder.api_key == "k"
 
 
-def test_hashing_fallback_warns_when_production_like(
+def test_no_hashing_warning_when_st_available(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """KB_API_KEY set + no explicit backend → warning fires; ST is attempted (and succeeds here via stub)."""
+    """ST available + KB_API_KEY set → embedder is 'st' and hashing warning does NOT fire."""
 
     for name in ("KB_EMBEDDINGS_BACKEND", "OLLAMA_EMBED_MODEL", "EMBEDDINGS_API_BASE_URL"):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("KB_API_KEY", "any-key")
     kb_embeddings.reset_embedder()
 
-    with caplog.at_level("WARNING", logger="app.services.kb_embeddings"):
-        embedder = kb_embeddings.get_embedder()
+    sentinel = kb_embeddings.HashingEmbedder()
+    sentinel.name = "st"  # stand in for a real ST embedder
+    monkeypatch.setattr(kb_embeddings, "_try_build_st_embedder", lambda env: sentinel, raising=False)
 
-    # ST is the new implicit default (stub succeeds); warning still fires for KB_API_KEY
-    assert embedder.name == "st"
-    matching = [r for r in caplog.records if "hashing" in r.message.lower()]
-    assert (
-        matching
-    ), f"expected hashing-fallback warning, got: {[r.message for r in caplog.records]}"
+    with caplog.at_level("WARNING", logger="app.services.kb_embeddings"):
+        chosen = kb_embeddings._build_from_env(env={"KB_API_KEY": "k"})
+
+    assert chosen is sentinel
+    assert "Falling back to hashing embedder" not in caplog.text
+
+
+def test_hashing_warning_when_st_unavailable_and_production_like(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """ST unavailable + KB_API_KEY set + no explicit backend → hash used and warning fires."""
+
+    for name in ("KB_EMBEDDINGS_BACKEND", "OLLAMA_EMBED_MODEL", "EMBEDDINGS_API_BASE_URL"):
+        monkeypatch.delenv(name, raising=False)
+    kb_embeddings.reset_embedder()
+
+    monkeypatch.setattr(kb_embeddings, "_try_build_st_embedder", lambda env: None, raising=False)
+
+    with caplog.at_level("WARNING", logger="app.services.kb_embeddings"):
+        chosen = kb_embeddings._build_from_env(env={"KB_API_KEY": "k"})
+
+    assert isinstance(chosen, kb_embeddings.HashingEmbedder)
+    assert "Falling back to hashing embedder" in caplog.text
 
 
 def test_st_default_silent_when_no_api_key(

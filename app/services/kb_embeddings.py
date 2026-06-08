@@ -283,9 +283,15 @@ def _build_from_env(env: Mapping[str, str] | None = None) -> Embedder:
         if explicit == "api":
             LOGGER.warning("API backend requested but EMBEDDINGS_API_BASE_URL missing")
 
-    # Implicit hashing fallback in a production-like config (KB_API_KEY set)
-    # is almost always an unintended silent failure: semantic search returns
-    # near-random results while the LLM still answers confidently. Surface it.
+    if not explicit:
+        st = _try_build_st_embedder(env)
+        if st is not None:
+            return st
+
+    # We are about to return the hashing embedder. In a production-like config
+    # (KB_API_KEY set, no explicit backend) this is almost always an unintended
+    # silent failure — semantic search returns near-random results. Surface it,
+    # but only now that ST has actually been ruled out.
     if not explicit and _env("KB_API_KEY", env):
         LOGGER.warning(
             "Falling back to hashing embedder while KB_API_KEY is set — "
@@ -294,11 +300,6 @@ def _build_from_env(env: Mapping[str, str] | None = None) -> Embedder:
             "KB_EMBEDDINGS_BACKEND=api (+ EMBEDDINGS_API_BASE_URL) for "
             "real embeddings; set KB_EMBEDDINGS_BACKEND=hash to silence this."
         )
-
-    if not explicit:
-        st = _try_build_st_embedder(env)
-        if st is not None:
-            return st
 
     record_embedder_backend("hash")
     return HashingEmbedder()
