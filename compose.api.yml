@@ -1,0 +1,18 @@
+# compose.api.yml — external-key profile
+#
+# Use when you have a cloud LLM API key (DeepSeek, Groq, OpenRouter, OpenAI).
+# Disables the bundled local GGUF model and switches the embedder to an API
+# backend, reducing container RAM to ~300 MB.
+#
+# Usage:
+#   docker compose -f compose.yml -f compose.api.yml up -d
+#
+# Required: set at least one provider key in your .env (or export it):
+#   DEEPSEEK_API_KEY, GROQ_API_KEY, OPENROUTER_API_KEY, or OPENAI_API_KEY
+
+services:
+  kb_api:
+    environment:
+      KB_LLM_LOCAL_FALLBACK: "0"   # disable local GGUF; use the external key below
+      DEEPSEEK_API_KEY: "${DEEPSEEK_API_KEY:?set a provider key for the api profile}"
+      KB_EMBEDDINGS_BACKEND: "api"

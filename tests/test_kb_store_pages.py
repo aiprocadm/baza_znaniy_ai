@@ -6,12 +6,14 @@ from pathlib import Path
 
 import pytest
 
+from app.services.kb_embeddings import HashingEmbedder
 from app.services.kb_store import KnowledgeBaseStore
 
 
 @pytest.fixture
 def store(tmp_path: Path) -> KnowledgeBaseStore:
-    return KnowledgeBaseStore(tmp_path / "test.sqlite")
+    # Hashing embedder produces non-zero vectors → search returns results in tests
+    return KnowledgeBaseStore(tmp_path / "test.sqlite", embedder=HashingEmbedder())
 
 
 def test_legacy_text_path_still_works(store: KnowledgeBaseStore) -> None:

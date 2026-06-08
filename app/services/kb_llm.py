@@ -473,6 +473,33 @@ class GgufEvalProvider:
             elapsed_ms=round(elapsed_ms, 2),
         )
 
+    async def generate_stream(
+        self,
+        prompt: str,
+        *,
+        system: Optional[str] = None,
+        max_tokens: Optional[int] = None,
+        temperature: Optional[float] = None,
+    ):
+        """Async generator that yields the full GGUF response as a single chunk.
+
+        Local CPU inference cannot truly stream token-by-token, so we run the
+        blocking :meth:`generate` call off the event loop via
+        :func:`asyncio.to_thread` and yield the result as one delta.
+        """
+        import asyncio
+
+        resp = await asyncio.to_thread(
+            self.generate,
+            prompt,
+            system=system,
+            max_tokens=max_tokens,
+            temperature=temperature,
+        )
+        text = (resp.text or "").strip()
+        if text:
+            yield text
+
 
 def _build_gguf_provider(env: Mapping[str, str] | None = None) -> Optional[GgufEvalProvider]:
     path = _env("KB_LLM_GGUF_PATH", env) or "./models/qwen2.5-3b-instruct-q4_k_m.gguf"
@@ -503,7 +530,7 @@ def build_provider(provider: str, env: Mapping[str, str] | None = None) -> OpenA
 
 def select_provider(
     env: Mapping[str, str] | None = None,
-) -> Optional[OpenAICompatibleProvider]:
+) -> Optional[OpenAICompatibleProvider | GgufEvalProvider]:
     """Pick the most appropriate provider for the current environment."""
 
     explicit = _env("KB_LLM_PROVIDER", env)
@@ -531,8 +558,17 @@ def select_provider(
             except LLMUnavailable:
                 continue
 
-    if (_env("KB_LLM_LOCAL_FALLBACK", env) or "").strip().lower() in {"1", "true", "yes", "on"}:
-        return _build_gguf_provider(env)
+    # Keyless default: try the bundled local GGUF so the product works out of the
+    # box with no API key. Disable explicitly with KB_LLM_LOCAL_FALLBACK=0/false/no/off.
+    if (_env("KB_LLM_LOCAL_FALLBACK", env) or "on").strip().lower() not in {
+        "0",
+        "false",
+        "no",
+        "off",
+    }:
+        gguf = _build_gguf_provider(env)
+        if gguf is not None:
+            return gguf
 
     return None
 
@@ -567,10 +603,11 @@ def provider_status(env: Mapping[str, str] | None = None) -> dict[str, Any]:
 
     selected = select_provider(env)
     if selected is not None:
+        _config = getattr(selected, "config", None)
         info["selected"] = {
             "name": selected.name,
             "model": selected.model,
-            "api_base": selected.config.api_base,
+            "api_base": _config.api_base if _config is not None else None,
         }
     else:
         info["selected"] = None

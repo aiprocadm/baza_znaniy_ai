@@ -10,9 +10,18 @@
   "qwen2.5-3b-instruct": {
     "model_id": "Qwen/Qwen2.5-3B-Instruct-GGUF",
     "filename": "qwen2.5-3b-instruct-q4_k_m.gguf",
-    "sha256": null,
+    "sha256": "626b4a6678b86442240e33df819e00132d3ba7dddfe1cdc4fbb18e0a9615c62d",
     "license": "Apache-2.0",
     "url": "https://huggingface.co/Qwen/Qwen2.5-3B-Instruct-GGUF/resolve/main/qwen2.5-3b-instruct-q4_k_m.gguf",
     "description": "Qwen2.5-3B-Instruct Q4_K_M (~2 GB) — RU-capable in-process judge/gen for the RAG eval."
+  },
+  "gpu": {
+    "model_id": "Qwen/Qwen2.5-7B-Instruct-GGUF",
+    "filename": "qwen2.5-7b-instruct-q4_k_m.gguf",
+    "sha256": null,
+    "license": "Apache-2.0",
+    "url": "https://huggingface.co/Qwen/Qwen2.5-7B-Instruct-GGUF/resolve/main/qwen2.5-7b-instruct-q4_k_m.gguf",
+    "note": "Pin sha256 on first download before commercial distribution.",
+    "description": "Qwen2.5-7B-Instruct Q4_K_M for the gpu profile."
   }
 }

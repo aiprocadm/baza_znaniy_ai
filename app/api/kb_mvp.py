@@ -655,7 +655,12 @@ def health(request: Request) -> dict[str, Any]:
 
     extra: list[tuple] = []
     try:
-        if kb_embeddings.embedder_status().get("name") == "hash":
+        # Prefer the store's own embedder to detect degradation; fall back to global.
+        _store_embedder = getattr(store, "embedder", None)
+        _embedder_name = getattr(_store_embedder, "name", None)
+        if _embedder_name is None:
+            _embedder_name = kb_embeddings.embedder_status().get("name")
+        if _embedder_name == "hash":
             extra.append((retrieval_health.RetrievalReason.HASHING_EMBEDDER, "embedder=hash"))
     except Exception:  # pragma: no cover - never let a probe break health
         pass
@@ -1115,11 +1120,11 @@ async def ask_stream(payload: AskRequest, request: Request) -> StreamingResponse
             if not received_any:
                 yield _sse_event("error", {"message": "empty completion"})
 
-        if provider is not None:
+        stream_fn = getattr(provider, "generate_stream", None) if provider is not None else None
+        if provider is not None and callable(stream_fn):
             provider_name = provider.name
             model_name = provider.model
-            stream_iter = provider.generate_stream(prompt, system=_RAG_SYSTEM_PROMPT)
-            async for evt in emit_stream(stream_iter):
+            async for evt in emit_stream(stream_fn(prompt, system=_RAG_SYSTEM_PROMPT)):
                 yield evt
 
         # If primary provider produced nothing — try legacy then extractive

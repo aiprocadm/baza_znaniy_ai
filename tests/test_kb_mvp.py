@@ -43,6 +43,11 @@ def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
         "KB_SEARCH_HARD_LIMIT",
     ):
         monkeypatch.delenv(name, raising=False)
+    # Force hashing embedder so tests are fast and don't attempt ST weight loading
+    monkeypatch.setenv("KB_EMBEDDINGS_BACKEND", "hash")
+    # API tests must not load the 2GB local GGUF; GGUF selection is covered by
+    # unit tests that monkeypatch select_provider directly.
+    monkeypatch.setenv("KB_LLM_LOCAL_FALLBACK", "0")
     kb_store.reset_default_store()
     kb_embeddings.reset_embedder()
     kb_rerank.reset_cache()
@@ -445,7 +450,10 @@ def test_select_provider_respects_explicit() -> None:
 
 
 def test_select_provider_returns_none_when_unconfigured() -> None:
-    assert kb_llm.select_provider(env={}) is None
+    # No cloud keys and local fallback explicitly disabled → None.
+    # The model file may exist on disk; disabling the fallback is the
+    # canonical way to assert "no provider" without removing the binary.
+    assert kb_llm.select_provider(env={"KB_LLM_LOCAL_FALLBACK": "0"}) is None
 
 
 def test_provider_status_marks_configured(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -504,7 +512,8 @@ def test_openai_compatible_provider_generate_calls_http(monkeypatch: pytest.Monk
 # ----------------------------------------------------------------------
 
 
-def test_hashing_embedder_is_default(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_st_embedder_is_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    # ST (e5-small) is now the implicit default when no backend is configured
     for name in (
         "KB_EMBEDDINGS_BACKEND",
         "OLLAMA_EMBED_MODEL",
@@ -513,9 +522,9 @@ def test_hashing_embedder_is_default(monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv(name, raising=False)
     kb_embeddings.reset_embedder()
     embedder = kb_embeddings.get_embedder()
-    assert embedder.name == "hash"
+    assert embedder.name == "st"
     vec = embedder.embed("text")
-    assert len(vec) == kb_store.EMBEDDING_DIM
+    assert len(vec) == 384  # ST stub/real model returns 384-dim vectors
 
 
 def test_ollama_embedder_constructs(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -541,30 +550,50 @@ def test_api_embedder_constructs(monkeypatch: pytest.MonkeyPatch) -> None:
     assert embedder.api_key == "k"
 
 
-def test_hashing_fallback_warns_when_production_like(
+def test_no_hashing_warning_when_st_available(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """KB_API_KEY set + no real embedder = silent failure. Warn loudly."""
+    """ST available + KB_API_KEY set → embedder is 'st' and hashing warning does NOT fire."""
 
     for name in ("KB_EMBEDDINGS_BACKEND", "OLLAMA_EMBED_MODEL", "EMBEDDINGS_API_BASE_URL"):
         monkeypatch.delenv(name, raising=False)
-    monkeypatch.setenv("KB_API_KEY", "any-key")
     kb_embeddings.reset_embedder()
 
+    sentinel = kb_embeddings.HashingEmbedder()
+    sentinel.name = "st"  # stand in for a real ST embedder
+    monkeypatch.setattr(
+        kb_embeddings, "_try_build_st_embedder", lambda env: sentinel, raising=False
+    )
+
     with caplog.at_level("WARNING", logger="app.services.kb_embeddings"):
-        embedder = kb_embeddings.get_embedder()
+        chosen = kb_embeddings._build_from_env(env={"KB_API_KEY": "k"})
 
-    assert isinstance(embedder, kb_embeddings.HashingEmbedder)
-    matching = [r for r in caplog.records if "hashing" in r.message.lower()]
-    assert (
-        matching
-    ), f"expected hashing-fallback warning, got: {[r.message for r in caplog.records]}"
+    assert chosen is sentinel
+    assert "Falling back to hashing embedder" not in caplog.text
 
 
-def test_hashing_default_silent_when_no_api_key(
+def test_hashing_warning_when_st_unavailable_and_production_like(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """Pure dev mode (no KB_API_KEY) — hashing is expected, no warning."""
+    """ST unavailable + KB_API_KEY set + no explicit backend → hash used and warning fires."""
+
+    for name in ("KB_EMBEDDINGS_BACKEND", "OLLAMA_EMBED_MODEL", "EMBEDDINGS_API_BASE_URL"):
+        monkeypatch.delenv(name, raising=False)
+    kb_embeddings.reset_embedder()
+
+    monkeypatch.setattr(kb_embeddings, "_try_build_st_embedder", lambda env: None, raising=False)
+
+    with caplog.at_level("WARNING", logger="app.services.kb_embeddings"):
+        chosen = kb_embeddings._build_from_env(env={"KB_API_KEY": "k"})
+
+    assert isinstance(chosen, kb_embeddings.HashingEmbedder)
+    assert "Falling back to hashing embedder" in caplog.text
+
+
+def test_st_default_silent_when_no_api_key(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Pure dev mode (no KB_API_KEY) — ST is the new default, no hashing warning."""
 
     for name in (
         "KB_EMBEDDINGS_BACKEND",
@@ -578,9 +607,12 @@ def test_hashing_default_silent_when_no_api_key(
     with caplog.at_level("WARNING", logger="app.services.kb_embeddings"):
         embedder = kb_embeddings.get_embedder()
 
-    assert isinstance(embedder, kb_embeddings.HashingEmbedder)
+    # ST is the new implicit default; no hashing warning should fire
+    assert embedder.name == "st"
     matching = [r for r in caplog.records if "hashing" in r.message.lower()]
-    assert not matching, f"unexpected warning in dev mode: {[r.message for r in caplog.records]}"
+    assert (
+        not matching
+    ), f"unexpected hashing warning in dev mode: {[r.message for r in caplog.records]}"
 
 
 def test_hashing_silent_when_explicitly_requested(
@@ -622,8 +654,9 @@ def test_embedder_backend_metric_records_active_kind(
 
     kb_embeddings.get_embedder()
 
-    hash_value = REGISTRY.get_sample_value("kb_embedder_backend_active", labels={"kind": "hash"})
-    assert hash_value == 1.0
+    # Default is now ST, so the `st` gauge is set, not `hash`
+    st_value = REGISTRY.get_sample_value("kb_embedder_backend_active", labels={"kind": "st"})
+    assert st_value == 1.0
 
 
 # ----------------------------------------------------------------------
@@ -1188,6 +1221,8 @@ def test_auth_required_when_key_set(tmp_path: Path, monkeypatch: pytest.MonkeyPa
 
     monkeypatch.setenv("KB_API_KEY", "secret-123")
     monkeypatch.setenv("KB_MVP_DB_PATH", str(tmp_path / "auth_test.sqlite"))
+    # Do not load the 2GB local GGUF; this test only checks auth behaviour.
+    monkeypatch.setenv("KB_LLM_LOCAL_FALLBACK", "0")
     kb_store.reset_default_store()
     kb_embeddings.reset_embedder()
 

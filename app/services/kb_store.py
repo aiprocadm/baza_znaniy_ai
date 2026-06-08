@@ -25,6 +25,8 @@ from pathlib import Path
 from typing import Any, Iterable, List, Mapping, Optional, Protocol, Sequence, Tuple, cast
 
 from app.observability import retrieval_health
+from app.services import embedder_signature as _emb_sig
+from app.services.embedder_signature import verify_or_store
 
 LOGGER = logging.getLogger(__name__)
 
@@ -225,6 +227,7 @@ class KnowledgeBaseStore:
         self._lock = threading.RLock()
         self._embedder = _resolve_embedder(embedder)
         self._init_schema()
+        self._verify_embedder_signature()
 
     @property
     def embedder(self) -> _EmbedderLike:
@@ -337,7 +340,50 @@ class KnowledgeBaseStore:
                     ON kb_feedback(message_id);
                 CREATE INDEX IF NOT EXISTS idx_kb_feedback_rating_created
                     ON kb_feedback(rating, created_at);
+                CREATE TABLE IF NOT EXISTS kv_meta (
+                    key TEXT PRIMARY KEY,
+                    value TEXT NOT NULL
+                );
                 """
+            )
+
+    def _kv_load(self, key: str) -> Optional[str]:
+        with self._connect() as conn:
+            row = conn.execute("SELECT value FROM kv_meta WHERE key = ?", (key,)).fetchone()
+        return row[0] if row is not None else None
+
+    def _kv_save(self, key: str, value: str) -> None:
+        with self._lock, self._connect() as conn:
+            conn.execute(
+                "INSERT INTO kv_meta(key, value) VALUES(?, ?) "
+                "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                (key, value),
+            )
+
+    def _verify_embedder_signature(self) -> None:
+        # Hold the lock for the entire read-modify-write sequence to avoid a
+        # TOCTOU race when two store instances open the same DB concurrently.
+        # self._lock is an RLock, so re-entry from _kv_save (which also
+        # acquires it) is safe.
+        with self._lock:
+            stored = self._kv_load(_emb_sig.SIGNATURE_KEY)
+            if stored is None:
+                # No signature row yet.  Check whether the index is truly empty
+                # or was built before kv_meta existed (upgrade path).
+                with self._connect() as conn:
+                    row = conn.execute("SELECT embedder, dim FROM kb_chunks LIMIT 1").fetchone()
+                if row is not None:
+                    # Populated pre-kv_meta DB: backfill the legacy signature so
+                    # verify_or_store can detect a mismatch with the active embedder.
+                    # The kb_chunks.embedder column defaults to 'hash', so an empty
+                    # value is treated as a legacy hashing index.
+                    legacy_name = row[0] if row[0] else "hash"
+                    legacy_dim = int(row[1]) if row[1] else EMBEDDING_DIM
+                    self._kv_save(_emb_sig.SIGNATURE_KEY, f"{legacy_name}:{legacy_dim}")
+            verify_or_store(
+                self._embedder,
+                load=self._kv_load,
+                save=lambda s: self._kv_save(_emb_sig.SIGNATURE_KEY, s),
             )
 
     @staticmethod

@@ -1,0 +1,18 @@
+# compose.gpu.yml — GPU-accelerated local GGUF profile
+#
+# Offloads transformer layers to an NVIDIA or Metal GPU for faster local
+# inference. Requires the GGUF model file to exist at KB_LLM_GGUF_PATH.
+#
+# Usage:
+#   docker compose -f compose.yml -f compose.gpu.yml up -d
+#
+# Tune LLM_GPU_LAYERS to the number of layers your GPU VRAM can hold:
+#   7B models: 32–35 layers (full offload at ~6 GB VRAM)
+#   3B models: 26–28 layers (full offload at ~3 GB VRAM)
+
+services:
+  kb_api:
+    environment:
+      KB_LLM_PROVIDER: "gguf"
+      KB_LLM_GGUF_PATH: "./models/qwen2.5-7b-instruct-q4_k_m.gguf"
+      LLM_GPU_LAYERS: "35"

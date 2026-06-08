@@ -47,8 +47,14 @@ class SentenceTransformer:
     def encode(self, texts: Any, *, convert_to_numpy: bool = False, **_: Any):
         import numpy as np
 
-        length = len(texts) if texts else 0
+        single = isinstance(texts, str)
+        items = [texts] if single else (texts or [])
+        length = len(items)
         vectors = np.zeros((length, 384), dtype=np.float32)
+        if single:
+            # Real sentence_transformers returns 1-D array for a single string
+            result = vectors[0]
+            return result if convert_to_numpy else result.tolist()
         if convert_to_numpy:
             return vectors
         return vectors.tolist()
