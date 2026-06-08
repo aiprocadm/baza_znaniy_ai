@@ -82,7 +82,9 @@ def _read_meta_event(client: TestClient, question: str) -> dict:
 
 
 def test_ask_stream_meta_carries_retrieval_when_degraded(tmp_path: Path, monkeypatch):
-    store = KnowledgeBaseStore(tmp_path / "kb.sqlite", embedder=HashingEmbedder())  # explicit hashing to test degradation path
+    store = KnowledgeBaseStore(
+        tmp_path / "kb.sqlite", embedder=HashingEmbedder()
+    )  # explicit hashing to test degradation path
     store.add_document("doc1", text="alpha beta gamma " * 20)
     client = _client(store, monkeypatch)
 

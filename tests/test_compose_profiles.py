@@ -1,4 +1,5 @@
 """Each compose profile yields a coherent, non-contradictory env set."""
+
 from __future__ import annotations
 
 import pathlib

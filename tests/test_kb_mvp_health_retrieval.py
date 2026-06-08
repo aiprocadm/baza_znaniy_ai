@@ -9,7 +9,6 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 import app.observability.retrieval_health as retrieval_health
-import app.services.kb_embeddings as kb_embeddings
 from app.api.kb_mvp import router
 from app.services.kb_embeddings import HashingEmbedder
 from app.services.kb_store import KnowledgeBaseStore

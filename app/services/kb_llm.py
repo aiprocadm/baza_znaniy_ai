@@ -533,7 +533,12 @@ def select_provider(
 
     # Keyless default: try the bundled local GGUF so the product works out of the
     # box with no API key. Disable explicitly with KB_LLM_LOCAL_FALLBACK=0/false/no/off.
-    if (_env("KB_LLM_LOCAL_FALLBACK", env) or "on").strip().lower() not in {"0", "false", "no", "off"}:
+    if (_env("KB_LLM_LOCAL_FALLBACK", env) or "on").strip().lower() not in {
+        "0",
+        "false",
+        "no",
+        "off",
+    }:
         gguf = _build_gguf_provider(env)
         if gguf is not None:
             return gguf

@@ -1,4 +1,5 @@
 """Keyless auto-selection: local GGUF is the DEFAULT fallback (opt-out, not opt-in)."""
+
 from __future__ import annotations
 
 import pytest
