@@ -571,10 +571,11 @@ def provider_status(env: Mapping[str, str] | None = None) -> dict[str, Any]:
 
     selected = select_provider(env)
     if selected is not None:
+        _config = getattr(selected, "config", None)
         info["selected"] = {
             "name": selected.name,
             "model": selected.model,
-            "api_base": selected.config.api_base,
+            "api_base": _config.api_base if _config is not None else None,
         }
     else:
         info["selected"] = None

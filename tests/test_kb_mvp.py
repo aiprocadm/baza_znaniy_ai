@@ -45,6 +45,9 @@ def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
         monkeypatch.delenv(name, raising=False)
     # Force hashing embedder so tests are fast and don't attempt ST weight loading
     monkeypatch.setenv("KB_EMBEDDINGS_BACKEND", "hash")
+    # API tests must not load the 2GB local GGUF; GGUF selection is covered by
+    # unit tests that monkeypatch select_provider directly.
+    monkeypatch.setenv("KB_LLM_LOCAL_FALLBACK", "0")
     kb_store.reset_default_store()
     kb_embeddings.reset_embedder()
     kb_rerank.reset_cache()
@@ -447,7 +450,10 @@ def test_select_provider_respects_explicit() -> None:
 
 
 def test_select_provider_returns_none_when_unconfigured() -> None:
-    assert kb_llm.select_provider(env={}) is None
+    # No cloud keys and local fallback explicitly disabled → None.
+    # The model file may exist on disk; disabling the fallback is the
+    # canonical way to assert "no provider" without removing the binary.
+    assert kb_llm.select_provider(env={"KB_LLM_LOCAL_FALLBACK": "0"}) is None
 
 
 def test_provider_status_marks_configured(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1212,6 +1218,8 @@ def test_auth_required_when_key_set(tmp_path: Path, monkeypatch: pytest.MonkeyPa
 
     monkeypatch.setenv("KB_API_KEY", "secret-123")
     monkeypatch.setenv("KB_MVP_DB_PATH", str(tmp_path / "auth_test.sqlite"))
+    # Do not load the 2GB local GGUF; this test only checks auth behaviour.
+    monkeypatch.setenv("KB_LLM_LOCAL_FALLBACK", "0")
     kb_store.reset_default_store()
     kb_embeddings.reset_embedder()
 
