@@ -45,7 +45,7 @@ def test_refusal_item_scored_deterministically():
     items = [GoldenItem("Кто выиграл матч?", (), expect_refusal=True)]
 
     def retriever(q, k):
-        return [EvalHit(1, "нерелевантный текст")]
+        return [EvalHit("f.md:1", "нерелевантный текст")]
 
     gen = _Provider("Не удалось найти в документах информацию для ответа.")
     judge = _Provider("{}")  # must not be consulted for refusal items
@@ -56,10 +56,10 @@ def test_refusal_item_scored_deterministically():
 
 
 def test_answerable_item_uses_judge():
-    items = [GoldenItem("Что такое отпуск?", (7,), reference_answer="перерыв")]
+    items = [GoldenItem("Что такое отпуск?", ("f.md:7",), reference_answer="перерыв")]
 
     def retriever(q, k):
-        return [EvalHit(7, "Отпуск — перерыв.")]
+        return [EvalHit("f.md:7", "Отпуск — перерыв.")]
 
     gen = _Provider("Отпуск — это перерыв [1].")
     judge = _Provider('{"faithfulness":5,"relevance":5,"completeness":4,"citation":5}')
