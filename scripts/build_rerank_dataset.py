@@ -12,6 +12,7 @@ this module must stay cheap so stub-backed unit tests never touch ML deps.
 
 from __future__ import annotations
 
+import argparse
 import json
 import logging
 from dataclasses import dataclass
@@ -81,3 +82,106 @@ def write_pairs(path: Path, pairs: Sequence[Pair], scores: Sequence[float], meta
     path.with_suffix(".meta.json").write_text(
         json.dumps(meta, ensure_ascii=False, indent=1), encoding="utf-8"
     )
+
+
+def as_retrieve(eval_retriever) -> Retrieve:
+    """Adapt an ``app.eval.adapter`` Retriever (EvalHit) to (chunk_key, text)."""
+
+    def _retrieve(query: str, k: int) -> list[tuple[str, str]]:
+        return [(h.chunk_key, h.text) for h in eval_retriever(query, k)]
+
+    return _retrieve
+
+
+def dedupe_queries(queries: Sequence[tuple[str, str]]) -> list[tuple[str, str]]:
+    seen: set[str] = set()
+    out: list[tuple[str, str]] = []
+    for query, source_key in queries:
+        norm = normalize_question(query)
+        if norm in seen:
+            continue
+        seen.add(norm)
+        out.append((query, source_key))
+    return out
+
+
+def generate_queries(
+    store, provider, *, rounds: int, limit_chunks: int = 0
+) -> list[tuple[str, str]]:
+    """Synthetic (query, source_chunk_key) via the W1 generator. LLM-slow."""
+    from app.eval.adapter import build_global_id_key_map
+    from app.services import synthetic_qa as sq
+
+    generator = sq.SyntheticQAGenerator(provider=provider)
+    key_map = build_global_id_key_map(store)
+    chunks = list(sq.iter_chunks(store))
+    if limit_chunks:
+        chunks = chunks[:limit_chunks]
+    queries: list[tuple[str, str]] = []
+    for round_no in range(rounds):
+        for chunk_id, text in chunks:
+            for qa in generator.generate_for_chunk(
+                chunks=[text], chunk_ids=[chunk_id], mode=sq.GenerationMode.SINGLE
+            ):
+                key = key_map.get(qa.source_chunk_id)
+                if key is not None:
+                    queries.append((qa.instruction, key))
+        LOGGER.info("round %d/%d: %d queries so far", round_no + 1, rounds, len(queries))
+    return dedupe_queries(queries)
+
+
+def teacher_scores(pairs: Sequence[Pair], *, model_name: str, batch_size: int) -> list[float]:
+    """Score (query, text) with the teacher cross-encoder. CPU-slow."""
+    from sentence_transformers import CrossEncoder
+
+    encoder = CrossEncoder(model_name, max_length=512)
+    scores = encoder.predict(
+        [(p.query, p.text) for p in pairs], batch_size=batch_size, show_progress_bar=True
+    )
+    return [float(s) for s in scores]
+
+
+def main(argv: list[str] | None = None) -> None:
+    parser = argparse.ArgumentParser(prog="build_rerank_dataset")
+    parser.add_argument("--out", default=str(PAIRS_OUT))
+    parser.add_argument("--rounds", type=int, default=3, help="QA-generation passes per chunk")
+    parser.add_argument("--candidates", type=int, default=20)
+    parser.add_argument("--teacher", default=DEFAULT_TEACHER)
+    parser.add_argument("--batch", type=int, default=16)
+    parser.add_argument("--limit-chunks", type=int, default=0, help="smoke runs (0 = all)")
+    args = parser.parse_args(argv)
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
+
+    from app.eval.adapter import make_mvp_retriever
+    from app.eval.dataset import load_golden
+    from app.services.kb_store import get_store
+    from scripts.eval_rag import _gen_provider
+
+    store = get_store()
+    queries = generate_queries(
+        store, _gen_provider(), rounds=args.rounds, limit_chunks=args.limit_chunks
+    )
+    golden_questions = frozenset(item.question for item in load_golden(GOLDEN_PUBLIC))
+    pairs = build_pairs(
+        queries, as_retrieve(make_mvp_retriever(store)), golden_questions, k=args.candidates
+    )
+    LOGGER.info("scoring %d pairs with teacher %s", len(pairs), args.teacher)
+    scores = teacher_scores(pairs, model_name=args.teacher, batch_size=args.batch)
+    write_pairs(
+        Path(args.out),
+        pairs,
+        scores,
+        meta={
+            "teacher": args.teacher,
+            "rounds": args.rounds,
+            "candidates": args.candidates,
+            "n_queries": len(queries),
+            "n_pairs": len(pairs),
+            "golden_excluded": str(GOLDEN_PUBLIC),
+        },
+    )
+    print(f"Wrote {len(pairs)} pairs ({len(queries)} queries) to {args.out}")
+
+
+if __name__ == "__main__":
+    main()

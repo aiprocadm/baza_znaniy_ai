@@ -6,7 +6,9 @@ import pytest
 
 from scripts.build_rerank_dataset import (
     Pair,
+    as_retrieve,
     build_pairs,
+    dedupe_queries,
     normalize_question,
     write_pairs,
 )
@@ -56,3 +58,22 @@ def test_write_pairs_roundtrip(tmp_path):
 def test_write_pairs_rejects_length_mismatch(tmp_path):
     with pytest.raises(ValueError):
         write_pairs(tmp_path / "p.jsonl", [Pair("q", "k", "t")], scores=[], meta={})
+
+
+class _Hit:
+    def __init__(self, chunk_key: str, text: str):
+        self.chunk_key = chunk_key
+        self.text = text
+
+
+def test_as_retrieve_adapts_eval_retriever_to_tuples():
+    def eval_retriever(query: str, k: int):
+        return [_Hit(f"d.md:{i}", f"t{i}") for i in range(k)]
+
+    retrieve = as_retrieve(eval_retriever)
+    assert retrieve("q", 2) == [("d.md:0", "t0"), ("d.md:1", "t1")]
+
+
+def test_dedupe_queries_by_normalized_text_keeps_first():
+    queries = [("Какой срок?", "a.md:0"), ("какой СРОК", "b.md:1"), ("Другой?", "c.md:2")]
+    assert dedupe_queries(queries) == [("Какой срок?", "a.md:0"), ("Другой?", "c.md:2")]
