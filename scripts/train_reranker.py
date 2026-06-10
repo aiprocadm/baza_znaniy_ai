@@ -85,7 +85,11 @@ def train(
         )
         return enc
 
-    loader = DataLoader(rows_train, batch_size=batch_size, shuffle=True, collate_fn=collate)
+    generator = torch.Generator()
+    generator.manual_seed(seed)
+    loader = DataLoader(
+        rows_train, batch_size=batch_size, shuffle=True, collate_fn=collate, generator=generator
+    )
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
     loss_fn = torch.nn.BCEWithLogitsLoss()
     model.train()
@@ -93,11 +97,11 @@ def train(
         total = 0.0
         for step, batch in enumerate(loader):
             labels = batch.pop("labels")
+            optimizer.zero_grad()
             logits = model(**batch).logits.squeeze(-1)
             loss = loss_fn(logits, labels)
             loss.backward()
             optimizer.step()
-            optimizer.zero_grad()
             total += float(loss)
             if step % 50 == 0:
                 print(f"epoch {epoch} step {step}/{len(loader)} loss {float(loss):.4f}")
@@ -114,6 +118,8 @@ def train(
             preds.extend(torch.sigmoid(logits).tolist())
             gold.extend(labels.tolist())
     pearson = float(np.corrcoef(preds, gold)[0, 1]) if len(preds) > 1 else float("nan")
+    if math.isnan(pearson):
+        print("WARNING: val_pearson is NaN — constant predictions? Check model output.")
 
     out_dir.mkdir(parents=True, exist_ok=True)
     model.save_pretrained(out_dir)
@@ -135,6 +141,11 @@ def main(argv: list[str] | None = None) -> None:
 
     rows = load_pairs(Path(args.pairs))
     rows_train, rows_val = split_by_query(rows, val_fraction=args.val_fraction, seed=args.seed)
+    if not rows_train:
+        raise SystemExit(
+            f"Empty train split ({len(rows_val)} val pairs from {len(rows)} total) — "
+            "need at least 2 distinct queries."
+        )
     print(f"train pairs: {len(rows_train)}, val pairs: {len(rows_val)}")
     metrics = train(
         rows_train,
@@ -154,6 +165,7 @@ def main(argv: list[str] | None = None) -> None:
         "lr": args.lr,
         "max_length": args.max_length,
         "seed": args.seed,
+        "val_fraction": args.val_fraction,
         **metrics,
     }
     (Path(args.out) / "train_meta.json").write_text(
