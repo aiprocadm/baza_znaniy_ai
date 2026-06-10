@@ -118,15 +118,24 @@ def generate_queries(
     if limit_chunks:
         chunks = chunks[:limit_chunks]
     queries: list[tuple[str, str]] = []
+    dropped = 0
     for round_no in range(rounds):
         for chunk_id, text in chunks:
             for qa in generator.generate_for_chunk(
                 chunks=[text], chunk_ids=[chunk_id], mode=sq.GenerationMode.SINGLE
             ):
                 key = key_map.get(qa.source_chunk_id)
-                if key is not None:
-                    queries.append((qa.instruction, key))
-        LOGGER.info("round %d/%d: %d queries so far", round_no + 1, rounds, len(queries))
+                if key is None:
+                    dropped += 1
+                    continue
+                queries.append((qa.instruction, key))
+        LOGGER.info(
+            "round %d/%d: %d queries so far, %d dropped (unknown chunk_id)",
+            round_no + 1,
+            rounds,
+            len(queries),
+            dropped,
+        )
     return dedupe_queries(queries)
 
 
@@ -165,6 +174,11 @@ def main(argv: list[str] | None = None) -> None:
     pairs = build_pairs(
         queries, as_retrieve(make_mvp_retriever(store)), golden_questions, k=args.candidates
     )
+    if not pairs:
+        raise SystemExit(
+            f"No pairs generated (queries={len(queries)}). "
+            "Check KB_MVP_DB_PATH and that the store is ingested."
+        )
     LOGGER.info("scoring %d pairs with teacher %s", len(pairs), args.teacher)
     scores = teacher_scores(pairs, model_name=args.teacher, batch_size=args.batch)
     write_pairs(
