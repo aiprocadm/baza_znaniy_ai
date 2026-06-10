@@ -207,7 +207,7 @@ def test_generate_emits_composite_keys(monkeypatch, tmp_path):
     class _FakeGenerator:
         """Replaces SyntheticQAGenerator: always returns _Pair for any chunk."""
 
-        def __init__(self, provider):
+        def __init__(self, provider, **kwargs):
             pass
 
         def generate_for_chunk(self, *, chunks, chunk_ids, mode):
@@ -248,7 +248,7 @@ def test_generate_every_samples_breadth(monkeypatch, tmp_path):
         model = "fake"
 
     class _FakeGenerator:
-        def __init__(self, provider):
+        def __init__(self, provider, **kwargs):
             pass
 
         def generate_for_chunk(self, *, chunks, chunk_ids, mode):
@@ -269,3 +269,39 @@ def test_generate_every_samples_breadth(monkeypatch, tmp_path):
     # Stride sampling: consecutive sampled ids differ by the stride, not by 1.
     diffs = {b - a for a, b in zip(seen_chunk_ids, seen_chunk_ids[1:])}
     assert diffs == {3}
+
+
+def test_generate_no_self_check_disables_consistency(monkeypatch, tmp_path):
+    """--no-self-check must build the generator with check_self_consistency=False."""
+    from app.services.kb_store import KnowledgeBaseStore
+    import app.services.kb_store as kb_store_mod
+    import scripts.eval_rag as cli
+
+    store = KnowledgeBaseStore(str(tmp_path / "kb.sqlite"))
+    store.add_document(title="Doc", text="абзац про оплату услуг.", filename="doc.md")
+    monkeypatch.setattr(kb_store_mod, "get_store", lambda: store)
+    monkeypatch.setattr(cli, "get_store", lambda: store)
+
+    captured: dict = {}
+
+    class _FakeProvider:
+        name = "fake"
+        model = "fake"
+
+    class _FakeGenerator:
+        def __init__(self, provider, check_self_consistency=True):
+            captured["check"] = check_self_consistency
+
+        def generate_for_chunk(self, *, chunks, chunk_ids, mode):
+            return []
+
+    monkeypatch.setattr(cli, "_gen_provider", lambda: _FakeProvider())
+    monkeypatch.setattr(cli.sq, "SyntheticQAGenerator", _FakeGenerator)
+    monkeypatch.setattr(cli.sq, "estimate_total_cost_usd", lambda **kw: 0.0)
+
+    out = tmp_path / "golden_auto.jsonl"
+    cli.main(["generate", "--out", str(out), "--no-self-check", "--yes"])
+    assert captured["check"] is False
+
+    cli.main(["generate", "--out", str(out), "--yes"])
+    assert captured["check"] is True

@@ -116,7 +116,10 @@ def cmd_generate(args: argparse.Namespace) -> None:
             f"Re-run with --yes to proceed."
         )
 
-    generator = sq.SyntheticQAGenerator(provider=provider)
+    generator = sq.SyntheticQAGenerator(
+        provider=provider,
+        check_self_consistency=not getattr(args, "no_self_check", False),
+    )
     key_map = build_global_id_key_map(store)
     items: list[GoldenItem] = []
     for chunk_id, text in chunks:
@@ -168,6 +171,11 @@ def build_parser() -> argparse.ArgumentParser:
     gen.add_argument("--out", default="var/data/eval/golden_auto.jsonl")
     gen.add_argument("--limit", type=int, default=0, help="max chunks to process (0 = all)")
     gen.add_argument("--every", type=int, default=1, help="take every Nth chunk (breadth sampling)")
+    gen.add_argument(
+        "--no-self-check",
+        action="store_true",
+        help="skip the self-consistency second pass (halves LLM calls; for slow local teachers)",
+    )
     gen.add_argument("--budget-usd", type=float, default=5.0)
     gen.add_argument("--yes", action="store_true", help="proceed past the budget guard")
     gen.set_defaults(func=cmd_generate)
