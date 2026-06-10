@@ -100,3 +100,5 @@ it isn't the suite: `tests/conftest.py::_protect_committed_fixtures` (session
 autouse) snapshots them and **fails loudly while restoring the bytes** if any
 test writes one. Run the suite with `KB_TEST_LOCK_FIXTURES=1` to instead lock
 them read-only and get a `PermissionError` traceback naming the offending test.
+
+> **2026-06-10:** golden_curated retired to the private half (`var/data/eval/private/`); the committed guard is now `data/eval/golden_public.jsonl` over the synthetic public corpus (`data/eval/corpus_public/`). See plan `2026-06-10-hybrid-eval-corpus-pr2-public-corpus.md`.

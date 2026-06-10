@@ -47,17 +47,17 @@ warnings.filterwarnings(
 # --- Committed-fixture write guard -----------------------------------------
 # These files are *inputs* the suite must treat as read-only. Their writers all
 # default to these very paths via relative defaults
-# (``scripts/build_curated_golden.py`` → ``data/eval/golden_curated.*``;
-# ``scripts/download_model.py`` → ``models/model_manifest.json``;
-# ``scripts/eval_rag.py`` ``run --golden`` default), so a test that drives one
-# of them without redirecting to ``tmp_path`` would silently regenerate a
-# tracked fixture and dirty the working tree — invisible until ``git status``.
-# The ``st``/``dim:1024`` signature and the normalised qwen manifest entry seen
-# after some local runs are the fingerprints of those writers.
+# (``scripts/eval_rag.py`` ``generate``/``run --golden`` default →
+# ``data/eval/golden_public.*``; ``scripts/download_model.py`` →
+# ``models/model_manifest.json``), so a test that drives one of them without
+# redirecting to ``tmp_path`` would silently regenerate a tracked fixture and
+# dirty the working tree — invisible until ``git status``. The ``st``/``dim:1024``
+# signature and the normalised qwen manifest entry seen after some local runs
+# are the fingerprints of those writers.
 REPO_ROOT = Path(__file__).resolve().parents[1]
 _PROTECTED_FIXTURES = (
-    REPO_ROOT / "data" / "eval" / "golden_curated.jsonl",
-    REPO_ROOT / "data" / "eval" / "golden_curated.sig.json",
+    REPO_ROOT / "data" / "eval" / "golden_public.jsonl",
+    REPO_ROOT / "data" / "eval" / "golden_public.sig.json",
     REPO_ROOT / "models" / "model_manifest.json",
 )
 

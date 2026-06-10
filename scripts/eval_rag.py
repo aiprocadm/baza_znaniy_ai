@@ -94,6 +94,9 @@ def cmd_generate(args: argparse.Namespace) -> None:
     store = get_store()
     provider = _gen_provider()
     chunks = list(sq.iter_chunks(store))
+    every = getattr(args, "every", 1) or 1
+    if every > 1:
+        chunks = chunks[::every]  # stride-sample so --limit spans the whole corpus
     if args.limit:
         chunks = chunks[: args.limit]
     if not chunks:
@@ -113,7 +116,10 @@ def cmd_generate(args: argparse.Namespace) -> None:
             f"Re-run with --yes to proceed."
         )
 
-    generator = sq.SyntheticQAGenerator(provider=provider)
+    generator = sq.SyntheticQAGenerator(
+        provider=provider,
+        check_self_consistency=not getattr(args, "no_self_check", False),
+    )
     key_map = build_global_id_key_map(store)
     items: list[GoldenItem] = []
     for chunk_id, text in chunks:
@@ -144,7 +150,7 @@ def build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command", required=True)
 
     run = sub.add_parser("run", help="score retrieval on the MVP surface")
-    run.add_argument("--golden", default="data/eval/golden_curated.jsonl")
+    run.add_argument("--golden", default="data/eval/golden_public.jsonl")
     run.add_argument("--out", default="var/data/eval/run.json")
     run.add_argument("--allow-hashing", action="store_true")
     run.add_argument("--judge", action="store_true", help="also score generation via LLM-judge")
@@ -164,6 +170,12 @@ def build_parser() -> argparse.ArgumentParser:
     gen = sub.add_parser("generate", help="build a golden set from the corpus")
     gen.add_argument("--out", default="var/data/eval/golden_auto.jsonl")
     gen.add_argument("--limit", type=int, default=0, help="max chunks to process (0 = all)")
+    gen.add_argument("--every", type=int, default=1, help="take every Nth chunk (breadth sampling)")
+    gen.add_argument(
+        "--no-self-check",
+        action="store_true",
+        help="skip the self-consistency second pass (halves LLM calls; for slow local teachers)",
+    )
     gen.add_argument("--budget-usd", type=float, default=5.0)
     gen.add_argument("--yes", action="store_true", help="proceed past the budget guard")
     gen.set_defaults(func=cmd_generate)
