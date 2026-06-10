@@ -37,7 +37,7 @@ class Pair:
 
 def normalize_question(q: str) -> str:
     """Collapse whitespace/case/trailing punctuation for leak comparison."""
-    return " ".join(q.lower().split()).rstrip("?!. ")
+    return " ".join(q.lower().split()).rstrip("?!.… ")
 
 
 def build_pairs(

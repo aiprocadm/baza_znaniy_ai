@@ -19,6 +19,7 @@ def _retrieve(query: str, k: int):
 def test_normalize_question_strips_case_space_punctuation():
     assert normalize_question("  Какой Срок?  ") == normalize_question("какой срок")
     assert normalize_question("Что это?!") == "что это"
+    assert normalize_question("Что это…") == "что это"
 
 
 def test_build_pairs_excludes_golden_queries():
