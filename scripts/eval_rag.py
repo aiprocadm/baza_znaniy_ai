@@ -150,7 +150,7 @@ def build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command", required=True)
 
     run = sub.add_parser("run", help="score retrieval on the MVP surface")
-    run.add_argument("--golden", default="data/eval/golden_curated.jsonl")
+    run.add_argument("--golden", default="data/eval/golden_public.jsonl")
     run.add_argument("--out", default="var/data/eval/run.json")
     run.add_argument("--allow-hashing", action="store_true")
     run.add_argument("--judge", action="store_true", help="also score generation via LLM-judge")
