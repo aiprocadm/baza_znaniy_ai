@@ -1,7 +1,7 @@
 # Own Reranker via Distillation (`kbai-reranker-ru`) — Design
 
 **Date:** 2026-06-10
-**Status:** Design approved (brainstorming). Awaiting spec review → implementation plan.
+**Status:** Implemented (pipeline shipped); **v1 gate FAILED** (training-query volume) — verdict, numbers and v2 plan in [runbooks/2026-06-10-own-reranker-training.md](../runbooks/2026-06-10-own-reranker-training.md).
 **Scope owner:** solo side-project (10-20 h/week)
 **Parent strategy:** subordinate to [2026-05-22-project-vision-design.md](2026-05-22-project-vision-design.md); builds on [2026-06-08-keyless-local-stack-default-design.md](2026-06-08-keyless-local-stack-default-design.md) (tier B) and [2026-06-06-hybrid-eval-corpus-design.md](2026-06-06-hybrid-eval-corpus-design.md) (данные/гейт).
 
