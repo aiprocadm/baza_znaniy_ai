@@ -16,7 +16,7 @@ $env:KB_MVP_DB_PATH = "var/data/kb_public.sqlite"   # стор, против к�
 $env:KB_EMBEDDINGS_BACKEND = "st"                    # bge-m3, dim=1024 — совпадает с golden_public.sig.json
 ```
 
-Store signature verified before the run: `{doc_count: 9, max_chunk_id: 598, embedder_name: "st", dim: 1024}` — byte-identical to `golden_public.sig.json` (no reingest needed; the PR2 store at `var/data/kb_public.sqlite` was reused).
+Store signature verified before the run: `{doc_count: 9, max_chunk_id: 598, embedder_name: "st", dim: 1024}` — byte-identical to `golden_public.sig.json`. NOTE: the plan's Task 6 says to ingest a fresh store at `var/data/eval/public.sqlite3`; instead the existing PR2 store at `var/data/kb_public.sqlite` was reused deliberately (same corpus, signature-verified) — not a typo.
 
 ## Commands as executed
 
@@ -66,8 +66,8 @@ py -3.13 -m scripts.eval_rag run --golden data/eval/golden_public.jsonl --rerank
 
 | split | Pearson vs teacher |
 |---|---|
-| train (400 pairs) | **0.98** |
-| val (query-disjoint, 240 pairs) | **0.04–0.09** |
+| train (first 400 of 2300 train pairs — diagnostic subsample) | **0.98** |
+| val (query-disjoint 10% split, 240 pairs) | **0.04–0.09** |
 
 The model **memorizes** 114 train queries instead of learning relevance: 127 unique
 queries is far below what a 29M cross-encoder needs to generalize. Hyperparameters
@@ -79,8 +79,8 @@ is healthy (13% of pairs with teacher score > 0.5; spread confirmed by hand-chec
 ~1.5 min/query on the bundled GGUF (4–6 tok/s) → 200 chunks ≈ 4.5 h. The second batch
 (`--offset 1`) was attempted 4× on 2026-06-11 and every long background run was killed
 externally (app restarts kill the session job object; WMI/hidden-process variants died
-within ~50 min — suspected AV/power heuristics). See "Resume" below — the flags to
-continue are in place.
+within ~50 min — suspected AV/power heuristics). The flags to continue are in
+place — see "v2 plan" below.
 
 ## v2 plan (what it takes to pass the gate)
 
