@@ -105,10 +105,14 @@ def dedupe_queries(queries: Sequence[tuple[str, str]]) -> list[tuple[str, str]]:
     return out
 
 
-def select_chunks(chunks: list, *, stride: int = 1, limit: int = 0) -> list:
-    """Evenly sample every *stride*-th chunk, then cap at *limit* (0 = no cap)."""
-    if stride > 1:
-        chunks = chunks[::stride]
+def select_chunks(chunks: list, *, stride: int = 1, offset: int = 0, limit: int = 0) -> list:
+    """Evenly sample every *stride*-th chunk starting at *offset*, then cap at *limit* (0 = no cap).
+
+    When offset > 0 or stride > 1, slices as chunks[offset::stride]. This allows disjoint
+    subsets across successive runs (e.g., offset=0 stride=3 → [0,3,6], offset=1 stride=3 → [1,4,7]).
+    """
+    if stride > 1 or offset:
+        chunks = chunks[offset::stride]
     if limit:
         chunks = chunks[:limit]
     return chunks
@@ -121,6 +125,7 @@ def generate_queries(
     rounds: int,
     limit_chunks: int = 0,
     stride: int = 1,
+    offset: int = 0,
     self_consistency: bool = True,
 ) -> list[tuple[str, str]]:
     """Synthetic (query, source_chunk_key) via the W1 generator. LLM-slow."""
@@ -129,7 +134,9 @@ def generate_queries(
 
     generator = sq.SyntheticQAGenerator(provider=provider, check_self_consistency=self_consistency)
     key_map = build_global_id_key_map(store)
-    chunks = select_chunks(list(sq.iter_chunks(store)), stride=stride, limit=limit_chunks)
+    chunks = select_chunks(
+        list(sq.iter_chunks(store)), stride=stride, offset=offset, limit=limit_chunks
+    )
     queries: list[tuple[str, str]] = []
     dropped = 0
     for round_no in range(rounds):
@@ -178,6 +185,12 @@ def main(argv: list[str] | None = None) -> None:
         help="sample every Nth chunk (even coverage across docs)",
     )
     parser.add_argument(
+        "--offset",
+        type=int,
+        default=0,
+        help="start index for stride sampling (cover a different subset per run)",
+    )
+    parser.add_argument(
         "--no-self-consistency",
         action="store_true",
         help="single LLM call per chunk; noisy queries are fine for distillation (teacher labels them)",
@@ -197,6 +210,7 @@ def main(argv: list[str] | None = None) -> None:
         rounds=args.rounds,
         limit_chunks=args.limit_chunks,
         stride=args.stride,
+        offset=args.offset,
         self_consistency=not args.no_self_consistency,
     )
     golden_questions = frozenset(item.question for item in load_golden(GOLDEN_PUBLIC))
@@ -219,6 +233,7 @@ def main(argv: list[str] | None = None) -> None:
             "rounds": args.rounds,
             "candidates": args.candidates,
             "stride": args.stride,
+            "offset": args.offset,
             "self_consistency": not args.no_self_consistency,
             "n_queries": len(queries),
             "n_pairs": len(pairs),

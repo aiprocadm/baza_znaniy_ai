@@ -93,3 +93,13 @@ def test_select_chunks_stride_then_limit():
 def test_select_chunks_defaults_passthrough():
     chunks = list(range(3))
     assert select_chunks(chunks) == [0, 1, 2]
+
+
+def test_select_chunks_offset_shifts_the_stride_window():
+    chunks = list(range(10))
+    assert select_chunks(chunks, stride=3, offset=1) == [1, 4, 7]
+
+
+def test_select_chunks_offset_without_stride_skips_prefix():
+    chunks = list(range(5))
+    assert select_chunks(chunks, offset=2) == [2, 3, 4]
