@@ -105,18 +105,31 @@ def dedupe_queries(queries: Sequence[tuple[str, str]]) -> list[tuple[str, str]]:
     return out
 
 
+def select_chunks(chunks: list, *, stride: int = 1, limit: int = 0) -> list:
+    """Evenly sample every *stride*-th chunk, then cap at *limit* (0 = no cap)."""
+    if stride > 1:
+        chunks = chunks[::stride]
+    if limit:
+        chunks = chunks[:limit]
+    return chunks
+
+
 def generate_queries(
-    store, provider, *, rounds: int, limit_chunks: int = 0
+    store,
+    provider,
+    *,
+    rounds: int,
+    limit_chunks: int = 0,
+    stride: int = 1,
+    self_consistency: bool = True,
 ) -> list[tuple[str, str]]:
     """Synthetic (query, source_chunk_key) via the W1 generator. LLM-slow."""
     from app.eval.adapter import build_global_id_key_map
     from app.services import synthetic_qa as sq
 
-    generator = sq.SyntheticQAGenerator(provider=provider)
+    generator = sq.SyntheticQAGenerator(provider=provider, check_self_consistency=self_consistency)
     key_map = build_global_id_key_map(store)
-    chunks = list(sq.iter_chunks(store))
-    if limit_chunks:
-        chunks = chunks[:limit_chunks]
+    chunks = select_chunks(list(sq.iter_chunks(store)), stride=stride, limit=limit_chunks)
     queries: list[tuple[str, str]] = []
     dropped = 0
     for round_no in range(rounds):
@@ -158,6 +171,17 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--teacher", default=DEFAULT_TEACHER)
     parser.add_argument("--batch", type=int, default=16)
     parser.add_argument("--limit-chunks", type=int, default=0, help="smoke runs (0 = all)")
+    parser.add_argument(
+        "--stride",
+        type=int,
+        default=1,
+        help="sample every Nth chunk (even coverage across docs)",
+    )
+    parser.add_argument(
+        "--no-self-consistency",
+        action="store_true",
+        help="single LLM call per chunk; noisy queries are fine for distillation (teacher labels them)",
+    )
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
 
@@ -168,7 +192,12 @@ def main(argv: list[str] | None = None) -> None:
 
     store = get_store()
     queries = generate_queries(
-        store, _gen_provider(), rounds=args.rounds, limit_chunks=args.limit_chunks
+        store,
+        _gen_provider(),
+        rounds=args.rounds,
+        limit_chunks=args.limit_chunks,
+        stride=args.stride,
+        self_consistency=not args.no_self_consistency,
     )
     golden_questions = frozenset(item.question for item in load_golden(GOLDEN_PUBLIC))
     pairs = build_pairs(
@@ -189,6 +218,8 @@ def main(argv: list[str] | None = None) -> None:
             "teacher": args.teacher,
             "rounds": args.rounds,
             "candidates": args.candidates,
+            "stride": args.stride,
+            "self_consistency": not args.no_self_consistency,
             "n_queries": len(queries),
             "n_pairs": len(pairs),
             "golden_excluded": str(GOLDEN_PUBLIC),

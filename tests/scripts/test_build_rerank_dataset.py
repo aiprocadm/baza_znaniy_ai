@@ -10,6 +10,7 @@ from scripts.build_rerank_dataset import (
     build_pairs,
     dedupe_queries,
     normalize_question,
+    select_chunks,
     write_pairs,
 )
 
@@ -77,3 +78,18 @@ def test_as_retrieve_adapts_eval_retriever_to_tuples():
 def test_dedupe_queries_by_normalized_text_keeps_first():
     queries = [("Какой срок?", "a.md:0"), ("какой СРОК", "b.md:1"), ("Другой?", "c.md:2")]
     assert dedupe_queries(queries) == [("Какой срок?", "a.md:0"), ("Другой?", "c.md:2")]
+
+
+def test_select_chunks_stride_samples_evenly():
+    chunks = list(range(10))
+    assert select_chunks(chunks, stride=3) == [0, 3, 6, 9]
+
+
+def test_select_chunks_stride_then_limit():
+    chunks = list(range(10))
+    assert select_chunks(chunks, stride=2, limit=3) == [0, 2, 4]
+
+
+def test_select_chunks_defaults_passthrough():
+    chunks = list(range(3))
+    assert select_chunks(chunks) == [0, 1, 2]
