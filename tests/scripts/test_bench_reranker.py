@@ -2,8 +2,6 @@
 
 import json
 
-import pytest
-
 from scripts.bench_reranker import group_queries, measure, percentile
 
 
@@ -33,5 +31,5 @@ def test_measure_calls_scorer_once_per_query_with_capped_candidates():
 
 def test_percentile_p95_and_median():
     timings = [float(v) for v in range(1, 101)]
-    assert percentile(timings, 0.50) == pytest.approx(50.0, abs=1.0)
-    assert percentile(timings, 0.95) == pytest.approx(95.0, abs=1.0)
+    assert percentile(timings, 0.50) == 50.0
+    assert percentile(timings, 0.95) == 95.0

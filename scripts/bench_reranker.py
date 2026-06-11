@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import time
 from pathlib import Path
 from typing import Callable, Sequence
@@ -44,7 +45,7 @@ def measure(
 
 def percentile(timings: Sequence[float], q: float) -> float:
     ordered = sorted(timings)
-    index = min(len(ordered) - 1, max(0, round(q * (len(ordered) - 1))))
+    index = min(len(ordered) - 1, max(0, math.ceil(q * len(ordered)) - 1))
     return ordered[index]
 
 
@@ -61,12 +62,16 @@ def main(argv: list[str] | None = None) -> None:
     sample = [(q, t) for q, t in grouped.items() if len(t) >= args.candidates][: args.queries]
     if not sample:
         raise SystemExit("No queries with enough candidates in the pairs file.")
+    if len(sample) < 10:
+        print(f"WARNING: only {len(sample)} qualifying queries — p95 will be unreliable")
 
     from sentence_transformers import CrossEncoder
 
     encoder = CrossEncoder(args.model, max_length=384)
-    measure(encoder.predict, sample[:2], candidates=args.candidates)  # warm-up
-    timings = measure(encoder.predict, sample, candidates=args.candidates)
+    warmup_set = sample[:2]
+    timed_set = sample[2:] or sample  # tiny corpora: better biased than empty
+    measure(encoder.predict, warmup_set, candidates=args.candidates)
+    timings = measure(encoder.predict, timed_set, candidates=args.candidates)
     p50 = percentile(timings, 0.50)
     p95 = percentile(timings, 0.95)
     print(
