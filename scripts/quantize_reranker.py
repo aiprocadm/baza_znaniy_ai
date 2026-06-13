@@ -14,8 +14,9 @@ What it does
 2. Applies ``torch.ao.quantization.quantize_dynamic`` to the underlying
    transformer's ``nn.Linear`` layers (int8 weights, dynamic activation
    quant). This is the cleanest CPU path: no calibration set, no ONNX export
-   toolchain, pure-torch and reproducible. The encoder keeps its real
-   tokenizer + sigmoid, so ``encoder.predict`` still works after quantization.
+   toolchain, pure-torch and reproducible. The quantized module is scored via a
+   direct HF forward (``make_direct_scorer``), NOT ``encoder.predict`` (see the
+   design note below for why predict breaks on the quantized module).
 3. Benchmarks p50/p95 wall time for reranking ``--candidates`` (default 20)
    per query, reusing the query groups + timing helpers from
    ``scripts.bench_reranker`` (imported, never edited), with a warm-up pass.
@@ -32,16 +33,22 @@ state_dict is NOT loadable by ``CrossEncoder(...)`` / HF ``from_pretrained``
 
 The quantized model is therefore served as a serialized torch module written
 with ``torch.save(encoder.model, ...)`` and reloaded at serve time via
-``torch.load(...)``, then wrapped by the SAME ``CrossEncoder`` instance (we
-swap ``encoder.model`` and reuse the original tokenizer + ``predict``).
-``build_quantized_encoder`` / ``load_quantized_encoder`` below encapsulate
-exactly that. Because ``torch.load`` deserializes arbitrary objects, the
-``*.pt`` artifact must be treated as trusted (it is produced locally by this
-script next to the canonical fp32 dir). The serving layer keeps the fp32 HF
-dir as the canonical/portable artifact and treats the ``*.pt`` int8 module as
-a CPU-latency optimization sitting beside it. (ONNX Runtime dynamic quant is
-the stronger alternative for a 2-4x speedup but pulls in onnxruntime + an
-export step; we chose the zero-extra-dep torch path for this deliverable.)
+``torch.load(...)``. It must be scored with a **direct HF forward**
+(``tokenizer(...) -> model(**enc) -> sigmoid``; see ``make_direct_scorer``),
+NOT through ``CrossEncoder.predict`` — sentence-transformers' predict dispatch
+feeds the feature dict positionally into BERT and the quantized module then
+trips ``input_ids.size()``. (The fp32 path tolerates this; the quantized one
+does not.) Because ``torch.load`` deserializes arbitrary objects, the ``*.pt``
+artifact must be treated as trusted (produced locally by this script next to
+the canonical fp32 dir).
+
+MEASURED VERDICT (2026-06-13, rubert-tiny2 student, this CPU, 20 candidates,
+max_length 256): fp32 p50/p95 = 620/1228 ms, int8 = 645/852 ms — only ~1.4x on
+p95 and ~0 on p50, still ~4x over the 200 ms budget. torch dynamic quant
+accelerates only ``nn.Linear`` matmuls; on a tiny BERT the forward is dominated
+by other ops + per-call overhead, so the win is small. **int8 alone does not
+meet the gate** — the latency path needs fewer candidates, ONNX Runtime
+(graph int8 + op fusion), shorter max_length, or a revised budget.
 
 Run (heavy, needs torch + the trained model):
     py -3.13 -m scripts.quantize_reranker --compare
@@ -98,15 +105,19 @@ def _load_encoder(model: str, *, max_length: int) -> Any:
 
 
 def quantize_module(module: Any) -> Any:
-    """Apply int8 dynamic quantization to all ``nn.Linear`` layers.
+    """Apply int8 dynamic quantization to all ``nn.Linear`` layers, in place.
 
-    Returns the quantized module (a new object; the caller swaps it in).
+    ``inplace=True`` swaps only the ``nn.Linear`` internals and preserves object
+    identity. Note this does NOT make ``CrossEncoder.predict`` work on the result
+    (predict's dict dispatch still trips the quantized module — score via
+    ``make_direct_scorer`` instead); inplace is kept simply to avoid a redundant
+    full copy of the model. Returns the same object for call-site convenience.
     """
     import torch
     from torch.ao.quantization import quantize_dynamic
 
     module.train(False)
-    return quantize_dynamic(module, {torch.nn.Linear}, dtype=torch.qint8)
+    return quantize_dynamic(module, {torch.nn.Linear}, dtype=torch.qint8, inplace=True)
 
 
 def build_quantized_encoder(model: str, *, max_length: int) -> Any:
@@ -142,8 +153,37 @@ def load_quantized_encoder(model: str, quantized_pt: Path, *, max_length: int) -
     return encoder
 
 
+def make_direct_scorer(model: Any, tokenizer: Any, *, max_length: int):
+    """Build a ``score_fn(pairs) -> [float]`` that calls the HF model directly.
+
+    Bypasses ``CrossEncoder.predict`` on purpose: sentence-transformers' predict
+    dispatch is incompatible with a dynamically-quantized module (it feeds the
+    feature dict positionally into BERT -> ``input_ids.size()`` blows up). A
+    plain ``tokenizer(...) -> model(**enc) -> sigmoid`` path works for both fp32
+    and the int8 module, so it is also the apples-to-apples comparison path.
+    """
+    import torch
+
+    model.eval()
+
+    def score(pairs: Sequence[tuple[str, str]]) -> list[float]:
+        enc = tokenizer(
+            [q for q, _ in pairs],
+            [t for _, t in pairs],
+            padding=True,
+            truncation=True,
+            max_length=max_length,
+            return_tensors="pt",
+        )
+        with torch.no_grad():
+            logits = model(**enc).logits.reshape(-1)
+        return torch.sigmoid(logits).tolist()
+
+    return score
+
+
 def _bench(
-    encoder: Any,
+    score_fn: Any,
     sample: Sequence[tuple[str, list[str]]],
     *,
     candidates: int,
@@ -153,8 +193,8 @@ def _bench(
 ) -> bool:
     warm, timed = split_warmup(sample, warmup=warmup)
     if warm:
-        measure(encoder.predict, warm, candidates=candidates)  # warm-up, discarded
-    timings = measure(encoder.predict, timed, candidates=candidates)
+        measure(score_fn, warm, candidates=candidates)  # warm-up, discarded
+    timings = measure(score_fn, timed, candidates=candidates)
     p50, p95, passed = summarize(timings, budget_ms=budget_ms)
     verdict = "PASS" if passed else "FAIL"
     print(
@@ -193,9 +233,12 @@ def main(argv: list[str] | None = None) -> None:
         print(f"WARNING: only {len(sample)} qualifying queries -- p95 will be unreliable")
 
     if args.compare:
-        fp32 = _load_encoder(args.model, max_length=args.max_length)
+        fp32_enc = _load_encoder(args.model, max_length=args.max_length)
+        fp32_score = make_direct_scorer(
+            fp32_enc.model, fp32_enc.tokenizer, max_length=args.max_length
+        )
         _bench(
-            fp32,
+            fp32_score,
             sample,
             candidates=args.candidates,
             warmup=args.warmup,
@@ -203,9 +246,10 @@ def main(argv: list[str] | None = None) -> None:
             label="fp32",
         )
 
-    int8 = build_quantized_encoder(args.model, max_length=args.max_length)
+    int8_enc = build_quantized_encoder(args.model, max_length=args.max_length)
+    int8_score = make_direct_scorer(int8_enc.model, int8_enc.tokenizer, max_length=args.max_length)
     passed = _bench(
-        int8,
+        int8_score,
         sample,
         candidates=args.candidates,
         warmup=args.warmup,
@@ -215,7 +259,7 @@ def main(argv: list[str] | None = None) -> None:
 
     if args.save_to:
         dest = Path(args.save_to)
-        save_quantized_encoder(int8, dest)
+        save_quantized_encoder(int8_enc, dest)
         print(f"saved int8 module -> {dest}")
 
     if not passed:
