@@ -1,5 +1,13 @@
-"""The admin embedder-warning banner reads health().embedder.name === 'hash'.
-Lock that contract so a future refactor can't silently drop the field."""
+"""Lock the health() contract that the admin degradation banner depends on.
+
+Two fields are locked:
+- ``health().embedder.name == "hash"`` — used by the legacy JS embedder-warning
+  banner to detect the hashing backend.
+- ``health().retrieval.degraded == True`` and a reason entry with
+  ``reason == "hashing_embedder"`` — used by the new retrieval-degradation
+  banner introduced in A3 so the admin console can surface the issue
+  independently of per-query context.
+"""
 from __future__ import annotations
 
 from pathlib import Path
@@ -43,3 +51,30 @@ def test_health_exposes_embedder_name(hash_embedder_client):
     assert "name" in body["embedder"]
     # When KB_EMBEDDINGS_BACKEND=hash is set the hashing fallback is active.
     assert body["embedder"]["name"] == "hash"
+
+
+def test_health_retrieval_degraded_under_hash(hash_embedder_client):
+    """Lock the retrieval contract the admin degradation banner depends on.
+
+    When the hashing embedder is active the health response MUST include:
+    - ``retrieval.degraded == True``
+    - at least one entry in ``retrieval.reasons`` with ``reason == "hashing_embedder"``
+
+    If either assertion fails a future backend refactor has broken the contract
+    that the admin banner JS reads from ``GET /api/kb/health``.
+    """
+    resp = hash_embedder_client.get("/api/kb/health")
+    assert resp.status_code == 200
+    body = resp.json()
+
+    assert "retrieval" in body, "health() must expose a 'retrieval' block"
+    retrieval = body["retrieval"]
+
+    assert retrieval.get("degraded") is True, (
+        "retrieval.degraded must be True when the hashing embedder is active"
+    )
+
+    reason_keys = [r.get("reason") for r in retrieval.get("reasons", [])]
+    assert "hashing_embedder" in reason_keys, (
+        f"Expected 'hashing_embedder' in retrieval.reasons, got: {reason_keys}"
+    )
