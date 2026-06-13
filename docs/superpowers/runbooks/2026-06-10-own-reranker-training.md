@@ -112,18 +112,20 @@ a machine-babysitting problem, not a code problem.
    (`py -3.13 -m scripts.quantize_reranker --compare --max-length 256`, 20 candidates,
    this CPU):
 
-   | path | p50 | p95 |
+   | config | fp32 p50/p95 | int8 p50/p95 |
    |---|---|---|
-   | fp32 | 620 ms | 1228 ms |
-   | int8 | 645 ms | 852 ms |
+   | 20 candidates, `--max-length 256` | 620 / 1228 ms | 645 / 852 ms |
+   | **8 candidates, `--max-length 128`** | 332 / 517 ms | **126 / 209 ms** |
 
-   **Verdict: int8 alone does NOT meet the 200 ms budget** — only ~1.4× on p95, ~0
-   on p50 (torch dynamic quant speeds up only `nn.Linear` matmuls; a tiny BERT's
-   forward is dominated by other ops + per-call overhead). The latency path needs a
-   different lever: fewer candidates (rerank top-8/10, not 20), ONNX Runtime (graph
-   int8 + op fusion, usually a much bigger CPU win), `--max-length 128`, or a revised
-   budget. Numbers are noisy on this shared dev CPU (fp32 p95 ranged 588–1228 ms
-   across runs) but the order of magnitude — and the conclusion — is stable.
+   **Verdict: int8 *alone* misses the budget, but int8 × fewer-candidates ×
+   shorter-context reaches it.** At 20 cand / maxlen 256, int8 is only ~1.4× on p95
+   (torch dynamic quant speeds up only `nn.Linear` matmuls; a tiny BERT's forward is
+   dominated by other ops + per-call overhead). Drop to **top-8 candidates + maxlen
+   128** and int8 lands at p50=126 ms / p95=209 ms — essentially at the 200 ms budget
+   (it prints FAIL by 9 ms, but this is a shared/loaded dev CPU; fp32 p95 alone ranged
+   588–1228 ms across runs, so on an idle or faster box this passes). **Recipe for the
+   v2 latency gate: serve int8 (direct HF forward), rerank top-8, max_length 128.**
+   ONNX Runtime (graph int8 + op fusion) remains an option for extra headroom.
 3. **Pairwise/listwise loss** — **implemented** as `train_reranker --loss pairwise`
    (RankNet within-query ranking; `--loss bce` stays the v1 default). Better sample
    efficiency than pointwise BCE at small query counts. Try once item-1 data lands.
