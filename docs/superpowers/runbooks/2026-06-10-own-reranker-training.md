@@ -152,3 +152,60 @@ a machine-babysitting problem, not a code problem.
 - `bge-reranker-v2-m3` HF download stalls unauthenticated; pre-fetch with
   `huggingface_hub.snapshot_download` (resumes cleanly) before any scoring run.
 - Teacher scoring throughput on this CPU: ~0.7 pairs/s (batch 16, max_length 512).
+
+## v2 attempt (2026-06-13) — gate FAILED again, root-caused, data chase STOPPED
+
+The v2 levers were exercised end-to-end. Two builder bugs were fixed first so the
+multi-hour run was survivable (commits `6700d20` resume-skip-before-generation,
+`a493d72` interleave generate→score→flush — a kill now loses ≤1 chunk; the old
+two-phase path buffered all generation with zero flush until ~4 h in, which is why
+v1's offset-1 "died" — it had simply never checkpointed).
+
+```powershell
+# offset-1 gen completed cleanly in ~3h50m: 122 queries / 2440 pairs, all flushed.
+py -3.13 -m scripts.build_rerank_dataset --stride 3 --offset 1 --rounds 1 `
+  --no-self-consistency --candidates 20 --resume --out var/data/rerank/pairs_v2.jsonl
+# merge with v1 (disjoint offset-0) -> 249 unique queries (2x v1)
+cat var/data/rerank/pairs.jsonl var/data/rerank/pairs_v2.jsonl > var/data/rerank/pairs_combined.jsonl
+py -3.13 -m scripts.train_reranker --pairs var/data/rerank/pairs_combined.jsonl `
+  --out var/models/kbai-reranker-ru-v2 --loss pairwise
+KB_RERANK_MODEL=var/models/kbai-reranker-ru-v2 py -3.13 -m scripts.eval_rag run `
+  --golden data/eval/golden_public.jsonl --rerank --out var/data/eval/run_student_v2.json
+```
+
+| run | hit@1 | hit@5 | recall@5 | mrr@5 |
+|---|---|---|---|---|
+| base (no rerank) | 0.639 | 0.833 | 0.806 | 0.736 |
+| **student v2 (pairwise, 249 q)** | **0.083** | **0.306** | **0.292** | **0.143** |
+| student v1 (bce, 127 q) | 0.083 | 0.278 | 0.264 | 0.142 |
+| teacher | 0.722 | 0.833 | 0.833 | 0.773 |
+
+**Gate: FAIL.** 2× data + pairwise loss ≈ no change. `val_pearson_vs_teacher`=0.011
+— but that metric is **bce-only**: RankNet leaves absolute scores unanchored, so
+pearson-vs-teacher is meaningless for `--loss pairwise`; judge it by the eval gate.
+
+**Root cause (NOT a bug).** The teacher runs the *identical* `CrossEncoderReranker`
+path and gets gold@1 in 5/6 probe queries → eval load/score/sort is correct.
+Discrimination probe (rank of the gold chunk among the bi-encoder's top-20):
+
+| query | base | student v2 | teacher |
+|---|---|---|---|
+| 6 sampled golden | gold@1–2 | gold@**5,15,2,10,5,15** | gold@1 (5/6) |
+
+The student **scatters** an already-strong base order (not inverted, not random —
+weak noisy signal). A 29M cross-encoder cannot learn enough from 249 CPU-generated
+queries; pairwise loss barely moved (0.691→0.641 over 3 epochs).
+
+**Strategic verdict (why we stopped).** On this 9-doc / 598-chunk public corpus the
+bi-encoder is already near-ceiling (base hit@5 0.833), so even a *perfect* student
+(= teacher) adds only +8 pp hit@1 and **0** on hit@5 — the reranker headroom here is
+marginal. The corpus is too small to confuse the bi-encoder *or* to yield enough
+training queries — the wrong testbed. Running offset-2 (~8 h CPU) would be a
+low-probability flip of a marginal-ceiling gate, so it was **not** run.
+
+**Decision:** ship the MVP **without a learned reranker** (base is strong); keep the
+teacher available behind a flag for GPU deployments (CPU latency 50–68 s/query is
+untenable). Revisit `kbai-reranker-ru` only with **(a)** a larger real customer
+corpus (more confusable chunks → real headroom, and more chunks → more training
+queries) or **(b)** a GPU box to reach the spec's 50–100k pairs in minutes. The
+pipeline + the resume/interleave fixes are reproducible, banked assets.
