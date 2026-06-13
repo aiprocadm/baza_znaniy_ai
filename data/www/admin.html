@@ -78,6 +78,11 @@
     color: var(--danger);
     font-weight: 600;
   }
+  .degraded-banner { border-radius: 8px; padding: 0.7rem 0.9rem; margin: 0 0 0.75rem; font-size: 0.9rem; line-height: 1.35; }
+  .degraded-banner strong { display: block; margin-bottom: 0.2rem; }
+  .degraded-banner ul { margin: 0.3rem 0 0; padding-left: 1.1rem; }
+  .degraded-banner.warning { background: #fef3c7; border: 1px solid #f59e0b; color: #92400e; }
+  .degraded-banner.critical { background: #fee2e2; border: 1px solid #dc2626; color: #991b1b; }
   table {
     width: 100%;
     border-collapse: collapse;
@@ -118,6 +123,7 @@
   }
 </style>
 <main>
+  <div id="health-degraded" class="degraded-banner" role="alert" hidden></div>
   <section>
     <h1 data-i18n="admin.header">Knowledge Base — Admin</h1>
     <p>Загрузите новые документы и следите за историей индексации. Доступ ограничен администраторами.</p>
@@ -384,6 +390,46 @@
       return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]);
     });
   }
+
+  // i18n helper — uses window.t (from /i18n/_loader.js) when available,
+  // otherwise returns the fallback so the banner is readable even if the
+  // loader has not run yet (direct open, slow network).
+  function tr(key, fallback){
+    return (typeof window.t === 'function') ? window.t(key, fallback) : fallback;
+  }
+
+  function renderHealthDegradation(retrieval){
+    const el = document.getElementById('health-degraded');
+    if(!el) return;
+    const reasons = (retrieval && retrieval.reasons) || [];
+    if(!retrieval || !retrieval.degraded || !reasons.length){
+      el.hidden = true;
+      while(el.firstChild) el.removeChild(el.firstChild);
+      return;
+    }
+    el.className = 'degraded-banner ' + (retrieval.severity === 'critical' ? 'critical' : 'warning');
+    while(el.firstChild) el.removeChild(el.firstChild);
+    var strong = document.createElement('strong');
+    strong.textContent = tr('retrieval.banner.title', 'Качество поиска снижено');
+    el.appendChild(strong);
+    var ul = document.createElement('ul');
+    reasons.forEach(function(r){
+      var li = document.createElement('li');
+      li.textContent = tr('retrieval.reason.' + r.reason, r.detail || r.reason);
+      ul.appendChild(li);
+    });
+    el.appendChild(ul);
+    el.hidden = false;
+  }
+
+  // Fetch health on page load — public endpoint, no token needed.
+  // Failures are silently swallowed so a network error never breaks the page.
+  fetch('/api/kb/health').then(function(res){
+    if(!res.ok) return;
+    return res.json();
+  }).then(function(data){
+    if(data && data.retrieval) renderHealthDegradation(data.retrieval);
+  }).catch(function(){});
 
   async function tryLoadDocuments(force){
     if(!currentToken){
