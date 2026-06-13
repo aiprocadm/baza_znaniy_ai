@@ -316,6 +316,48 @@ def score_and_flush_by_chunk(
     return new_pairs
 
 
+def generate_score_flush_by_chunk(
+    chunks: Sequence[tuple[int, str]],
+    *,
+    gen_fn: Callable[[int, str], Sequence[str]],
+    key_of: Callable[[int], str | None],
+    retrieve: Retrieve,
+    golden_questions: frozenset[str],
+    score_fn: Callable[[Sequence[Pair]], list[float]],
+    out: Path,
+    k: int = 20,
+) -> int:
+    """Per source chunk: generate -> mine -> score -> append, flushing each chunk.
+
+    Unlike the two-phase ``generate_queries`` + ``score_and_flush_by_chunk`` path
+    (which buffers *all* LLM generation in memory before the first flush), this
+    interleaves generation with persistence: a row hits disk after the first
+    chunk (~90 s), and a hard kill loses at most the in-flight chunk. Combined
+    with ``pending_chunks`` resume-skip upstream, that makes a multi-hour run on
+    a flaky machine genuinely resumable. ``gen_fn``/``score_fn`` are injected so
+    unit tests exercise the orchestration without ML deps.
+    """
+    new_pairs = 0
+    for chunk_id, text in chunks:
+        source_key = key_of(chunk_id)
+        if source_key is None:
+            continue  # no resume marker possible -> skip (matches pending_chunks)
+        queries = dedupe_queries([(q, source_key) for q in gen_fn(chunk_id, text)])
+        chunk_pairs = build_pairs(queries, retrieve, golden_questions, k=k)
+        if not chunk_pairs:
+            continue  # no queries, or all golden-filtered -> nothing to score
+        scores = score_fn(chunk_pairs)
+        append_rows(out, chunk_pairs, scores)
+        new_pairs += len(chunk_pairs)
+        LOGGER.info(
+            "chunk %s: +%d pairs (%d total appended this run)",
+            source_key,
+            len(chunk_pairs),
+            new_pairs,
+        )
+    return new_pairs
+
+
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(prog="build_rerank_dataset")
     parser.add_argument("--out", default=str(PAIRS_OUT))
@@ -350,8 +392,9 @@ def main(argv: list[str] | None = None) -> None:
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
 
-    from app.eval.adapter import make_mvp_retriever
+    from app.eval.adapter import build_global_id_key_map, make_mvp_retriever
     from app.eval.dataset import load_golden
+    from app.services import synthetic_qa as sq
     from app.services.kb_store import get_store
     from scripts.eval_rag import _gen_provider
 
@@ -366,38 +409,63 @@ def main(argv: list[str] | None = None) -> None:
         LOGGER.info("resume: %d source chunks already on disk in %s", len(done), out_path)
 
     store = get_store()
-    queries = generate_queries(
-        store,
-        _gen_provider(),
-        rounds=args.rounds,
-        limit_chunks=args.limit_chunks,
+    key_map = build_global_id_key_map(store)
+    chunks = select_chunks(
+        list(sq.iter_chunks(store)),
         stride=args.stride,
         offset=args.offset,
-        self_consistency=not args.no_self_consistency,
-        done_source_keys=done,
+        limit=args.limit_chunks,
     )
-    pending = filter_done_queries(queries, done)
+    before = len(chunks)
+    chunks = pending_chunks(chunks, key_map, done)
     LOGGER.info(
-        "%d queries generated, %d pending after resume-skip (%d source chunks done)",
-        len(queries),
-        len(pending),
-        len(done),
+        "%d chunks selected, %d to process (%d skipped, already on disk)",
+        before,
+        len(chunks),
+        before - len(chunks),
     )
 
     golden_questions = frozenset(item.question for item in load_golden(GOLDEN_PUBLIC))
     retrieve = as_retrieve(make_mvp_retriever(store))
 
-    def _score(chunk_pairs: Sequence[Pair]) -> list[float]:
-        return teacher_scores(chunk_pairs, model_name=args.teacher, batch_size=args.batch)
+    generator = sq.SyntheticQAGenerator(
+        provider=_gen_provider(), check_self_consistency=not args.no_self_consistency
+    )
 
-    new_pairs = score_and_flush_by_chunk(
-        pending, retrieve, golden_questions, _score, out=out_path, k=args.candidates
+    def _gen(chunk_id: int, text: str) -> list[str]:
+        out_q: list[str] = []
+        for _ in range(args.rounds):
+            for qa in generator.generate_for_chunk(
+                chunks=[text], chunk_ids=[chunk_id], mode=sq.GenerationMode.SINGLE
+            ):
+                out_q.append(qa.instruction)
+        return out_q
+
+    # Load the teacher cross-encoder once and reuse it across chunks (the old
+    # two-phase path reloaded the 568M model per chunk).
+    from sentence_transformers import CrossEncoder
+
+    encoder = CrossEncoder(args.teacher, max_length=512)
+
+    def _score(chunk_pairs: Sequence[Pair]) -> list[float]:
+        scores = encoder.predict([(p.query, p.text) for p in chunk_pairs], batch_size=args.batch)
+        return [float(s) for s in scores]
+
+    new_pairs = generate_score_flush_by_chunk(
+        chunks,
+        gen_fn=_gen,
+        key_of=key_map.get,
+        retrieve=retrieve,
+        golden_questions=golden_questions,
+        score_fn=_score,
+        out=out_path,
+        k=args.candidates,
     )
 
     total_pairs = count_rows(out_path)
     if total_pairs == 0:
         raise SystemExit(
-            f"No pairs generated (queries={len(queries)}). "
+            f"No pairs generated ({len(chunks)} chunks processed). "
             "Check KB_MVP_DB_PATH and that the store is ingested."
         )
     write_meta(
@@ -417,7 +485,7 @@ def main(argv: list[str] | None = None) -> None:
     )
     print(
         f"Wrote {new_pairs} new pairs this run; {total_pairs} pairs total "
-        f"({len(pending)} queries processed) to {args.out}"
+        f"({len(chunks)} chunks processed) to {args.out}"
     )
 
 

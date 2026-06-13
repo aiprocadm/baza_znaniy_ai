@@ -13,6 +13,7 @@ from scripts.build_rerank_dataset import (
     count_rows,
     dedupe_queries,
     filter_done_queries,
+    generate_score_flush_by_chunk,
     group_by_source,
     normalize_question,
     pending_chunks,
@@ -235,4 +236,86 @@ def test_score_and_flush_by_chunk_skips_golden_only_chunks(tmp_path):
         raise AssertionError("score_fn must not run for a golden-filtered chunk")
 
     assert score_and_flush_by_chunk(queries, _retrieve, golden, score_fn, out=out, k=2) == 0
+    assert not out.exists()
+
+
+# --- interleaved generate->mine->score->flush (survivable generation) --------
+
+
+def test_generate_score_flush_by_chunk_interleaves_and_flushes_each_chunk(tmp_path):
+    out = tmp_path / "pairs.jsonl"
+    chunks = [(10, "text-a"), (11, "text-b")]
+    n = generate_score_flush_by_chunk(
+        chunks,
+        gen_fn=lambda cid, text: [f"q for {cid}"],
+        key_of={10: "a.md:0", 11: "b.md:1"}.get,
+        retrieve=_retrieve,
+        golden_questions=frozenset(),
+        score_fn=lambda pairs: [0.5] * len(pairs),
+        out=out,
+        k=2,
+    )
+    # 2 chunks x 1 query x 2 candidates = 4 pairs, source keys recorded for resume.
+    assert n == 4
+    assert completed_source_keys(out) == {"a.md:0", "b.md:1"}
+
+
+def test_generate_score_flush_persists_each_chunk_before_the_next(tmp_path):
+    # The survivability guarantee: a kill (here, score_fn raising on chunk 2)
+    # must leave chunk 1 fully flushed so resume can skip it.
+    out = tmp_path / "pairs.jsonl"
+    chunks = [(10, "a"), (11, "b")]
+    calls = {"n": 0}
+
+    def score_fn(pairs):
+        calls["n"] += 1
+        if calls["n"] == 2:
+            raise RuntimeError("killed mid-run")
+        return [0.5] * len(pairs)
+
+    with pytest.raises(RuntimeError):
+        generate_score_flush_by_chunk(
+            chunks,
+            gen_fn=lambda cid, text: ["q"],
+            key_of={10: "a.md:0", 11: "b.md:1"}.get,
+            retrieve=_retrieve,
+            golden_questions=frozenset(),
+            score_fn=score_fn,
+            out=out,
+            k=1,
+        )
+    assert completed_source_keys(out) == {"a.md:0"}
+
+
+def test_generate_score_flush_skips_chunk_with_unknown_key(tmp_path):
+    out = tmp_path / "pairs.jsonl"
+    n = generate_score_flush_by_chunk(
+        [(99, "x")],
+        gen_fn=lambda cid, text: ["q"],
+        key_of={}.get,  # key miss -> cannot record a resume marker, skip
+        retrieve=_retrieve,
+        golden_questions=frozenset(),
+        score_fn=lambda pairs: [0.5] * len(pairs),
+        out=out,
+        k=2,
+    )
+    assert n == 0
+    assert not out.exists()
+
+
+def test_generate_score_flush_skips_golden_only_chunk_without_scoring(tmp_path):
+    out = tmp_path / "pairs.jsonl"
+    n = generate_score_flush_by_chunk(
+        [(10, "a")],
+        gen_fn=lambda cid, text: ["Секрет?"],
+        key_of={10: "a.md:0"}.get,
+        retrieve=_retrieve,
+        golden_questions=frozenset({"Секрет?"}),
+        score_fn=lambda pairs: (_ for _ in ()).throw(
+            AssertionError("score_fn must not run for a golden-only chunk")
+        ),
+        out=out,
+        k=2,
+    )
+    assert n == 0
     assert not out.exists()
