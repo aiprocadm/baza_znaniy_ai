@@ -14,6 +14,17 @@
 
 ## Part A — Hashing-embedder warning banner (admin console)
 
+> **Revision (2026-06-14):** During execution we discovered the end-user UI
+> (`data/www/index.html`) already has a degradation-banner mechanism
+> (`renderDegradation`, `.degraded-banner` CSS, i18n keys `retrieval.banner.title`
+> + `retrieval.reason.*`) driven by the `retrieval` block of `/api/kb/health` /
+> `/ask`. The admin console has none. **Decision (user-approved): reuse that
+> mechanism in the admin console instead of inventing `admin.embedder.warn.*`
+> keys.** This is DRY, consistent, and also surfaces non-hashing degradations
+> (e.g. embedding-dim mismatch). Tasks below reflect the revised approach:
+> A2 (new i18n keys) is dropped; A1 locks the `retrieval` contract; A3 mirrors
+> `renderDegradation` reading `health().retrieval`.
+
 ### Task A1: Lock the health-endpoint contract the banner depends on
 
 **Files:**
