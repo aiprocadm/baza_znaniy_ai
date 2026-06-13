@@ -6,7 +6,14 @@ import json
 
 import pytest
 
-from scripts.train_reranker import load_pairs, soft_label, split_by_query
+from scripts.train_reranker import (
+    enumerate_pairs,
+    group_by_query,
+    load_pairs,
+    query_grouped_batches,
+    soft_label,
+    split_by_query,
+)
 
 
 def _write_pairs(path, rows):
@@ -45,3 +52,63 @@ def test_split_by_query_is_query_disjoint_and_deterministic():
     assert {r["query"] for r in train_a} & {r["query"] for r in val_a} == set()
     assert len(train_a) + len(val_a) == len(rows)
     assert val_a  # non-empty
+
+
+# --- pairwise loss helpers (used only by --loss pairwise) -------------------
+
+
+def test_group_by_query_groups_and_preserves_order():
+    rows = [
+        {"query": "a", "text": "a1", "teacher_score": 0.1},
+        {"query": "b", "text": "b1", "teacher_score": 0.2},
+        {"query": "a", "text": "a2", "teacher_score": 0.3},
+    ]
+    groups = group_by_query(rows)
+    assert [[r["text"] for r in g] for g in groups] == [["a1", "a2"], ["b1"]]
+    # every input row is preserved exactly once
+    assert sum(len(g) for g in groups) == len(rows)
+
+
+def test_enumerate_pairs_orders_positive_first():
+    group = [
+        {"teacher_score": 0.9},  # 0
+        {"teacher_score": 0.1},  # 1
+        {"teacher_score": 0.5},  # 2
+    ]
+    pairs = enumerate_pairs(group)
+    # (i, j) means score_i > score_j; deterministic ascending order
+    assert pairs == [(0, 1), (0, 2), (2, 1)]
+    for i, j in pairs:
+        assert group[i]["teacher_score"] > group[j]["teacher_score"]
+
+
+def test_enumerate_pairs_no_pairs_when_all_equal():
+    group = [{"teacher_score": 0.5}, {"teacher_score": 0.5}, {"teacher_score": 0.5}]
+    assert enumerate_pairs(group) == []
+
+
+def test_enumerate_pairs_margin_suppresses_near_ties():
+    group = [{"teacher_score": 0.50}, {"teacher_score": 0.55}, {"teacher_score": 0.90}]
+    # with a 0.1 margin only the 0.90 vs others gaps survive
+    pairs = enumerate_pairs(group, margin=0.1)
+    assert pairs == [(2, 0), (2, 1)]
+
+
+def test_enumerate_pairs_uses_soft_label_for_raw_logits():
+    # raw logits get sigmoid'd: 4.0 -> ~0.98 outranks -4.0 -> ~0.018
+    group = [{"teacher_score": -4.0}, {"teacher_score": 4.0}]
+    assert enumerate_pairs(group) == [(1, 0)]
+
+
+def test_query_grouped_batches_deterministic_and_drops_unrankable():
+    rows = (
+        [{"query": "a", "teacher_score": s} for s in (0.1, 0.9)]
+        + [{"query": "b", "teacher_score": s} for s in (0.5, 0.5)]  # no pairs -> dropped
+        + [{"query": "c", "teacher_score": s} for s in (0.2, 0.8)]
+    )
+    b1 = query_grouped_batches(rows, seed=7)
+    b2 = query_grouped_batches(rows, seed=7)
+    assert b1 == b2  # deterministic
+    queries = {g[0]["query"] for g in b1}
+    assert queries == {"a", "c"}  # all-equal "b" dropped
+    assert all(len(enumerate_pairs(g)) >= 1 for g in b1)
