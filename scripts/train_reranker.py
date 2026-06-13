@@ -220,12 +220,13 @@ def _train_pairwise(model, collate, rows_train, *, torch, epochs, lr, seed) -> N
             loss_val = torch.nn.functional.softplus(-diff).mean()
             loss_val.backward()
             optimizer.step()
-            total += float(loss_val)
+            step_loss = float(loss_val.detach())
+            total += step_loss
             n_steps += 1
             if step % 50 == 0:
                 print(
                     f"epoch {epoch} step {step}/{len(batches)} "
-                    f"pairs {len(pairs)} loss {float(loss_val):.4f}"
+                    f"pairs {len(pairs)} loss {step_loss:.4f}"
                 )
         print(f"epoch {epoch} mean pairwise loss {total / max(1, n_steps):.4f}")
 
