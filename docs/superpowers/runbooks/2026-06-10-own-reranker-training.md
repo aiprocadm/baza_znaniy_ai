@@ -106,11 +106,24 @@ a machine-babysitting problem, not a code problem.
    training attempt; re-check the train-vs-val Pearson gap as the early signal
    (val ≥ 0.6 before bothering with eval).
 2. **Latency:** int8 dynamic quantization — **implemented** in
-   `scripts/quantize_reranker.py` (`quantize_dynamic` over `nn.Linear`, served as a
-   `*.pt` beside the fp32 dir; see its docstring). Measure with
-   `py -3.13 -m scripts.quantize_reranker --compare` (fp32 vs int8 p50/p95). Typical
-   2–4× CPU speedup; combined with `--max-length 256` should approach the 200 ms budget.
-   NOT yet run against a real model — that measurement is the next manual step.
+   `scripts/quantize_reranker.py` (`quantize_dynamic` over `nn.Linear`; scored via a
+   direct HF forward, NOT `CrossEncoder.predict`, which is incompatible with the
+   quantized module). **MEASURED 2026-06-13** on the v1 model
+   (`py -3.13 -m scripts.quantize_reranker --compare --max-length 256`, 20 candidates,
+   this CPU):
+
+   | path | p50 | p95 |
+   |---|---|---|
+   | fp32 | 620 ms | 1228 ms |
+   | int8 | 645 ms | 852 ms |
+
+   **Verdict: int8 alone does NOT meet the 200 ms budget** — only ~1.4× on p95, ~0
+   on p50 (torch dynamic quant speeds up only `nn.Linear` matmuls; a tiny BERT's
+   forward is dominated by other ops + per-call overhead). The latency path needs a
+   different lever: fewer candidates (rerank top-8/10, not 20), ONNX Runtime (graph
+   int8 + op fusion, usually a much bigger CPU win), `--max-length 128`, or a revised
+   budget. Numbers are noisy on this shared dev CPU (fp32 p95 ranged 588–1228 ms
+   across runs) but the order of magnitude — and the conclusion — is stable.
 3. **Pairwise/listwise loss** — **implemented** as `train_reranker --loss pairwise`
    (RankNet within-query ranking; `--loss bce` stays the v1 default). Better sample
    efficiency than pointwise BCE at small query counts. Try once item-1 data lands.
