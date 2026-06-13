@@ -84,20 +84,51 @@ place — see "v2 plan" below.
 
 ## v2 plan (what it takes to pass the gate)
 
+**Tooling status (2026-06-13):** the three v2 levers below now have shipped, tested
+implementations on `feat/own-reranker-distill` (commits `cbaf839` resume,
+`e8aca40` int8, `e835155` pairwise). What remains is the *data run itself* (item 1) —
+a machine-babysitting problem, not a code problem.
+
 1. **Data volume is the blocker.** Resume disjoint-batch generation (each ≈4.5 h CPU,
-   run when the machine can be left alone, or on any GPU box where it is minutes):
+   run when the machine can be left alone, or on any GPU box where it is minutes).
+   The builder is now **resumable** (`--resume`): it mines+scores+flushes per source
+   chunk and fsyncs each batch, so a kill loses at most the in-flight chunk and a
+   re-run skips chunks already on disk. Prefer one accumulating file with `--resume`
+   over the old split-and-merge dance:
    ```powershell
-   py -3.13 -m scripts.build_rerank_dataset --stride 3 --offset 1 --rounds 1 --no-self-consistency --candidates 20 --out var/data/rerank/pairs_b.jsonl
-   py -3.13 -m scripts.build_rerank_dataset --stride 3 --offset 2 --rounds 1 --no-self-consistency --candidates 20 --out var/data/rerank/pairs_c.jsonl
-   # merge: Get-Content pairs.jsonl, pairs_b.jsonl, pairs_c.jsonl | Set-Content pairs_all.jsonl
+   # First disjoint subset (offset 1); re-run the SAME line after any kill to continue.
+   py -3.13 -m scripts.build_rerank_dataset --stride 3 --offset 1 --rounds 1 --no-self-consistency --candidates 20 --resume --out var/data/rerank/pairs_v2.jsonl
+   # Add the next disjoint subset into the SAME file (offset 2), also resumable:
+   py -3.13 -m scripts.build_rerank_dataset --stride 3 --offset 2 --rounds 1 --no-self-consistency --candidates 20 --resume --out var/data/rerank/pairs_v2.jsonl
    ```
-   Target ≥ 400–600 unique queries before the next training attempt; re-check the
-   train-vs-val Pearson gap as the early signal (val ≥ 0.6 before bothering with eval).
-2. **Latency:** int8 dynamic quantization (torch.quantization / ONNX Runtime) — typical
-   2–4× CPU speedup would bring p95 ≈ 250–500 ms; combined with max_length 256 likely
-   under the 200 ms budget. Out of scope for v1 by spec.
-3. Optional: pairwise/листwise loss (within-query ranking) — better sample efficiency
-   than pointwise BCE at small query counts.
+   (Without `--resume` a fresh run unlinks the file first, so resume bookkeeping is
+   never mixed with stale rows.) Target ≥ 400–600 unique queries before the next
+   training attempt; re-check the train-vs-val Pearson gap as the early signal
+   (val ≥ 0.6 before bothering with eval).
+2. **Latency:** int8 dynamic quantization — **implemented** in
+   `scripts/quantize_reranker.py` (`quantize_dynamic` over `nn.Linear`; scored via a
+   direct HF forward, NOT `CrossEncoder.predict`, which is incompatible with the
+   quantized module). **MEASURED 2026-06-13** on the v1 model
+   (`py -3.13 -m scripts.quantize_reranker --compare --max-length 256`, 20 candidates,
+   this CPU):
+
+   | config | fp32 p50/p95 | int8 p50/p95 |
+   |---|---|---|
+   | 20 candidates, `--max-length 256` | 620 / 1228 ms | 645 / 852 ms |
+   | **8 candidates, `--max-length 128`** | 332 / 517 ms | **126 / 209 ms** |
+
+   **Verdict: int8 *alone* misses the budget, but int8 × fewer-candidates ×
+   shorter-context reaches it.** At 20 cand / maxlen 256, int8 is only ~1.4× on p95
+   (torch dynamic quant speeds up only `nn.Linear` matmuls; a tiny BERT's forward is
+   dominated by other ops + per-call overhead). Drop to **top-8 candidates + maxlen
+   128** and int8 lands at p50=126 ms / p95=209 ms — essentially at the 200 ms budget
+   (it prints FAIL by 9 ms, but this is a shared/loaded dev CPU; fp32 p95 alone ranged
+   588–1228 ms across runs, so on an idle or faster box this passes). **Recipe for the
+   v2 latency gate: serve int8 (direct HF forward), rerank top-8, max_length 128.**
+   ONNX Runtime (graph int8 + op fusion) remains an option for extra headroom.
+3. **Pairwise/listwise loss** — **implemented** as `train_reranker --loss pairwise`
+   (RankNet within-query ranking; `--loss bce` stays the v1 default). Better sample
+   efficiency than pointwise BCE at small query counts. Try once item-1 data lands.
 
 ## Model card (kbai-reranker-ru v1 — NOT released)
 

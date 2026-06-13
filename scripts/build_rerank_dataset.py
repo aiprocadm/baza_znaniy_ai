@@ -15,6 +15,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Sequence
@@ -34,6 +35,7 @@ class Pair:
     query: str
     chunk_key: str
     text: str
+    source_key: str = ""
 
 
 def normalize_question(q: str) -> str:
@@ -51,37 +53,106 @@ def build_pairs(
     """Mine top-*k* candidates per query, dropping golden-colliding queries."""
     banned = {normalize_question(q) for q in golden_questions}
     out: list[Pair] = []
-    for query, _source_key in queries:
+    for query, source_key in queries:
         if normalize_question(query) in banned:
             continue
         for chunk_key, text in retrieve(query, k):
-            out.append(Pair(query=query, chunk_key=chunk_key, text=text))
+            out.append(Pair(query=query, chunk_key=chunk_key, text=text, source_key=source_key))
     leaked = {normalize_question(p.query) for p in out} & banned
     assert not leaked, f"golden leak into training pairs: {sorted(leaked)[:3]}"
     return out
 
 
+def _pair_row(pair: Pair, score: float) -> dict:
+    """Serialize one scored pair to its on-disk JSON record.
+
+    ``source_key`` is the *source* chunk a query was generated from (distinct
+    from ``chunk_key``, the mined candidate). It is the resume marker: a row's
+    presence means that source chunk is fully generated, mined, and scored.
+    """
+    return {
+        "query": pair.query,
+        "chunk_key": pair.chunk_key,
+        "text": pair.text,
+        "teacher_score": float(score),
+        "source_key": pair.source_key,
+    }
+
+
+def append_rows(path: Path, pairs: Sequence[Pair], scores: Sequence[float]) -> None:
+    """Append scored pairs to ``path`` (JSONL), creating it if absent.
+
+    Used on the incremental/per-chunk path so a kill mid-run keeps everything
+    flushed so far. Flushes + fsyncs each batch so a hard kill cannot leave a
+    torn final line.
+    """
+    if len(pairs) != len(scores):
+        raise ValueError(f"pairs/scores length mismatch: {len(pairs)} != {len(scores)}")
+    if not pairs:
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as fh:
+        for pair, score in zip(pairs, scores, strict=True):
+            fh.write(json.dumps(_pair_row(pair, score), ensure_ascii=False) + "\n")
+        fh.flush()
+        os.fsync(fh.fileno())
+
+
+def write_meta(path: Path, meta: dict) -> None:
+    """Write/refresh the ``.meta.json`` sidecar next to ``path``."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.with_suffix(".meta.json").write_text(
+        json.dumps(meta, ensure_ascii=False, indent=1), encoding="utf-8"
+    )
+
+
 def write_pairs(path: Path, pairs: Sequence[Pair], scores: Sequence[float], meta: dict) -> None:
+    """Overwrite ``path`` with all pairs + write the meta sidecar (batch path)."""
     if len(pairs) != len(scores):
         raise ValueError(f"pairs/scores length mismatch: {len(pairs)} != {len(scores)}")
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8") as fh:
         for pair, score in zip(pairs, scores, strict=True):
-            fh.write(
-                json.dumps(
-                    {
-                        "query": pair.query,
-                        "chunk_key": pair.chunk_key,
-                        "text": pair.text,
-                        "teacher_score": float(score),
-                    },
-                    ensure_ascii=False,
-                )
-                + "\n"
-            )
-    path.with_suffix(".meta.json").write_text(
-        json.dumps(meta, ensure_ascii=False, indent=1), encoding="utf-8"
-    )
+            fh.write(json.dumps(_pair_row(pair, score), ensure_ascii=False) + "\n")
+    write_meta(path, meta)
+
+
+def completed_source_keys(path: Path) -> set[str]:
+    """Return the set of source chunk keys already represented in ``path``.
+
+    A source key on disk means that chunk's queries were generated, mined, and
+    teacher-scored — so resume can skip it. Tolerates a torn final line (a
+    partial write from a hard kill) and rows missing ``source_key`` (legacy
+    format, which simply contribute nothing to skip).
+    """
+    if not path.exists():
+        return set()
+    done: set[str] = set()
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError:
+            continue  # torn final line from a hard kill
+        key = row.get("source_key")
+        if key:
+            done.add(key)
+    return done
+
+
+def filter_done_queries(
+    queries: Sequence[tuple[str, str]], done_source_keys: set[str]
+) -> list[tuple[str, str]]:
+    """Drop queries whose source chunk is already completed on disk."""
+    return [(q, src) for q, src in queries if src not in done_source_keys]
+
+
+def count_rows(path: Path) -> int:
+    """Count non-blank JSONL rows in ``path`` (0 if absent)."""
+    if not path.exists():
+        return 0
+    return sum(1 for line in path.read_text(encoding="utf-8").splitlines() if line.strip())
 
 
 def as_retrieve(eval_retriever) -> Retrieve:
@@ -159,6 +230,23 @@ def generate_queries(
     return dedupe_queries(queries)
 
 
+def group_by_source(queries: Sequence[tuple[str, str]]) -> list[tuple[str, list[str]]]:
+    """Group ``(query, source_key)`` tuples by source key, preserving first-seen order.
+
+    The unit of resumable work is one source chunk: all its queries are mined +
+    teacher-scored + flushed together so a row's presence on disk means that
+    source chunk is fully done.
+    """
+    order: list[str] = []
+    grouped: dict[str, list[str]] = {}
+    for query, source_key in queries:
+        if source_key not in grouped:
+            grouped[source_key] = []
+            order.append(source_key)
+        grouped[source_key].append(query)
+    return [(src, grouped[src]) for src in order]
+
+
 def teacher_scores(pairs: Sequence[Pair], *, model_name: str, batch_size: int) -> list[float]:
     """Score (query, text) with the teacher cross-encoder. CPU-slow."""
     from sentence_transformers import CrossEncoder
@@ -168,6 +256,39 @@ def teacher_scores(pairs: Sequence[Pair], *, model_name: str, batch_size: int) -
         [(p.query, p.text) for p in pairs], batch_size=batch_size, show_progress_bar=True
     )
     return [float(s) for s in scores]
+
+
+def score_and_flush_by_chunk(
+    queries: Sequence[tuple[str, str]],
+    retrieve: Retrieve,
+    golden_questions: frozenset[str],
+    score_fn: Callable[[Sequence[Pair]], list[float]],
+    *,
+    out: Path,
+    k: int = 20,
+) -> int:
+    """Per-source-chunk: mine -> score -> append, flushing after each chunk.
+
+    Returns the number of pairs newly appended. ``score_fn`` maps a chunk's
+    candidate pairs to teacher scores (kept as a parameter so unit tests inject
+    a pure stub instead of the cross-encoder). The anti-leak filter runs per
+    chunk via :func:`build_pairs`, so the guarantee holds on this path too.
+    """
+    new_pairs = 0
+    for source_key, group in group_by_source(queries):
+        chunk_pairs = build_pairs([(q, source_key) for q in group], retrieve, golden_questions, k=k)
+        if not chunk_pairs:
+            continue  # all queries for this chunk were golden-filtered
+        scores = score_fn(chunk_pairs)
+        append_rows(out, chunk_pairs, scores)
+        new_pairs += len(chunk_pairs)
+        LOGGER.info(
+            "source chunk %s: +%d pairs (%d total appended this run)",
+            source_key,
+            len(chunk_pairs),
+            new_pairs,
+        )
+    return new_pairs
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -195,6 +316,12 @@ def main(argv: list[str] | None = None) -> None:
         action="store_true",
         help="single LLM call per chunk; noisy queries are fine for distillation (teacher labels them)",
     )
+    parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="append to --out, skipping source chunks already completed on disk "
+        "(a killed run loses at most the in-flight chunk)",
+    )
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
 
@@ -202,6 +329,16 @@ def main(argv: list[str] | None = None) -> None:
     from app.eval.dataset import load_golden
     from app.services.kb_store import get_store
     from scripts.eval_rag import _gen_provider
+
+    out_path = Path(args.out)
+    if not args.resume and out_path.exists():
+        # Fresh run: start clean so resume bookkeeping (source_key markers) is
+        # never mixed with a previous run's rows.
+        out_path.unlink()
+
+    done = completed_source_keys(out_path) if args.resume else set()
+    if done:
+        LOGGER.info("resume: %d source chunks already on disk in %s", len(done), out_path)
 
     store = get_store()
     queries = generate_queries(
@@ -213,21 +350,32 @@ def main(argv: list[str] | None = None) -> None:
         offset=args.offset,
         self_consistency=not args.no_self_consistency,
     )
-    golden_questions = frozenset(item.question for item in load_golden(GOLDEN_PUBLIC))
-    pairs = build_pairs(
-        queries, as_retrieve(make_mvp_retriever(store)), golden_questions, k=args.candidates
+    pending = filter_done_queries(queries, done)
+    LOGGER.info(
+        "%d queries generated, %d pending after resume-skip (%d source chunks done)",
+        len(queries),
+        len(pending),
+        len(done),
     )
-    if not pairs:
+
+    golden_questions = frozenset(item.question for item in load_golden(GOLDEN_PUBLIC))
+    retrieve = as_retrieve(make_mvp_retriever(store))
+
+    def _score(chunk_pairs: Sequence[Pair]) -> list[float]:
+        return teacher_scores(chunk_pairs, model_name=args.teacher, batch_size=args.batch)
+
+    new_pairs = score_and_flush_by_chunk(
+        pending, retrieve, golden_questions, _score, out=out_path, k=args.candidates
+    )
+
+    total_pairs = count_rows(out_path)
+    if total_pairs == 0:
         raise SystemExit(
             f"No pairs generated (queries={len(queries)}). "
             "Check KB_MVP_DB_PATH and that the store is ingested."
         )
-    LOGGER.info("scoring %d pairs with teacher %s", len(pairs), args.teacher)
-    scores = teacher_scores(pairs, model_name=args.teacher, batch_size=args.batch)
-    write_pairs(
-        Path(args.out),
-        pairs,
-        scores,
+    write_meta(
+        out_path,
         meta={
             "teacher": args.teacher,
             "rounds": args.rounds,
@@ -235,12 +383,16 @@ def main(argv: list[str] | None = None) -> None:
             "stride": args.stride,
             "offset": args.offset,
             "self_consistency": not args.no_self_consistency,
-            "n_queries": len(queries),
-            "n_pairs": len(pairs),
+            "resume": args.resume,
+            "n_source_chunks_done": len(completed_source_keys(out_path)),
+            "n_pairs": total_pairs,
             "golden_excluded": str(GOLDEN_PUBLIC),
         },
     )
-    print(f"Wrote {len(pairs)} pairs ({len(queries)} queries) to {args.out}")
+    print(
+        f"Wrote {new_pairs} new pairs this run; {total_pairs} pairs total "
+        f"({len(pending)} queries processed) to {args.out}"
+    )
 
 
 if __name__ == "__main__":
