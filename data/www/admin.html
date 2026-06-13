@@ -422,13 +422,25 @@
     el.hidden = false;
   }
 
+  // Wait (bounded) for the i18n dict (_loader.js loads it asynchronously,
+  // and it's a <script src> below this one) so reason text is translated,
+  // not the raw server detail.
+  function renderHealthDegradationWhenReady(retrieval){
+    var tries = 0;
+    (function attempt(){
+      if (window._kbDict || tries >= 30) { renderHealthDegradation(retrieval); return; }
+      tries++;
+      setTimeout(attempt, 50);
+    })();
+  }
+
   // Fetch health on page load — public endpoint, no token needed.
   // Failures are silently swallowed so a network error never breaks the page.
   fetch('/api/kb/health').then(function(res){
     if(!res.ok) return;
     return res.json();
   }).then(function(data){
-    if(data && data.retrieval) renderHealthDegradation(data.retrieval);
+    if(data && data.retrieval) renderHealthDegradationWhenReady(data.retrieval);
   }).catch(function(){});
 
   async function tryLoadDocuments(force){
