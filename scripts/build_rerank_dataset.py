@@ -148,6 +148,21 @@ def filter_done_queries(
     return [(q, src) for q, src in queries if src not in done_source_keys]
 
 
+def pending_chunks(
+    chunks: Sequence[tuple[int, str]],
+    key_map: dict[int, str],
+    done_source_keys: set[str],
+) -> list[tuple[int, str]]:
+    """Drop chunks already represented on disk *before* the LLM generates for them.
+
+    Query generation (~1.5 min/chunk on the local GGUF) dominates wall time, so
+    resume must skip done chunks here, not post-generation in ``filter_done_queries``.
+    A chunk whose id has no key (``key_map`` miss) is kept — we cannot prove it is
+    done, and generation drops it later as an unknown chunk.
+    """
+    return [(cid, text) for cid, text in chunks if key_map.get(cid) not in done_source_keys]
+
+
 def count_rows(path: Path) -> int:
     """Count non-blank JSONL rows in ``path`` (0 if absent)."""
     if not path.exists():
@@ -198,6 +213,7 @@ def generate_queries(
     stride: int = 1,
     offset: int = 0,
     self_consistency: bool = True,
+    done_source_keys: set[str] | None = None,
 ) -> list[tuple[str, str]]:
     """Synthetic (query, source_chunk_key) via the W1 generator. LLM-slow."""
     from app.eval.adapter import build_global_id_key_map
@@ -208,6 +224,15 @@ def generate_queries(
     chunks = select_chunks(
         list(sq.iter_chunks(store)), stride=stride, offset=offset, limit=limit_chunks
     )
+    if done_source_keys:
+        before = len(chunks)
+        chunks = pending_chunks(chunks, key_map, done_source_keys)
+        LOGGER.info(
+            "resume: skipping %d/%d source chunks before generation (%d to generate)",
+            before - len(chunks),
+            before,
+            len(chunks),
+        )
     queries: list[tuple[str, str]] = []
     dropped = 0
     for round_no in range(rounds):
@@ -349,6 +374,7 @@ def main(argv: list[str] | None = None) -> None:
         stride=args.stride,
         offset=args.offset,
         self_consistency=not args.no_self_consistency,
+        done_source_keys=done,
     )
     pending = filter_done_queries(queries, done)
     LOGGER.info(

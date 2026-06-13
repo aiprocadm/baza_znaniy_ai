@@ -15,6 +15,7 @@ from scripts.build_rerank_dataset import (
     filter_done_queries,
     group_by_source,
     normalize_question,
+    pending_chunks,
     score_and_flush_by_chunk,
     select_chunks,
     write_pairs,
@@ -177,6 +178,26 @@ def test_completed_source_keys_ignores_legacy_rows_without_source_key(tmp_path):
 def test_filter_done_queries_drops_completed_sources():
     queries = [("q1", "s.md:0"), ("q2", "s.md:1"), ("q3", "s.md:0")]
     assert filter_done_queries(queries, {"s.md:0"}) == [("q2", "s.md:1")]
+
+
+def test_pending_chunks_skips_done_chunks_before_generation():
+    # Resume's expensive saving: a chunk whose source key is already on disk is
+    # dropped BEFORE the LLM is invoked for it, not after (filter_done_queries).
+    chunks = [(0, "t0"), (1, "t1"), (2, "t2")]
+    key_map = {0: "a.md:0", 1: "a.md:1", 2: "a.md:2"}
+    assert pending_chunks(chunks, key_map, {"a.md:1"}) == [(0, "t0"), (2, "t2")]
+
+
+def test_pending_chunks_keeps_chunk_with_unknown_key():
+    # key_map miss -> can't prove it's done, so keep it (generation drops it later).
+    chunks = [(0, "t0"), (9, "t9")]
+    assert pending_chunks(chunks, {0: "a.md:0"}, {"a.md:0"}) == [(9, "t9")]
+
+
+def test_pending_chunks_empty_done_is_passthrough():
+    chunks = [(0, "t0"), (1, "t1")]
+    key_map = {0: "a.md:0", 1: "a.md:1"}
+    assert pending_chunks(chunks, key_map, set()) == chunks
 
 
 def test_count_rows_counts_nonblank(tmp_path):
