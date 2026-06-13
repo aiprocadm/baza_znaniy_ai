@@ -407,14 +407,15 @@
       while(el.firstChild) el.removeChild(el.firstChild);
       return;
     }
+    // severity matches the backend RetrievalSeverity enum value ("critical"/"warning").
     el.className = 'degraded-banner ' + (retrieval.severity === 'critical' ? 'critical' : 'warning');
     while(el.firstChild) el.removeChild(el.firstChild);
-    var strong = document.createElement('strong');
+    const strong = document.createElement('strong');
     strong.textContent = tr('retrieval.banner.title', 'Качество поиска снижено');
     el.appendChild(strong);
-    var ul = document.createElement('ul');
+    const ul = document.createElement('ul');
     reasons.forEach(function(r){
-      var li = document.createElement('li');
+      const li = document.createElement('li');
       li.textContent = tr('retrieval.reason.' + r.reason, r.detail || r.reason);
       ul.appendChild(li);
     });

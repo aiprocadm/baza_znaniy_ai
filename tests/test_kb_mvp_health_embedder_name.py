@@ -4,8 +4,8 @@ Two fields are locked:
 - ``health().embedder.name == "hash"`` — used by the legacy JS embedder-warning
   banner to detect the hashing backend.
 - ``health().retrieval.degraded == True`` and a reason entry with
-  ``reason == "hashing_embedder"`` — used by the new retrieval-degradation
-  banner introduced in A3 so the admin console can surface the issue
+  ``reason == "hashing_embedder"`` — used by the admin-console
+  retrieval-degradation banner so it can surface the issue
   independently of per-query context.
 """
 from __future__ import annotations
