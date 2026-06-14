@@ -40,3 +40,10 @@ def test_extract_articles_end_to_end_strips_tags_and_splits():
     assert "равенстве" in arts[0].text
     assert "<p>" not in arts[0].text and "<" not in arts[1].text  # no tags survive
     assert all(a.date == "1994-11-30" for a in arts)
+
+
+def test_normalize_collapses_non_breaking_spaces():
+    # Real HTML/legal text is littered with U+00A0; it must collapse like a space.
+    out = normalize_whitespace("Статья  1 текст")
+    assert " " not in out
+    assert out == "Статья 1 текст"

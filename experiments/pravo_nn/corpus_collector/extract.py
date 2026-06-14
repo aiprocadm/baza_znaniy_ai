@@ -12,7 +12,7 @@ from dataclasses import dataclass
 
 _ARTICLE_RE = re.compile(r"(Статья\s+\d+(?:\.\d+)?[^\n]*)")
 _PAGE_NUM_RE = re.compile(r"^\d+$")
-_WS_RE = re.compile(r"[ \t ]+")
+_WS_RE = re.compile(r"[ \t ]+")
 _TAG_RE = re.compile(r"<[^>]+>")
 _ENTITIES = {"&nbsp;": " ", "&amp;": "&", "&lt;": "<", "&gt;": ">", "&quot;": '"'}
 
