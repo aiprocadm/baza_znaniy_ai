@@ -62,6 +62,10 @@ class _SimpleResponse:
 class TestClient:
     """Very small subset of ``fastapi.testclient.TestClient`` used in tests."""
 
+    # Mirror starlette's TestClient: stop pytest from collecting this helper as
+    # a test class (its name starts with "Test" but it has an __init__).
+    __test__ = False
+
     def __init__(self, app: "FastAPI") -> None:
         self.app = app
         for handler in self.app._event_handlers.get("startup", []):  # type: ignore[attr-defined]

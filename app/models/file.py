@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import threading
 from datetime import datetime
 from functools import lru_cache
 from types import SimpleNamespace
@@ -819,6 +820,67 @@ def _create_schema_if_possible(engine: Engine, metadata: Any | None) -> MetaData
     return meta
 
 
+def _dispose_async_engine(engine: Any) -> None:
+    """Synchronously dispose a freshly-created async SQLite engine.
+
+    The async engine is created only to release any handle on the SQLite file
+    before the synchronous engine opens it (see ``get_engine``). Disposal must
+    therefore actually run and its coroutine must always be awaited, otherwise
+    a ``coroutine 'AsyncEngine.dispose' was never awaited`` warning leaks.
+
+    A new event loop cannot be driven inside a thread that already runs one, so
+    when called from within a running loop (e.g. during ASGI request handling)
+    the dispose coroutine is run to completion in a dedicated worker thread.
+    """
+
+    disposer = getattr(engine, "dispose", None)
+    if disposer is None:
+        return
+
+    try:
+        result = disposer()
+    except TypeError:
+        return
+    if not asyncio.iscoroutine(result):
+        # Synchronous dispose already completed (e.g. stubbed engines).
+        return
+
+    try:
+        running_loop = asyncio.get_running_loop()
+    except RuntimeError:
+        running_loop = None
+
+    if running_loop is not None and running_loop.is_running():
+        error: list[BaseException] = []
+
+        def _run_in_thread() -> None:
+            try:
+                asyncio.run(result)
+            except BaseException as exc:  # noqa: BLE001 - reported below
+                error.append(exc)
+
+        worker = threading.Thread(
+            target=_run_in_thread,
+            name="dispose-async-sqlite-engine",
+        )
+        worker.start()
+        worker.join()
+        if error:
+            logger.debug(
+                "Failed to dispose async SQLite engine in worker thread",
+                exc_info=error[0],
+            )
+        return
+
+    try:
+        asyncio.run(result)
+    except Exception:
+        logger.debug(
+            "Failed to dispose async SQLite engine",
+            exc_info=True,
+        )
+
+
 @lru_cache(maxsize=1)
 def get_engine(url: Optional[str] = None, *, create_schema: bool = True) -> Engine:
     """Return a synchronous SQLAlchemy engine configured for SQLModel models."""
@@ -841,38 +903,6 @@ def get_engine(url: Optional[str] = None, *, create_schema: bool = True) -> Engi
 
     if driver_name.endswith("+aiosqlite"):
         engine_url = _sqlite_aiosqlite_to_sync_url(db_url_str)
-
-        def _dispose_async_engine(engine: Any) -> None:
-            disposer = getattr(engine, "dispose", None)
-            if disposer is None:
-                return
-
-            try:
-                running_loop = asyncio.get_running_loop()
-            except RuntimeError:
-                running_loop = None
-
-            if running_loop and running_loop.is_running():
-                loop = asyncio.new_event_loop()
-                try:
-                    loop.run_until_complete(disposer())
-                finally:
-                    loop.close()
-                return
-
-            try:
-                result = disposer()
-            except TypeError:
-                return
-            if not asyncio.iscoroutine(result):
-                return
-            try:
-                asyncio.run(result)
-            except Exception:
-                logger.debug(
-                    "Failed to dispose async SQLite engine",
-                    exc_info=True,
-                )
 
         try:
             async_engine = create_async_engine(db_url, echo=False)

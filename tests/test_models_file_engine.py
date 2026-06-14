@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import importlib
 import sys
 from contextlib import contextmanager
@@ -213,6 +214,54 @@ def test_ensure_sync_engine_preserves_real_methods(tmp_path: Path) -> None:
     assert getattr(guarded.dispose, "__self__", None) is engine
     assert _connect_and_scalar(guarded) in {1, "SELECT 1"}
     guarded.dispose()
+
+
+class _FakeAsyncEngine:
+    """Engine stub whose ``dispose`` returns a coroutine, like ``AsyncEngine``."""
+
+    def __init__(self) -> None:
+        self.awaited = False
+
+    async def dispose(self) -> None:
+        self.awaited = True
+
+
+def test_dispose_async_engine_awaits_without_running_loop() -> None:
+    """With no running loop the dispose coroutine is awaited via ``asyncio.run``."""
+
+    engine = _FakeAsyncEngine()
+    file_module._dispose_async_engine(engine)
+    assert engine.awaited is True
+
+
+def test_dispose_async_engine_awaits_within_running_loop() -> None:
+    """Called from inside a running loop, the dispose coroutine must still run.
+
+    Regression: the old code spun a fresh loop in the same thread, which raises
+    ``RuntimeError`` before the coroutine is awaited, leaking it and emitting a
+    ``coroutine 'AsyncEngine.dispose' was never awaited`` warning.
+    """
+
+    engine = _FakeAsyncEngine()
+
+    async def _drive() -> None:
+        file_module._dispose_async_engine(engine)
+
+    asyncio.run(_drive())
+    assert engine.awaited is True
+
+
+def test_dispose_async_engine_handles_sync_dispose() -> None:
+    """A synchronous ``dispose`` is invoked exactly once and not awaited."""
+
+    calls = {"n": 0}
+
+    class _SyncEngine:
+        def dispose(self) -> None:
+            calls["n"] += 1
+
+    file_module._dispose_async_engine(_SyncEngine())
+    assert calls["n"] == 1
 
 
 def test_ensure_sync_engine_wraps_on_attribute_failure(tmp_path: Path) -> None:
