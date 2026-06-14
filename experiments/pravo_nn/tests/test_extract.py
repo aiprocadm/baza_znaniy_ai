@@ -47,3 +47,11 @@ def test_normalize_collapses_non_breaking_spaces():
     out = normalize_whitespace("Статья  1 текст")
     assert " " not in out
     assert out == "Статья 1 текст"
+
+
+def test_split_ignores_mid_line_article_reference():
+    # A capitalized cross-reference inside a body line must NOT start a new article.
+    text = "Статья 1\nВ силу положений Статья 124 применяется иное.\nещё текст"
+    arts = split_articles(text, code="ГК РФ", source_url="x", date="")
+    assert [a.article for a in arts] == ["Статья 1"]  # only the line-start marker splits
+    assert "Статья 124" in arts[0].text  # the in-text reference stays in the body

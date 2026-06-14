@@ -57,3 +57,15 @@ documented here; nothing touches the production tree (`app/`).
 
 The corpus, raw cache, and manifest are generated artifacts (gitignored) — rerun
 `collect` to rebuild them (cached `data/raw/` makes reruns instant).
+
+## Known limitations
+
+- **Trailing footer in the last article.** Text after the final «Статья N»
+  marker (signature block, «Президент Российской Федерации», city/date) is
+  included in the last article's `text`, since splitting is marker-based with no
+  end sentinel. One article per document carries this tail. Acceptable noise for
+  register-learning / RAG; revisit with a footer sentinel if a cleaner cut is
+  needed.
+- **Rare capitalized cross-references.** A «Статья N …» reference that happens to
+  start its own line (after whitespace normalization) can still be mis-split into
+  a fragment “article”. In-text (mid-line) references are correctly ignored.

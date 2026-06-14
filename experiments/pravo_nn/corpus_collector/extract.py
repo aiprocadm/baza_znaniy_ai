@@ -10,7 +10,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-_ARTICLE_RE = re.compile(r"(Статья\s+\d+(?:\.\d+)?[^\n]*)")
+_ARTICLE_RE = re.compile(r"(?m)^(Статья\s+\d+(?:\.\d+)?[^\n]*)")
 _PAGE_NUM_RE = re.compile(r"^\d+$")
 _WS_RE = re.compile(r"[ \t ]+")
 _TAG_RE = re.compile(r"<[^>]+>")
