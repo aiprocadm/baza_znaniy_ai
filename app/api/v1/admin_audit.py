@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from sqlmodel import Session, select
 
 from app.core.audit_db import persist_audit_event, purge_audit_log, query_audit_log
@@ -19,6 +19,8 @@ router = APIRouter(prefix="/admin", tags=["admin"])
 
 
 class AuditLogItem(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     timestamp: datetime
     event: str
@@ -29,9 +31,6 @@ class AuditLogItem(BaseModel):
     request_method: Optional[str] = None
     status_code: Optional[int] = None
     correlation_id: Optional[str] = None
-
-    class Config:
-        from_attributes = True
 
 
 class AuditLogResponse(BaseModel):
