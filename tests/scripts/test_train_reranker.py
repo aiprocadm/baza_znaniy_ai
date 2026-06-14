@@ -11,6 +11,7 @@ from scripts.train_reranker import (
     group_by_query,
     load_pairs,
     query_grouped_batches,
+    select_device,
     soft_label,
     split_by_query,
 )
@@ -52,6 +53,24 @@ def test_split_by_query_is_query_disjoint_and_deterministic():
     assert {r["query"] for r in train_a} & {r["query"] for r in val_a} == set()
     assert len(train_a) + len(val_a) == len(rows)
     assert val_a  # non-empty
+
+
+# --- device selection (CPU now, GPU later without a code edit) --------------
+
+
+def test_select_device_prefers_cuda_when_available():
+    assert select_device(cuda_available=True) == "cuda"
+
+
+def test_select_device_falls_back_to_cpu():
+    assert select_device(cuda_available=False) == "cpu"
+
+
+def test_select_device_override_wins_over_autodetect():
+    # An explicit --device wins even if CUDA is present (e.g. forcing a CPU
+    # repro on a GPU box).
+    assert select_device(cuda_available=True, override="cpu") == "cpu"
+    assert select_device(cuda_available=False, override="cuda") == "cuda"
 
 
 # --- pairwise loss helpers (used only by --loss pairwise) -------------------

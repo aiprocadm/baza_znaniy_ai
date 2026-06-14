@@ -29,6 +29,20 @@ def load_pairs(path: Path) -> list[dict]:
     return rows
 
 
+def select_device(*, cuda_available: bool, override: str | None = None) -> str:
+    """Pick the torch device string: explicit ``override`` wins, else CUDA if
+    present, else CPU.
+
+    Keeps the trainer device-agnostic — the same code trains on CPU now and on
+    GPU later with no edit (just a freshly visible CUDA device). ``override``
+    lets a GPU box force a CPU repro (``--device cpu``). Pure (no torch import)
+    so it is unit-testable without the ML stack.
+    """
+    if override:
+        return override
+    return "cuda" if cuda_available else "cpu"
+
+
 def soft_label(score: float) -> float:
     """Teacher scores are sigmoid-activated probabilities; tolerate raw logits."""
     if 0.0 <= score <= 1.0:
@@ -103,6 +117,42 @@ def query_grouped_batches(rows: list[dict], *, seed: int, min_pairs: int = 1) ->
     return groups
 
 
+def _autocast(torch, *, device: str, use_amp: bool):
+    """Context manager for the forward pass: bf16 autocast on GPU, no-op on CPU.
+
+    bf16 (not fp16) so no GradScaler is needed — bf16's dynamic range matches
+    fp32, so gradients stay stable on a 29M model. Disabled on CPU, where mixed
+    precision is finicky and the speedup is marginal: correctness over a few %.
+    """
+    return torch.autocast(
+        device_type="cuda" if use_amp else "cpu",
+        dtype=torch.bfloat16,
+        enabled=use_amp,
+    )
+
+
+def _encode_rows(rows: list[dict], tokenizer, max_length: int) -> list[dict]:
+    """Tokenize each ``(query, text)`` once, keeping the fields the pairwise path
+    groups on (``query``, ``teacher_score``).
+
+    Done up front so every epoch reuses the encoding instead of re-tokenizing
+    the whole dataset in ``collate`` on each pass — pure wasted CPU on a large
+    corpus. ``collate`` then only pads the cached token ids.
+
+    Every tensor field the tokenizer emits is retained — crucially
+    ``token_type_ids`` for the BERT-based ``rubert-tiny2`` student, which mark the
+    query vs passage segments of the cross-encoder pair. Dropping them would
+    silently feed all-zero segments and degrade ranking quality.
+    """
+    out: list[dict] = []
+    for r in rows:
+        enc = tokenizer(r["query"], r["text"], truncation=True, max_length=max_length)
+        row = {"query": r["query"], "teacher_score": r["teacher_score"]}
+        row.update({key: enc[key] for key in enc})
+        out.append(row)
+    return out
+
+
 def train(
     rows_train: list[dict],
     rows_val: list[dict],
@@ -114,6 +164,7 @@ def train(
     max_length: int,
     seed: int,
     loss: str = "bce",
+    device: str | None = None,
 ) -> dict:
     import numpy as np
     import torch
@@ -122,15 +173,21 @@ def train(
 
     torch.manual_seed(seed)
     random.seed(seed)
+    device = device or select_device(cuda_available=torch.cuda.is_available())
+    use_amp = device == "cuda"
+    print(f"training on device={device} (autocast={'bf16' if use_amp else 'off'})")
+
     tokenizer = AutoTokenizer.from_pretrained(BASE_MODEL)
     model = AutoModelForSequenceClassification.from_pretrained(BASE_MODEL, num_labels=1)
+    model.to(device)
+
+    enc_train = _encode_rows(rows_train, tokenizer, max_length)
+    enc_val = _encode_rows(rows_val, tokenizer, max_length)
 
     def collate(batch: list[dict]):
-        enc = tokenizer(
-            [b["query"] for b in batch],
-            [b["text"] for b in batch],
-            truncation=True,
-            max_length=max_length,
+        feature_keys = [k for k in batch[0] if k not in ("query", "teacher_score")]
+        enc = tokenizer.pad(
+            {key: [b[key] for b in batch] for key in feature_keys},
             padding=True,
             return_tensors="pt",
         )
@@ -143,8 +200,10 @@ def train(
         _train_pairwise(
             model,
             collate,
-            rows_train,
+            enc_train,
             torch=torch,
+            device=device,
+            use_amp=use_amp,
             epochs=epochs,
             lr=lr,
             seed=seed,
@@ -153,7 +212,7 @@ def train(
         generator = torch.Generator()
         generator.manual_seed(seed)
         loader = DataLoader(
-            rows_train, batch_size=batch_size, shuffle=True, collate_fn=collate, generator=generator
+            enc_train, batch_size=batch_size, shuffle=True, collate_fn=collate, generator=generator
         )
         optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
         loss_fn = torch.nn.BCEWithLogitsLoss()
@@ -161,26 +220,31 @@ def train(
         for epoch in range(epochs):
             total = 0.0
             for step, batch in enumerate(loader):
-                labels = batch.pop("labels")
+                labels = batch.pop("labels").to(device)
+                batch = {k: v.to(device) for k, v in batch.items()}
                 optimizer.zero_grad()
-                logits = model(**batch).logits.squeeze(-1)
-                loss_val = loss_fn(logits, labels)
+                with _autocast(torch, device=device, use_amp=use_amp):
+                    logits = model(**batch).logits.squeeze(-1)
+                    loss_val = loss_fn(logits, labels)
                 loss_val.backward()
                 optimizer.step()
-                total += float(loss_val)
+                step_loss = float(loss_val.detach())
+                total += step_loss
                 if step % 50 == 0:
-                    print(f"epoch {epoch} step {step}/{len(loader)} loss {float(loss_val):.4f}")
+                    print(f"epoch {epoch} step {step}/{len(loader)} loss {step_loss:.4f}")
             print(f"epoch {epoch} mean loss {total / max(1, len(loader)):.4f}")
 
     model.eval()
-    loader_val = DataLoader(rows_val, batch_size=batch_size, shuffle=False, collate_fn=collate)
+    loader_val = DataLoader(enc_val, batch_size=batch_size, shuffle=False, collate_fn=collate)
     preds: list[float] = []
     gold: list[float] = []
     with torch.no_grad():
         for batch in loader_val:
             labels = batch.pop("labels")
-            logits = model(**batch).logits.squeeze(-1)
-            preds.extend(torch.sigmoid(logits).tolist())
+            batch = {k: v.to(device) for k, v in batch.items()}
+            with _autocast(torch, device=device, use_amp=use_amp):
+                logits = model(**batch).logits.squeeze(-1)
+            preds.extend(torch.sigmoid(logits.float()).tolist())
             gold.extend(labels.tolist())
     pearson = float(np.corrcoef(preds, gold)[0, 1]) if len(preds) > 1 else float("nan")
     if math.isnan(pearson):
@@ -189,10 +253,12 @@ def train(
     out_dir.mkdir(parents=True, exist_ok=True)
     model.save_pretrained(out_dir)
     tokenizer.save_pretrained(out_dir)
-    return {"val_pairs": len(preds), "val_pearson_vs_teacher": pearson}
+    return {"val_pairs": len(preds), "val_pearson_vs_teacher": pearson, "device": device}
 
 
-def _train_pairwise(model, collate, rows_train, *, torch, epochs, lr, seed) -> None:
+def _train_pairwise(
+    model, collate, rows_train, *, torch, device, use_amp, epochs, lr, seed
+) -> None:
     """RankNet-style pairwise training loop (one query == one batch).
 
     Not unit-tested (needs torch); the pure pairing logic in ``enumerate_pairs`` /
@@ -212,12 +278,14 @@ def _train_pairwise(model, collate, rows_train, *, torch, epochs, lr, seed) -> N
                 continue
             enc = collate(group)
             enc.pop("labels")
+            enc = {k: v.to(device) for k, v in enc.items()}
             optimizer.zero_grad()
-            logits = model(**enc).logits.squeeze(-1)
-            i_idx = torch.tensor([p[0] for p in pairs], dtype=torch.long)
-            j_idx = torch.tensor([p[1] for p in pairs], dtype=torch.long)
-            diff = logits[i_idx] - logits[j_idx]
-            loss_val = torch.nn.functional.softplus(-diff).mean()
+            with _autocast(torch, device=device, use_amp=use_amp):
+                logits = model(**enc).logits.squeeze(-1)
+                i_idx = torch.tensor([p[0] for p in pairs], dtype=torch.long, device=device)
+                j_idx = torch.tensor([p[1] for p in pairs], dtype=torch.long, device=device)
+                diff = logits[i_idx] - logits[j_idx]
+                loss_val = torch.nn.functional.softplus(-diff).mean()
             loss_val.backward()
             optimizer.step()
             step_loss = float(loss_val.detach())
@@ -241,6 +309,12 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--max-length", type=int, default=384)
     parser.add_argument("--val-fraction", type=float, default=0.1)
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument(
+        "--device",
+        default=None,
+        help="torch device (default: autodetect — cuda if available, else cpu). "
+        "Pass 'cpu' to force a CPU repro on a GPU box.",
+    )
     parser.add_argument(
         "--loss",
         choices=("bce", "pairwise"),
@@ -268,6 +342,7 @@ def main(argv: list[str] | None = None) -> None:
         max_length=args.max_length,
         seed=args.seed,
         loss=args.loss,
+        device=args.device,
     )
     meta = {
         "base_model": BASE_MODEL,

@@ -139,6 +139,37 @@ def _env_flag(name: str, default: bool) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def resolve_cpu_safe_precision(
+    *, cuda_available: bool, use_qlora: bool, use_fp16: bool, use_bf16: bool
+) -> tuple[bool, bool, bool, list[str]]:
+    """Downgrade GPU-only precision flags when no CUDA device is present.
+
+    The CLI defaults (QLoRA + fp16) target a GPU: bitsandbytes 4-bit quantisation
+    is CUDA-only, and HF ``Trainer`` fp16 mixed precision requires a GPU — so on a
+    CPU-only box the run crashes on startup. This auto-degrades to full-precision
+    LoRA on CPU (with a warning) so "train on CPU now, GPU later" works without a
+    flag dance. **GPU behaviour is unchanged** — when ``cuda_available`` is True
+    the flags pass through verbatim. Pure (no torch import) so it is unit-testable
+    without the ML stack.
+
+    Returns the (possibly adjusted) ``(use_qlora, use_fp16, use_bf16)`` plus a list
+    of human-readable warning strings (empty when nothing was changed).
+    """
+    if cuda_available:
+        return use_qlora, use_fp16, use_bf16, []
+    warnings: list[str] = []
+    if use_qlora:
+        use_qlora = False
+        warnings.append(
+            "QLoRA disabled: bitsandbytes 4-bit requires CUDA — "
+            "running full-precision LoRA on CPU."
+        )
+    if use_fp16:
+        use_fp16 = False
+        warnings.append("fp16 disabled: mixed-precision fp16 requires a GPU — using fp32 on CPU.")
+    return use_qlora, use_fp16, use_bf16, warnings
+
+
 def _load_config(args: argparse.Namespace) -> TrainingConfig:
     target_modules = [
         item.strip() for item in args.target_modules.split(",") if item.strip()
@@ -151,6 +182,18 @@ def _load_config(args: argparse.Namespace) -> TrainingConfig:
         raise ValueError("LoRA dropout must be within [0, 1)")
     if args.max_seq_len <= 0:
         raise ValueError("Maximum sequence length must be positive")
+    try:
+        cuda_available = torch.cuda.is_available()
+    except Exception:  # pragma: no cover - stubbed torch in unit tests
+        cuda_available = False
+    use_qlora, use_fp16, use_bf16, precision_warnings = resolve_cpu_safe_precision(
+        cuda_available=cuda_available,
+        use_qlora=bool(args.use_qlora),
+        use_fp16=bool(args.fp16),
+        use_bf16=bool(args.bf16),
+    )
+    for message in precision_warnings:
+        LOGGER.warning("%s", message)
     return TrainingConfig(
         base_model=args.base_model,
         train_path=args.train,
@@ -165,9 +208,9 @@ def _load_config(args: argparse.Namespace) -> TrainingConfig:
         lora_alpha=args.lora_alpha,
         lora_dropout=args.lora_dropout,
         target_modules=target_modules,
-        use_qlora=bool(args.use_qlora),
-        use_fp16=bool(args.fp16),
-        use_bf16=bool(args.bf16),
+        use_qlora=use_qlora,
+        use_fp16=use_fp16,
+        use_bf16=use_bf16,
         seed=args.seed,
         logging_steps=max(1, int(args.logging_steps)),
         prompt_mode=args.prompt_mode,
