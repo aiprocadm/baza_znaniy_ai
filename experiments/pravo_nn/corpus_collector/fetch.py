@@ -18,9 +18,9 @@ class FetchError(Exception):
 
 
 def url_for(spec: CodeSpec, *, source_base: str) -> str:
-    """Map a code to its URL at the chosen source. ADAPT to the spike outcome
-    (this default assumes `<base>/<slug>`)."""
-    return f"{source_base.rstrip('/')}/{spec.slug}"
+    """Map a code to its ИПС document URL using the nd registry id."""
+    base = source_base if source_base.endswith("/") else source_base + "/"
+    return f"{base}?doc_itself=&nd={spec.nd}&page=1&rdk=0"
 
 
 def fetch_raw(
@@ -28,6 +28,7 @@ def fetch_raw(
     *,
     source_base: str,
     cache_dir: Path,
+    encoding: str = "utf-8",
     opener: Callable = urllib.request.urlopen,
     retries: int = 3,
     backoff: float = 2.0,
@@ -41,7 +42,7 @@ def fetch_raw(
     for attempt in range(retries):
         try:
             with opener(url) as resp:
-                data = resp.read().decode("utf-8", errors="replace")
+                data = resp.read().decode(encoding, errors="replace")
             cache.parent.mkdir(parents=True, exist_ok=True)
             cache.write_text(data, encoding="utf-8")
             return data

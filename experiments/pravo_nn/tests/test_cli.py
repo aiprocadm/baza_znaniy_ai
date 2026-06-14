@@ -5,7 +5,7 @@ from experiments.pravo_nn.corpus_collector.config import CodeSpec
 
 
 def test_collect_runs_full_pipeline_offline(tmp_path, monkeypatch):
-    codes = (CodeSpec("ГК РФ", "gk-rf"), CodeSpec("УК РФ", "uk-rf"))
+    codes = (CodeSpec("ГК РФ", "gk-rf", "1"), CodeSpec("УК РФ", "uk-rf", "2"))
     raw_by_slug = {
         "gk-rf": "Статья 1\n" + "г" * 600 + "\nСтатья 2\nещё",
         "uk-rf": "Статья 1\n" + "у" * 600,

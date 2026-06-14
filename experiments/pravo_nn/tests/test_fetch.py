@@ -5,7 +5,7 @@ import pytest
 from experiments.pravo_nn.corpus_collector.config import CodeSpec
 from experiments.pravo_nn.corpus_collector.fetch import FetchError, fetch_raw
 
-SPEC = CodeSpec("ГК РФ", "gk-rf")
+SPEC = CodeSpec("ГК РФ", "gk-rf", "102033239")
 
 
 class _Resp:
@@ -61,3 +61,22 @@ def test_fetch_retries_then_raises(tmp_path):
             sleep=lambda _s: None,  # no real waiting in tests
         )
     assert len(attempts) == 3  # all retries exhausted
+
+
+def test_url_for_builds_ips_document_url():
+    from experiments.pravo_nn.corpus_collector.fetch import url_for
+
+    url = url_for(SPEC, source_base="http://pravo.gov.ru/proxy/ips/")
+    assert url == "http://pravo.gov.ru/proxy/ips/?doc_itself=&nd=102033239&page=1&rdk=0"
+
+
+def test_fetch_decodes_with_given_encoding(tmp_path):
+    body = "Статья 1 текст".encode("cp1251")
+
+    def opener(url):
+        return _Resp(body)
+
+    out = fetch_raw(
+        SPEC, source_base="http://x", cache_dir=tmp_path, opener=opener, encoding="cp1251"
+    )
+    assert "Статья 1 текст" in out  # correct cp1251 decode, not mojibake

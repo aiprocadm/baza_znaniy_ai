@@ -14,10 +14,11 @@ from dataclasses import dataclass
 class CodeSpec:
     name: str  # e.g. "ГК РФ"
     slug: str  # e.g. "gk-rf"
+    nd: str = ""  # ИПС registry id; "" means not yet harvested -> skipped by collect
 
 
 CODES: tuple[CodeSpec, ...] = (
-    CodeSpec("ГК РФ", "gk-rf"),  # Гражданский
+    CodeSpec("ГК РФ ч.1", "gk-rf-1", "102033239"),  # Гражданский, часть 1 (verified)
     CodeSpec("УК РФ", "uk-rf"),  # Уголовный
     CodeSpec("НК РФ", "nk-rf"),  # Налоговый
     CodeSpec("ТК РФ", "tk-rf"),  # Трудовой
@@ -38,6 +39,4 @@ CODES: tuple[CodeSpec, ...] = (
     CodeSpec("КТМ РФ", "ktm-rf"),  # Торгового мореплавания
 )
 
-# The base of the chosen text source. Empty until the Task 3 spike decides it;
-# Task 8 (fetch) sets it to the spike's committed value.
-SOURCE_BASE: str = ""
+SOURCE_BASE: str = "http://pravo.gov.ru/proxy/ips/"

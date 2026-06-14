@@ -27,14 +27,26 @@ def collect(
     source_label: str,
     data_dir: Path,
     collected_at: str,
+    encoding: str = "utf-8",
+    opener=None,
 ) -> None:
     raw_dir = data_dir / "raw"
     corpus_dir = data_dir / "corpus"
     all_articles: list[extract.Article] = []
     per_code: dict[str, list[extract.Article]] = {}
     for spec in codes:
+        if not spec.nd:
+            LOGGER.warning("no nd id for %s yet — skipping", spec.name)
+            continue
+        fetch_kwargs: dict = {
+            "source_base": source_base,
+            "cache_dir": raw_dir,
+            "encoding": encoding,
+        }
+        if opener is not None:
+            fetch_kwargs["opener"] = opener
         try:
-            raw = fetch.fetch_raw(spec, source_base=source_base, cache_dir=raw_dir)
+            raw = fetch.fetch_raw(spec, **fetch_kwargs)
         except FetchError as exc:
             LOGGER.error("skipping %s: %s", spec.name, exc)
             continue
@@ -74,6 +86,7 @@ def main(argv: list[str] | None = None) -> int:
             source_label=config.SOURCE_BASE,
             data_dir=_DEFAULT_DATA,
             collected_at=date.today().isoformat(),
+            encoding="cp1251",
         )
     return 0
 
