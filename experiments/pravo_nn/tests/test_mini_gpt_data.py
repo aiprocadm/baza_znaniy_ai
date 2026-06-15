@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 import torch
 
 from experiments.pravo_nn.mini_gpt.data import encode_corpus, load_bin, get_batch
@@ -37,3 +38,15 @@ def test_get_batch_shapes_and_shift(tmp_path):
         generator=torch.Generator().manual_seed(0),
     )
     assert torch.equal(x1[:, 1:], y1[:, :-1])
+
+
+class _OverflowTok:
+    """Fake tokenizer whose ids exceed uint16 range — triggers the guard."""
+
+    def encode(self, text):  # noqa: D401 - test double
+        return [70000]
+
+
+def test_encode_corpus_rejects_ids_above_uint16(tmp_path):
+    with pytest.raises(ValueError):
+        encode_corpus("x", _OverflowTok(), tmp_path / "train.bin")

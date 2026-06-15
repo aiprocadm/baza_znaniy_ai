@@ -14,6 +14,10 @@ from experiments.pravo_nn.mini_gpt.tokenizer import BPETokenizer
 
 def encode_corpus(text: str, tokenizer: BPETokenizer, out_path) -> int:
     ids = tokenizer.encode(text)
+    # uint16 silently wraps ids >= 65536; guard so an oversized vocab fails loud
+    # rather than corrupting the training bin invisibly.
+    if ids and max(ids) > 65535:
+        raise ValueError(f"token id {max(ids)} exceeds uint16; vocab too large for .bin")
     arr = np.array(ids, dtype=np.uint16)
     out = Path(out_path)
     out.parent.mkdir(parents=True, exist_ok=True)
