@@ -102,3 +102,47 @@ test writes one. Run the suite with `KB_TEST_LOCK_FIXTURES=1` to instead lock
 them read-only and get a `PermissionError` traceback naming the offending test.
 
 > **2026-06-10:** golden_curated retired to the private half (`var/data/eval/private/`); the committed guard is now `data/eval/golden_public.jsonl` over the synthetic public corpus (`data/eval/corpus_public/`). See plan `2026-06-10-hybrid-eval-corpus-pr2-public-corpus.md`.
+
+## Offline frozen-embeddings gate (PR3, 2026-06-15)
+
+`tests/test_eval_frozen.py` re-ranks the **committed** bge-m3 vectors
+(`data/eval/corpus_public/frozen_bge-m3.npz` + `.keys.json`) with pure numpy and
+asserts the answerable `golden_public` items still clear the floors in
+`data/eval/ci_thresholds.json`. It downloads **no model** — a deterministic CI
+gate (`eval-gate` job, numpy-only). Run it locally:
+
+```powershell
+py -3.13 -m pytest tests/test_eval_frozen.py -m "not integration" -q
+```
+
+Measured at freeze (33 answerable items): hit@1 0.697, hit@5 0.909, mrr@5 0.803,
+recall@5 0.879. Floors sit ~0.05 below. **When you re-freeze** (new corpus /
+golden / embedder), re-measure and raise the floors: the `_measured_*` block in
+`ci_thresholds.json` records the source numbers. The `@pytest.mark.integration`
+staleness test re-embeds one frozen query with the live bge-m3 and fails if it
+drifts — run it (CI / GPU) with `KB_EMBEDDINGS_BACKEND=st` to validate a freeze.
+
+## Public vs private corpus switch (PR4 scaffolding, 2026-06-15)
+
+`app/eval/corpus_select.resolve_corpus` (and `eval_rag run --corpus`) pick the
+eval half. Default is **public** (committed). The **private** half is never
+committed — point it at a local store + golden via env:
+
+```powershell
+$env:KB_EVAL_PRIVATE_DB="var/data/kb_private.sqlite"
+$env:KB_EVAL_PRIVATE_GOLDEN="var/data/eval/private/golden.jsonl"
+py -3.13 -m scripts.eval_rag run --corpus private --judge --out var/data/eval/baseline.json
+```
+
+A `private` request with those vars unset fails loudly (it will not silently
+score the public corpus). `tests/test_eval_private.py` skips loudly until the
+private corpus exists.
+
+**Fully-offline path** (no API keys, no downloads beyond the one-time models):
+`KB_EMBEDDINGS_BACKEND=st` + the bundled GGUF (keyless stack default).
+
+> **Deferred (not in this PR):** the actual **gate B (e5)** and **gate D (top_k)**
+> deltas are *measurements* on a real private corpus — they need that corpus to
+> exist and meaningful CPU/GPU time, and fabricating the numbers would violate the
+> no-placeholder rule. The wiring above is ready; record the deltas here (the
+> gate-C discipline above) once a private corpus is available.
