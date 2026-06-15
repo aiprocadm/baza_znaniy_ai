@@ -34,6 +34,10 @@ def article_slug(code: str, index: int) -> str:
     The enumeration ``index`` guarantees uniqueness even though article numbers
     repeat across codes (every code has its own «Статья 1»). Whitespace in the
     code name is collapsed so the slug is a single token.
+
+    Note: uniqueness is per-ingest pass only.  ``enumerate`` restarts at 0 on
+    a re-ingest, so calling :func:`ingest_articles` twice into the same store
+    will produce duplicate slugs and overwrite earlier documents.
     """
     base = re.sub(r"\s+", "_", code.strip())
     return f"{base}__a{index:05d}"

@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 
-from scripts.ingest_pravo import article_slug, iter_articles
+from scripts.ingest_pravo import article_slug, ingest_articles, iter_articles
 
 
 def test_article_slug_is_unique_and_collapses_whitespace():
@@ -15,17 +15,20 @@ def test_article_slug_is_unique_and_collapses_whitespace():
 def test_iter_articles_parses_jsonl(tmp_path: Path):
     p = tmp_path / "corpus.jsonl"
     p.write_text(
-        json.dumps({"code": "ГК РФ ч.1", "article": "Статья 1. X", "text": "тело"}, ensure_ascii=False)
+        json.dumps(
+            {"code": "ГК РФ ч.1", "article": "Статья 1. X", "text": "тело"},
+            ensure_ascii=False,
+        )
         + "\n\n"
-        + json.dumps({"code": "ГК РФ ч.1", "article": "Статья 2. Y", "text": "тело2"}, ensure_ascii=False)
+        + json.dumps(
+            {"code": "ГК РФ ч.1", "article": "Статья 2. Y", "text": "тело2"},
+            ensure_ascii=False,
+        )
         + "\n",
         encoding="utf-8",
     )
     arts = list(iter_articles(p))
     assert [a["article"] for a in arts] == ["Статья 1. X", "Статья 2. Y"]
-
-
-from scripts.ingest_pravo import ingest_articles
 
 
 class _FakeStore:
