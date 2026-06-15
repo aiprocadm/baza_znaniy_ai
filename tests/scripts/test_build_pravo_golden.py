@@ -1,6 +1,7 @@
 from app.eval.dataset import GoldenItem
 from scripts.build_pravo_golden import (
     build_golden_items,
+    documents_with_chunks,
     heading_to_query,
     select_heldout,
 )
@@ -33,3 +34,41 @@ def test_build_golden_items_uses_all_chunks_as_relevant_and_skips_empty():
     assert it.question == "Способы защиты"
     assert it.relevant_chunks == ("ГК_РФ_ч.1__a00012:0", "ГК_РФ_ч.1__a00012:1")
     assert it.source == "auto"
+
+
+class _FakeConn:
+    def __init__(self, rows):
+        self._rows = rows
+
+    def execute(self, _sql):
+        return self
+
+    def fetchall(self):
+        return self._rows
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+
+class _FakeStore:
+    def __init__(self, rows):
+        self._rows = rows
+
+    def _connect(self):
+        return _FakeConn(self._rows)
+
+
+def test_documents_with_chunks_groups_by_filename_in_order():
+    rows = [
+        ("fileA", "Статья 1. A", 0),
+        ("fileA", "Статья 1. A", 1),
+        ("fileB", "Статья 2. B", 0),
+    ]
+    docs = documents_with_chunks(_FakeStore(rows))
+    assert docs == [
+        ("fileA", "Статья 1. A", [0, 1]),
+        ("fileB", "Статья 2. B", [0]),
+    ]
