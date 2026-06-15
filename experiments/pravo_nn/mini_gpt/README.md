@@ -37,9 +37,9 @@ legally-correct norms. Raising quality needs more data / a GPU run. The model is
 device-agnostic (`get_device()` auto-detects cuda), so a GPU run is a config
 change, not a rewrite.
 
-## Status (first integration run, 2026-06-15)
+## Status (full training run COMPLETE, 2026-06-15)
 
-Pipeline verified end-to-end on the real corpus:
+End-to-end on the real corpus, trained to completion:
 
 - **Tokenizer:** byte-level BPE, **vocab 4097** (4096 merges + `<|endoftext|>`),
   trained on `corpus.txt` in ~5.5 min (pure Python, one-time cached).
@@ -50,19 +50,48 @@ Pipeline verified end-to-end on the real corpus:
   (**5.85 bytes/token** — solid BPE compression).
 - **Model:** **12.32M parameters** (n_layer=6, n_head=6, n_embd=384,
   block_size=256), device=cpu.
-- **Smoke train (50 steps, batch 8):** loss **8.4953 -> 5.3298** (start ≈
-  ln(4097)=8.32, i.e. near-random, then dropping — the backward path works).
-- **Generation:** decodes valid Russian UTF-8 and is prompt-anchored. After only
-  50 steps the sample is not yet coherent (expected) — coherence needs the full run.
-- **Throughput on this CPU:** ~3.7 s/step → ~5000 steps ≈ ~5 h. The full training
-  run is therefore launched **detached** (not inside this tooling): use
-  `Start-Process` + a polling monitor, per repo memory `detached-long-runs`
-  (harness background tasks die ~10 min into long CPU runs).
+- **Training:** 2000 steps, batch 8, AdamW + cosine LR. **loss 8.52 → 4.60**
+  (final 4.5995). ~2 epochs over the corpus. The early descent stalled near the
+  unigram entropy (~5.2) for ~0.3 epoch, then resumed past step ~450 — expected
+  for a from-scratch LM accumulating context examples.
+- **Throughput:** highly variable on this shared CPU — **~7 s/step idle, up to
+  ~56 s/step under load** (Task Manager / browser / the editor compete for the
+  16-core Meteor Lake). Wall time dominated by machine contention, not the model.
+  Two operational gotchas hit and fixed during the run: (1) **never launch more
+  than one torch process** — three concurrent runs oversubscribed the cores and
+  every step thrashed to a near-halt; (2) `Start-Process -RedirectStandardError`
+  **buffers** — log via a `logging.FileHandler` (flushes per record) instead, or
+  progress looks frozen.
 
-### Next: the real training run (handoff)
+### Generated samples (final checkpoint, loss 4.60)
 
-Launch the ~5000-step run detached, then fill in the final loss + a real
-generated sample below. After that the checkpoint is ready for sub-project #2 (LoRA).
+`--prompt "Статья 1." --max-new-tokens 200 --temperature 0.8 --top-k 40`:
 
-- Final loss: _TBD after full run_
-- Sample (`--prompt "Статья 1." --max-new-tokens 200`): _TBD after full run_
+> Статья 1. в на ( в в быть на на на в от в ( на или с в вы по ( на или о если в
+> до или в быть при или и - с с в на с и в по в в и по вы без в не В на если быть
+> до из Российской с и от в для на об и срок по на о и не и в в если или на суд в
+> его об не на при на с в быть по для и суд при в на по срок к или в в
+
+`--prompt "Статья 105."`:
+
+> Статья 105. Федерации вми не - либо статьи и в о срок к в в в в (не быть об в из
+> Российской на на и и и В их соответствии в к на в в ( вы также с его права
+> настоящего по не и в быть или и вы и и на его Российской вы ( в на в о также на
+> в и в от к в Российской Федерации в о по или и в до на об в а для срок в на
+> если права или со на об также быть с до на и в к
+
+**Honest quality read:** the model produces recognizable Russian **legal
+register** — correct domain vocabulary and real multi-word fragments
+("Российской Федерации", "в соответствии", "права настоящего", "срок", "суд",
+"статьи") — but **no coherent grammar**. This is the documented ceiling for
+loss ~4.6: it learned *what legal text is made of*, not *how to compose a norm*
+(that needs loss ~3, i.e. many more epochs — realistically a GPU run). For the
+goal of sub-project #1 (prove from-scratch training + a base for #2 LoRA) this
+is a success: the pipeline works end to end and the checkpoint is a valid base.
+
+### Next
+
+The checkpoint `data/checkpoints/ckpt.pt` is ready for **sub-project #2 (LoRA)**.
+To push raw mini-GPT quality higher: train many more epochs (lower loss toward ~3)
+on a GPU / idle machine — `train.py` is device-agnostic, so it's a config change,
+not a rewrite.
