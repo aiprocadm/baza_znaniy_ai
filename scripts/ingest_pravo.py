@@ -1,0 +1,86 @@
+"""Ingest the pravo corpus (one article = one document) into an MVP store for
+the reranker headroom probe (Phase 0, spec 2026-06-15).
+
+Heavy imports (the store + the ST embedder) are lazy so importing this module
+stays cheap and the pure helpers are unit-testable without ML deps.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import logging
+import re
+from pathlib import Path
+from typing import Iterator
+
+LOGGER = logging.getLogger(__name__)
+
+CORPUS = Path("experiments/pravo_nn/data/corpus/corpus.jsonl")
+
+
+def iter_articles(path: Path) -> Iterator[dict]:
+    """Yield each article record from the corpus JSONL, skipping blank lines."""
+    with Path(path).open("r", encoding="utf-8") as fh:
+        for line in fh:
+            line = line.strip()
+            if line:
+                yield json.loads(line)
+
+
+def article_slug(code: str, index: int) -> str:
+    """Stable, globally-unique document filename for chunk keys.
+
+    The enumeration ``index`` guarantees uniqueness even though article numbers
+    repeat across codes (every code has its own «Статья 1»). Whitespace in the
+    code name is collapsed so the slug is a single token.
+    """
+    base = re.sub(r"\s+", "_", code.strip())
+    return f"{base}__a{index:05d}"
+
+
+def ingest_articles(store, articles) -> tuple[int, int]:
+    """Add each article as one document. Returns (ingested, skipped).
+
+    Skips empty bodies and over-length articles (``add_document`` raises
+    ``ValueError`` for both) — a handful of skips is acceptable noise for a
+    headroom probe, but each is logged, never silent.
+    """
+    n_ok = n_skip = 0
+    for idx, art in enumerate(articles):
+        try:
+            store.add_document(
+                title=art["article"],
+                text=art["text"],
+                filename=article_slug(art["code"], idx),
+                source="pravo",
+            )
+            n_ok += 1
+        except ValueError as exc:
+            n_skip += 1
+            LOGGER.warning("skipped article %d (%s): %s", idx, art.get("article", "?"), exc)
+        if (idx + 1) % 200 == 0:
+            LOGGER.info("ingested %d articles (%d skipped) so far", n_ok, n_skip)
+    return n_ok, n_skip
+
+
+def main(argv: list[str] | None = None) -> None:
+    parser = argparse.ArgumentParser(prog="ingest_pravo")
+    parser.add_argument("--corpus", default=str(CORPUS))
+    parser.add_argument("--limit", type=int, default=0, help="ingest only the first N (smoke runs)")
+    args = parser.parse_args(argv)
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
+
+    from app.services.kb_store import get_store
+
+    articles = iter_articles(Path(args.corpus))
+    if args.limit:
+        articles = (a for i, a in enumerate(articles) if i < args.limit)
+
+    store = get_store()
+    n_ok, n_skip = ingest_articles(store, articles)
+    print(f"Ingested {n_ok} articles ({n_skip} skipped)")
+
+
+if __name__ == "__main__":
+    main()
