@@ -55,9 +55,17 @@ warnings.filterwarnings(
 # signature and the normalised qwen manifest entry seen after some local runs
 # are the fingerprints of those writers.
 REPO_ROOT = Path(__file__).resolve().parents[1]
+_EVAL = REPO_ROOT / "data" / "eval"
 _PROTECTED_FIXTURES = (
-    REPO_ROOT / "data" / "eval" / "golden_public.jsonl",
-    REPO_ROOT / "data" / "eval" / "golden_public.sig.json",
+    _EVAL / "golden_public.jsonl",
+    _EVAL / "golden_public.sig.json",
+    # Frozen-embedding gate inputs (PR3): ``build_frozen_embeddings.py`` defaults
+    # to these very paths, and the committed ``ci_thresholds.json`` is the floor
+    # the gate compares against — a stray regeneration must not silently dirty
+    # the tree or move the goalposts.
+    _EVAL / "corpus_public" / "frozen_bge-m3.npz",
+    _EVAL / "corpus_public" / "frozen_bge-m3.keys.json",
+    _EVAL / "ci_thresholds.json",
     REPO_ROOT / "models" / "model_manifest.json",
 )
 
