@@ -23,3 +23,29 @@ def test_iter_articles_parses_jsonl(tmp_path: Path):
     )
     arts = list(iter_articles(p))
     assert [a["article"] for a in arts] == ["Статья 1. X", "Статья 2. Y"]
+
+
+from scripts.ingest_pravo import ingest_articles
+
+
+class _FakeStore:
+    def __init__(self):
+        self.calls = []
+
+    def add_document(self, title, text=None, *, filename, source):
+        if not (text or "").strip():
+            raise ValueError("Text is empty")
+        self.calls.append({"title": title, "text": text, "filename": filename, "source": source})
+
+
+def test_ingest_articles_skips_empty_and_wires_slug():
+    store = _FakeStore()
+    arts = [
+        {"code": "ГК РФ ч.1", "article": "Статья 1. X", "text": "тело"},
+        {"code": "ГК РФ ч.1", "article": "Статья 2. Empty", "text": "   "},
+    ]
+    n_ok, n_skip = ingest_articles(store, arts)
+    assert (n_ok, n_skip) == (1, 1)
+    assert store.calls[0]["filename"] == "ГК_РФ_ч.1__a00000"
+    assert store.calls[0]["title"] == "Статья 1. X"
+    assert store.calls[0]["source"] == "pravo"
