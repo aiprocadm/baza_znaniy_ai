@@ -50,3 +50,25 @@ def test_save_load_round_trips(tmp_path):
     reloaded = BPETokenizer.load(tmp_path)
     assert reloaded.encode(SAMPLE) == tok.encode(SAMPLE)
     assert reloaded.special_tokens == tok.special_tokens
+
+
+def test_split_pattern_is_persisted_and_restored(tmp_path):
+    tok = BPETokenizer()
+    tok.train(SAMPLE, vocab_size=300)
+    assert tok.split_pattern  # populated after training
+    tok.save(tmp_path)
+    assert (tmp_path / "tokenizer_config.json").exists()
+    reloaded = BPETokenizer.load(tmp_path)
+    assert reloaded.split_pattern == tok.split_pattern
+
+
+def test_loaded_tokenizer_ignores_changed_module_constant(tmp_path, monkeypatch):
+    import experiments.pravo_nn.mini_gpt.tokenizer as tokmod
+    tok = BPETokenizer()
+    tok.train(SAMPLE, vocab_size=300)
+    tok.save(tmp_path)
+    expected = tok.encode(SAMPLE)
+    # Simulate a future edit to the module-level split constant.
+    monkeypatch.setattr(tokmod, "_SPLIT_RE", tokmod.re.compile(r"."))
+    reloaded = BPETokenizer.load(tmp_path)
+    assert reloaded.encode(SAMPLE) == expected  # uses the saved pattern, not the changed module one

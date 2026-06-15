@@ -36,6 +36,8 @@ class BPETokenizer:
         self.merges: dict[tuple[int, int], int] = {}
         self.vocab: dict[int, bytes] = {i: bytes([i]) for i in range(256)}
         self.special_tokens: dict[str, int] = {}
+        self.split_pattern: str = _SPLIT_RE.pattern
+        self._split_re: re.Pattern[str] = _SPLIT_RE
 
     def train(
         self,
@@ -47,7 +49,9 @@ class BPETokenizer:
         assert vocab_size >= 256
         num_merges = vocab_size - 256
         # Frequency-counted chunks -> each is a tuple of byte ids.
-        chunk_counts = Counter(_SPLIT_RE.findall(text))
+        self.split_pattern = _SPLIT_RE.pattern
+        self._split_re = re.compile(self.split_pattern)
+        chunk_counts = Counter(self._split_re.findall(text))
         words: dict[tuple[int, ...], int] = {}
         for chunk, cnt in chunk_counts.items():
             key = tuple(chunk.encode("utf-8"))
@@ -62,7 +66,7 @@ class BPETokenizer:
                     stats[pair] = stats.get(pair, 0) + cnt
             if not stats:
                 break
-            best = max(stats, key=lambda p: stats[p])
+            best = max(stats, key=lambda p: (stats[p], p))
             idx = 256 + i
             merges[best] = idx
             vocab[idx] = vocab[best[0]] + vocab[best[1]]
@@ -86,7 +90,7 @@ class BPETokenizer:
 
     def _encode_ordinary(self, text: str) -> list[int]:
         out: list[int] = []
-        for chunk in _SPLIT_RE.findall(text):
+        for chunk in self._split_re.findall(text):
             out.extend(self._encode_chunk(chunk))
         return out
 
@@ -125,6 +129,10 @@ class BPETokenizer:
         (out / "special_tokens.json").write_text(
             json.dumps(self.special_tokens, ensure_ascii=False), encoding="utf-8"
         )
+        (out / "tokenizer_config.json").write_text(
+            json.dumps({"split_pattern": self.split_pattern}, ensure_ascii=False),
+            encoding="utf-8",
+        )
 
     @classmethod
     def load(cls, in_dir) -> "BPETokenizer":
@@ -139,4 +147,11 @@ class BPETokenizer:
             merges[(a, b)] = 256 + rank
         tok.merges = merges
         tok.special_tokens = json.loads((src / "special_tokens.json").read_text(encoding="utf-8"))
+        cfg_path = src / "tokenizer_config.json"
+        if cfg_path.exists():
+            cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
+            tok.split_pattern = cfg["split_pattern"]
+        else:
+            tok.split_pattern = _SPLIT_RE.pattern
+        tok._split_re = re.compile(tok.split_pattern)
         return tok
