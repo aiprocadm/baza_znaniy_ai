@@ -1,0 +1,5 @@
+# Raw network responses are a rebuildable cache, not source.
+data/raw/
+# The assembled corpus + manifest are generated artifacts (tens of MB).
+data/corpus/
+data/manifest.json
