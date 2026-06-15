@@ -25,7 +25,8 @@ def test_select_heldout_takes_every_stride():
 def test_build_golden_items_uses_all_chunks_as_relevant_and_skips_empty():
     heldout = [
         ("ГК_РФ_ч.1__a00012", "Статья 12. Способы защиты", [0, 1]),
-        ("ГК_РФ_ч.1__a00099", "Статья 99.", []),
+        ("ГК_РФ_ч.1__a00099", "Статья 99.", []),  # empty query -> skipped
+        ("ГК_РФ_ч.1__a00100", "Статья 100. Есть заголовок", []),  # empty indices -> skipped
     ]
     items = build_golden_items(heldout)
     assert len(items) == 1
