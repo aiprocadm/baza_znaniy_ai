@@ -1,0 +1,24 @@
+{
+  "_comment": "Committed retrieval-quality floors for the offline frozen-embeddings CI gate (tests/test_eval_frozen.py). Measured by app.eval.retrieval_eval.evaluate over the ANSWERABLE golden_public items, ranked by the frozen bge-m3 vectors (make_frozen_retriever). Each floor sits ~0.05 below the measured value to absorb cross-platform numpy tie-flips. Re-measure and raise these only when the committed corpus/golden/frozen vectors change.",
+  "_measured_2026_06_15": {
+    "hit@1": 0.6970,
+    "hit@3": 0.9091,
+    "hit@5": 0.9091,
+    "hit@10": 0.9394,
+    "mrr@5": 0.8030,
+    "mrr@10": 0.8064,
+    "recall@5": 0.8788,
+    "recall@10": 0.9242,
+    "answerable_items": 33
+  },
+  "floors": {
+    "hit@1": 0.64,
+    "hit@3": 0.85,
+    "hit@5": 0.85,
+    "hit@10": 0.88,
+    "mrr@5": 0.75,
+    "mrr@10": 0.75,
+    "recall@5": 0.82,
+    "recall@10": 0.86
+  }
+}
