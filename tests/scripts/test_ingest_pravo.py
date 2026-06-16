@@ -52,3 +52,16 @@ def test_ingest_articles_skips_empty_and_wires_slug():
     assert store.calls[0]["filename"] == "ГК_РФ_ч.1__a00000"
     assert store.calls[0]["title"] == "Статья 1. X"
     assert store.calls[0]["source"] == "pravo"
+
+
+def test_ingest_articles_skips_existing_slugs():
+    store = _FakeStore()
+    arts = [
+        {"code": "ГК РФ ч.1", "article": "Статья 1. X", "text": "тело"},
+        {"code": "ГК РФ ч.1", "article": "Статья 2. Y", "text": "тело2"},
+    ]
+    existing = {"ГК_РФ_ч.1__a00000"}  # first article already ingested
+    n_ok, n_skip = ingest_articles(store, arts, existing_slugs=existing)
+    assert (n_ok, n_skip) == (1, 1)
+    assert len(store.calls) == 1
+    assert store.calls[0]["filename"] == "ГК_РФ_ч.1__a00001"

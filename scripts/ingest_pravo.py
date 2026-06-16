@@ -43,20 +43,26 @@ def article_slug(code: str, index: int) -> str:
     return f"{base}__a{index:05d}"
 
 
-def ingest_articles(store, articles) -> tuple[int, int]:
+def ingest_articles(store, articles, *, existing_slugs: set[str] | None = None) -> tuple[int, int]:
     """Add each article as one document. Returns (ingested, skipped).
 
-    Skips empty bodies and over-length articles (``add_document`` raises
-    ``ValueError`` for both) — a handful of skips is acceptable noise for a
-    headroom probe, but each is logged, never silent.
+    Skips (a) articles whose slug is already in ``existing_slugs`` (resume — a
+    prior run already stored them) and (b) empty/over-length bodies
+    (``add_document`` raises ``ValueError``). Every skip is counted; resume
+    skips are silent (expected), value-errors are logged.
     """
+    existing = existing_slugs or set()
     n_ok = n_skip = 0
     for idx, art in enumerate(articles):
+        slug = article_slug(art["code"], idx)
+        if slug in existing:
+            n_skip += 1
+            continue
         try:
             store.add_document(
                 title=art["article"],
                 text=art["text"],
-                filename=article_slug(art["code"], idx),
+                filename=slug,
                 source="pravo",
             )
             n_ok += 1
@@ -72,6 +78,11 @@ def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(prog="ingest_pravo")
     parser.add_argument("--corpus", default=str(CORPUS))
     parser.add_argument("--limit", type=int, default=0, help="ingest only the first N (smoke runs)")
+    parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="skip articles already in the store (re-run after a kill to continue)",
+    )
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
 
@@ -82,7 +93,16 @@ def main(argv: list[str] | None = None) -> None:
         articles = (a for i, a in enumerate(articles) if i < args.limit)
 
     store = get_store()
-    n_ok, n_skip = ingest_articles(store, articles)
+
+    existing_slugs: set[str] = set()
+    if args.resume:
+        with store._connect() as conn:  # noqa: SLF001
+            existing_slugs = {
+                row[0] for row in conn.execute("SELECT filename FROM kb_documents").fetchall()
+            }
+        LOGGER.info("resume: %d articles already in store, will skip", len(existing_slugs))
+
+    n_ok, n_skip = ingest_articles(store, articles, existing_slugs=existing_slugs)
     print(f"Ingested {n_ok} articles ({n_skip} skipped)")
 
 
