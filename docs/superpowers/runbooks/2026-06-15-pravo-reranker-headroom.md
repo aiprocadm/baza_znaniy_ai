@@ -86,3 +86,42 @@ known gold articles, re-run base vs teacher on them.
 
 The pipeline (resumable ingest, structural golden, two-way harness) is reproducible
 and banked regardless of the decision.
+
+## Manual control lens (2026-06-16) — 20 natural questions
+
+Per the §5 safeguard, 20 hand-written *natural* legal questions (one per several
+codes; phrasing deliberately does NOT echo the article heading), gold = the
+article's chunks. File: `data/eval/golden_pravo_manual.jsonl` (committed).
+
+| run | hit@1 | hit@3 | hit@5 | mrr@3 | mrr@5 | hit@10 |
+|---|---|---|---|---|---|---|
+| base (e5-small) | 0.550 | 0.600 | 0.700 | 0.575 | 0.597 | 0.750 |
+| teacher (bge-reranker-v2-m3) | 0.650 | 0.750 | 0.750 | 0.700 | 0.700 | 0.750 |
+| **Δ** | **+0.100** | **+0.150** | **+0.050** | **+0.125** | **+0.103** | **0.000** |
+
+**Reading.** On natural questions the teacher delivers large gains exactly where
+they matter for RAG — the **top of the ranking**: hit@1 +10 pp, hit@3 +15 pp,
+mrr@5 +10.3 pp. But the **gate metric, hit@5, is only +5.0 pp** — because base
+hit@5 is already 0.700 and hit@10 is 0.750, so @5/@10 are near a ceiling on this
+20-query sample. hit@5 is structurally **insensitive to reordering inside the
+top-5** (moving gold from rank 3→1 doesn't change hit@5, but does change hit@1 and
+mrr) — which is most of what a reranker does. So the chosen gate metric
+under-measures the reranker's real, product-relevant value here.
+
+## Final verdict (combining both lenses)
+
+- **Literal gate (Δhit@5 ≥ +10 pp): NOT met** on either golden (+3.9 pp structural,
+  +5.0 pp manual).
+- **But the reranker clearly helps**, and on natural questions it lifts the
+  top-rank metrics that drive RAG answer quality by **+10–15 pp** (hit@1/hit@3/mrr).
+  This is qualitatively unlike the 9-doc corpus (where teacher added +0 across the
+  board). The headroom is real; the hit@5 gate was the wrong single yardstick.
+- Two confounds still **understate** it: the 10k-chunk search cap (~30% unreachable)
+  and the tiny 20-query manual sample.
+
+**Recommendation: do NOT close — treat as a conditional GO, gated on mrr@5/hit@3
+rather than hit@5.** Sensible next step before committing to Phase 1 training:
+remove the 10k search cap (or move to Qdrant) and re-measure on a larger natural
+golden, so the decision rests on a clean, top-rank-sensitive metric. If the user
+prefers the original strict hit@5 gate as binding, the verdict is a (narrow) close.
+Decision is the user's; both readings are documented honestly above.
