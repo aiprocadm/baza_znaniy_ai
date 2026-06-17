@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
 
 from app.eval import generation_eval
@@ -22,11 +23,38 @@ from app.eval.adapter import (
     make_mvp_retriever,
     make_mvp_reranking_retriever,
 )
+from app.eval.corpus_select import resolve_corpus
 from app.eval.dataset import GoldenItem, load_golden, read_signature, save_golden, write_signature
 from app.services import synthetic_qa as sq
 from app.eval.metrics import RETRIEVAL_KS
 from app.services.kb_llm import select_provider
-from app.services.kb_store import get_store
+from app.services.kb_store import get_store, reset_default_store
+
+# The committed public golden is the default; ``_apply_corpus_selection`` only
+# repoints it when an explicit corpus half is chosen and ``--golden`` was left
+# at this default.
+_DEFAULT_GOLDEN = "data/eval/golden_public.jsonl"
+
+
+def _apply_corpus_selection(args: argparse.Namespace) -> None:
+    """Point the store + golden at the selected corpus half (public|private).
+
+    No-op unless ``--corpus`` is passed or ``KB_EVAL_CORPUS`` is set, so default
+    runs behave exactly as before. For an explicit selection the resolved store
+    path is exported via ``KB_MVP_DB_PATH`` (the store cache is reset so it takes
+    effect) and the golden defaults to the resolved set unless ``--golden`` was
+    overridden on the CLI. A ``private`` request with no private env fails loudly
+    inside ``resolve_corpus`` rather than silently scoring the public corpus.
+    """
+    choice = getattr(args, "corpus", None) or os.environ.get("KB_EVAL_CORPUS")
+    if not choice:
+        return
+    paths = resolve_corpus({**os.environ, "KB_EVAL_CORPUS": choice})
+    os.environ["KB_MVP_DB_PATH"] = str(paths.db_path)
+    reset_default_store()
+    if getattr(args, "golden", _DEFAULT_GOLDEN) == _DEFAULT_GOLDEN:
+        args.golden = str(paths.golden_path)
+    print(f"[corpus] {paths.label}: store={paths.db_path} golden={args.golden}")
 
 
 def _gen_provider():
@@ -42,6 +70,7 @@ def _judge_provider():
 
 
 def cmd_run(args: argparse.Namespace) -> None:
+    _apply_corpus_selection(args)
     store = get_store()
     sig = compute_signature(store)
     guards.ensure_real_embedder(sig, allow_hashing=args.allow_hashing)
@@ -150,7 +179,16 @@ def build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command", required=True)
 
     run = sub.add_parser("run", help="score retrieval on the MVP surface")
-    run.add_argument("--golden", default="data/eval/golden_public.jsonl")
+    run.add_argument("--golden", default=_DEFAULT_GOLDEN)
+    run.add_argument(
+        "--corpus",
+        choices=("public", "private"),
+        default=None,
+        help=(
+            "select the eval corpus half (overrides KB_EVAL_CORPUS). 'private' "
+            "needs KB_EVAL_PRIVATE_DB + KB_EVAL_PRIVATE_GOLDEN set, else it errors."
+        ),
+    )
     run.add_argument("--out", default="var/data/eval/run.json")
     run.add_argument("--allow-hashing", action="store_true")
     run.add_argument("--judge", action="store_true", help="also score generation via LLM-judge")
