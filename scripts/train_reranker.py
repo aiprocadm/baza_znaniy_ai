@@ -165,6 +165,7 @@ def train(
     seed: int,
     loss: str = "bce",
     device: str | None = None,
+    init_from: str = BASE_MODEL,
 ) -> dict:
     import numpy as np
     import torch
@@ -177,8 +178,8 @@ def train(
     use_amp = device == "cuda"
     print(f"training on device={device} (autocast={'bf16' if use_amp else 'off'})")
 
-    tokenizer = AutoTokenizer.from_pretrained(BASE_MODEL)
-    model = AutoModelForSequenceClassification.from_pretrained(BASE_MODEL, num_labels=1)
+    tokenizer = AutoTokenizer.from_pretrained(init_from)
+    model = AutoModelForSequenceClassification.from_pretrained(init_from, num_labels=1)
     model.to(device)
 
     enc_train = _encode_rows(rows_train, tokenizer, max_length)
@@ -303,6 +304,11 @@ def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(prog="train_reranker")
     parser.add_argument("--pairs", default=str(DEFAULT_PAIRS))
     parser.add_argument("--out", default=str(DEFAULT_OUT))
+    parser.add_argument(
+        "--init-from",
+        default=BASE_MODEL,
+        help="start checkpoint: rubert-tiny2 (stage 1) or a stage-1 dir (stage 2)",
+    )
     parser.add_argument("--epochs", type=int, default=3)
     parser.add_argument("--batch", type=int, default=32)
     parser.add_argument("--lr", type=float, default=5e-5)
@@ -343,9 +349,11 @@ def main(argv: list[str] | None = None) -> None:
         seed=args.seed,
         loss=args.loss,
         device=args.device,
+        init_from=args.init_from,
     )
     meta = {
         "base_model": BASE_MODEL,
+        "init_from": args.init_from,
         "pairs_file": args.pairs,
         "epochs": args.epochs,
         "batch": args.batch,
@@ -356,6 +364,7 @@ def main(argv: list[str] | None = None) -> None:
         "loss": args.loss,
         **metrics,
     }
+    Path(args.out).mkdir(parents=True, exist_ok=True)
     (Path(args.out) / "train_meta.json").write_text(
         json.dumps(meta, ensure_ascii=False, indent=1), encoding="utf-8"
     )

@@ -131,3 +131,35 @@ def test_query_grouped_batches_deterministic_and_drops_unrankable():
     queries = {g[0]["query"] for g in b1}
     assert queries == {"a", "c"}  # all-equal "b" dropped
     assert all(len(enumerate_pairs(g)) >= 1 for g in b1)
+
+
+def test_init_from_defaults_to_base_model(monkeypatch):
+    import scripts.train_reranker as tr
+
+    captured = {}
+
+    def fake_train(rows_train, rows_val, **kw):
+        captured.update(kw)
+        return {"val_pairs": 0, "val_pearson_vs_teacher": 0.0, "device": "cpu"}
+
+    monkeypatch.setattr(tr, "train", fake_train)
+    monkeypatch.setattr(tr, "load_pairs", lambda p: [
+        {"query": "a", "text": "t", "teacher_score": 1.0},
+        {"query": "b", "text": "u", "teacher_score": 0.0},
+    ])
+    tr.main(["--pairs", "x.jsonl", "--out", "o", "--epochs", "1"])
+    assert captured["init_from"] == "cointegrated/rubert-tiny2"
+
+
+def test_init_from_override_is_passed_through(monkeypatch):
+    import scripts.train_reranker as tr
+
+    captured = {}
+    monkeypatch.setattr(tr, "train", lambda rt, rv, **kw: captured.update(kw) or
+                        {"val_pairs": 0, "val_pearson_vs_teacher": 0.0, "device": "cpu"})
+    monkeypatch.setattr(tr, "load_pairs", lambda p: [
+        {"query": "a", "text": "t", "teacher_score": 1.0},
+        {"query": "b", "text": "u", "teacher_score": 0.0},
+    ])
+    tr.main(["--pairs", "x.jsonl", "--out", "o", "--init-from", "var/models/stage1"])
+    assert captured["init_from"] == "var/models/stage1"
