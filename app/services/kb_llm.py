@@ -431,11 +431,21 @@ class GgufEvalProvider:
     judge verdicts. Pass ``inner=`` to inject a fake in tests.
     """
 
-    def __init__(self, *, model_path: str, inner: object | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        model_path: str,
+        inner: object | None = None,
+        default_max_tokens: int = 512,
+    ) -> None:
         self.name = "gguf"
         self.model = Path(model_path).name
         self._model_path = model_path
         self._inner = inner
+        # Default completion length when a caller passes max_tokens=None. The
+        # bundled keyless model greedy-decodes and can run away into repeated
+        # citation markers; a sane cap keeps out-of-the-box answers tidy.
+        self._default_max_tokens = default_max_tokens
 
     def _ensure_inner(self) -> object:
         if self._inner is None:
@@ -461,7 +471,7 @@ class GgufEvalProvider:
         full_prompt = f"{system}\n\n{prompt}" if system else prompt
         context = {
             "temperature": 0.0 if temperature is None else float(temperature),
-            "max_tokens": int(max_tokens) if max_tokens else 512,
+            "max_tokens": int(max_tokens) if max_tokens else self._default_max_tokens,
         }
         started = time.perf_counter()
         text = inner.generate(full_prompt, context=context)  # type: ignore[attr-defined]
@@ -503,7 +513,14 @@ class GgufEvalProvider:
 
 def _build_gguf_provider(env: Mapping[str, str] | None = None) -> Optional[GgufEvalProvider]:
     path = _env("KB_LLM_GGUF_PATH", env) or "./models/qwen2.5-3b-instruct-q4_k_m.gguf"
-    provider = GgufEvalProvider(model_path=path)
+    default_max_tokens = 512
+    raw_max = _env("KB_LLM_MAX_TOKENS", env)
+    if raw_max:
+        try:
+            default_max_tokens = max(16, int(raw_max))
+        except ValueError:
+            LOGGER.warning("Ignoring invalid KB_LLM_MAX_TOKENS=%r", raw_max)
+    provider = GgufEvalProvider(model_path=path, default_max_tokens=default_max_tokens)
     if not provider.is_available():
         LOGGER.warning(
             "GGUF model not found at %s — run scripts/download_model.py "

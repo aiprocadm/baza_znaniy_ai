@@ -32,6 +32,42 @@ def test_adapter_shapes_response_and_folds_system() -> None:
     assert sent_ctx["temperature"] == 0.0 and sent_ctx["max_tokens"] == 128
 
 
+def test_default_max_tokens_used_when_caller_passes_none() -> None:
+    inner = _FakeInner()
+    prov = GgufEvalProvider(model_path="/m.gguf", inner=inner, default_max_tokens=90)
+
+    prov.generate("Вопрос?")  # no explicit max_tokens
+
+    _, sent_ctx = inner.calls[0]
+    assert sent_ctx["max_tokens"] == 90
+
+
+def test_kb_llm_max_tokens_env_sets_gguf_default(tmp_path) -> None:
+    model = tmp_path / "m.gguf"
+    model.write_bytes(b"GGUF\x00\x00\x00")
+    prov = select_provider(
+        {
+            "KB_LLM_PROVIDER": "gguf",
+            "KB_LLM_GGUF_PATH": str(model),
+            "KB_LLM_MAX_TOKENS": "90",
+        }
+    )
+    assert prov is not None and prov._default_max_tokens == 90
+
+
+def test_invalid_kb_llm_max_tokens_falls_back_to_512(tmp_path) -> None:
+    model = tmp_path / "m.gguf"
+    model.write_bytes(b"GGUF\x00\x00\x00")
+    prov = select_provider(
+        {
+            "KB_LLM_PROVIDER": "gguf",
+            "KB_LLM_GGUF_PATH": str(model),
+            "KB_LLM_MAX_TOKENS": "not-a-number",
+        }
+    )
+    assert prov is not None and prov._default_max_tokens == 512
+
+
 def test_select_provider_gguf_missing_model_returns_none(tmp_path) -> None:
     prov = select_provider(
         {"KB_LLM_PROVIDER": "gguf", "KB_LLM_GGUF_PATH": str(tmp_path / "absent.gguf")}
