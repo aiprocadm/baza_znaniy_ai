@@ -1,12 +1,14 @@
-# Pravo Reranker Phase 1 — Training (mMARCO → pravo) Implementation Plan
+# Pravo Reranker Phase 1 — Training (mr-TyDi → pravo) Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Train `kbai-reranker-ru` (rubert-tiny2 cross-encoder) in two stages — general ranking on Russian mMARCO, then domain adaptation on structurally-mined pravo pairs — and gate it on `golden_pravo_natural`.
+**Goal:** Train `kbai-reranker-ru` (rubert-tiny2 cross-encoder) in two stages — general ranking on Russian mr-TyDi, then domain adaptation on structurally-mined pravo pairs — and gate it on `golden_pravo_natural`.
 
-**Architecture:** Two new dataset builders emit the existing `{query, text, teacher_score}` jsonl format; the existing `train_reranker.py` runs both stages (with one new `--init-from` flag chaining stage-1 weights into stage-2). mMARCO uses synthetic pairwise labels (pos=1.0/neg=0.0); pravo uses bge-reranker-v2-m3 teacher scores on structurally-mined hard negatives. Everything reuses the production bi-encoder store and the device-agnostic trainer (CPU smoke → GPU full run).
+**Architecture:** Two new dataset builders emit the existing `{query, text, teacher_score}` jsonl format; the existing `train_reranker.py` runs both stages (with one new `--init-from` flag chaining stage-1 weights into stage-2). mr-TyDi gives natural Russian queries each with 1 positive + ~30 pre-mined hard negatives → synthetic pairwise labels (pos=1.0/neg=0.0); pravo uses bge-reranker-v2-m3 teacher scores on structurally-mined hard negatives. Everything reuses the production bi-encoder store and the device-agnostic trainer (CPU smoke → GPU full run).
 
-**Tech Stack:** Python (`py -3.13`), HuggingFace `datasets` (streaming) + `transformers`, `sentence_transformers` CrossEncoder (bge teacher), the MVP SQLite store (`app.services.kb_store`), existing eval harness (`scripts/eval_rag.py`).
+**Tech Stack:** Python (`py -3.13`), HuggingFace `datasets==3.6.0` (streaming, `trust_remote_code=True` — mr-TyDi is a script dataset, unsupported in datasets 4.0+) + `transformers`, `sentence_transformers` CrossEncoder (bge teacher), the MVP SQLite store (`app.services.kb_store`), existing eval harness (`scripts/eval_rag.py`).
+
+**Revision note (execution 2026-06-17):** stage-1 source changed from mMARCO to mr-TyDi — mMARCO's Russian split is not streamable text triples but a 5.77 GB passage-corpus ID-join. mr-TyDi russian is natural Russian (not MT), hundreds of MB, with pre-mined hard negatives. See spec §6.
 
 **Spec:** [2026-06-17-pravo-reranker-phase1-training-design.md](../specs/2026-06-17-pravo-reranker-phase1-training-design.md)
 
@@ -14,10 +16,10 @@
 
 ## File Structure
 
-- **Create** `scripts/build_mmarco_pairs.py` — stage-1 dataset builder: stream Russian mMARCO triples → `{query, text, teacher_score}` jsonl (synthetic binary labels). Pure helpers (`to_pairs`, `subsample_indices`) unit-tested; `datasets` import lazy.
+- **Create** `scripts/build_mrtydi_pairs.py` — stage-1 dataset builder: stream Russian mr-TyDi records → `{query, text, teacher_score}` jsonl (synthetic binary labels; 1 positive + capped hard negatives per query). Pure helpers (`to_pairs`, `record_to_texts`, `take_first`) unit-tested; `datasets` import lazy.
 - **Create** `scripts/build_pravo_pairs.py` — stage-2 structural miner: heading→query, article→positive, bi-encoder top-k→hard-negs, bge teacher scores, anti-leak vs golden_pravo. Reuses `heading_to_query` (build_pravo_golden) + `build_pairs`/`normalize_question` (build_rerank_dataset). Store/teacher imports lazy.
 - **Modify** `scripts/train_reranker.py` — add `--init-from` (default `BASE_MODEL`); thread into `from_pretrained`. ~4 lines.
-- **Create** `tests/scripts/test_build_mmarco_pairs.py` — pure-function tests, no ML deps.
+- **Create** `tests/scripts/test_build_mrtydi_pairs.py` — pure-function tests, no ML deps.
 - **Create** `tests/scripts/test_build_pravo_pairs.py` — pure-function tests, no ML deps.
 - **Modify** `tests/scripts/test_train_reranker.py` — add `--init-from` arg-parse test.
 
@@ -25,74 +27,97 @@ All four scripts follow the established convention: heavy imports (`datasets`, `
 
 ---
 
-## Task 0: Environment — confirm `datasets` availability
+## Task 0: Environment — `datasets==3.6.0` + confirm mr-TyDi schema  ✅ DONE at plan authoring
 
-**Files:** none (environment check).
+**Files:** none (environment check). Completed during execution 2026-06-17 — recorded here so a fresh worker can reproduce/verify.
 
-- [ ] **Step 1: Check whether `datasets` is importable**
+- [ ] **Step 1: Pin `datasets==3.6.0`** (4.0+ removed script-dataset support; mr-TyDi needs it)
 
-Run: `py -3.13 -c "import datasets; print(datasets.__version__)"`
-Expected: either a version string (skip Step 2) or `ModuleNotFoundError` (do Step 2). As of plan authoring it is NOT installed.
+Run: `py -3.13 -m pip install "datasets==3.6.0"`
+Expected: `Successfully installed datasets-3.6.0`. (pandas 3.0.3 / py3.13 coexist fine; nothing else depends on `datasets`.)
 
-- [ ] **Step 2: Install `datasets` if missing**
-
-Run: `py -3.13 -m pip install "datasets>=2.0"`
-Expected: install succeeds; re-run Step 1 and see a version string.
-
-- [ ] **Step 3: Inspect the real Russian mMARCO triples schema**
+- [ ] **Step 2: Confirm the real mr-TyDi russian schema**
 
 Run:
 ```bash
-py -3.13 -c "from datasets import load_dataset; ds=load_dataset('unicamp-dl/mmarco','russian',split='train',streaming=True); print(next(iter(ds)))"
+py -3.13 -c "from datasets import load_dataset; ds=load_dataset('castorini/mr-tydi','russian',split='train',streaming=True,trust_remote_code=True); r=next(iter(ds)); print(list(r.keys())); print(len(r['positive_passages']), len(r['negative_passages']))"
 ```
-Expected: one record printed. **Record the exact column names** (expected `query`, `positive`, `negative`; if the config name or columns differ, note them — Task 2's `iter_triples` must match the real keys). This is the single dataset-specific unknown; everything downstream is pure and tested.
+Expected (confirmed): keys `['query_id', 'query', 'positive_passages', 'negative_passages']`; `positive_passages` = list of `{docid, text, title}` (≥1), `negative_passages` = list of `{docid, text, title}` (~30). Task 1/2 below are written to this exact schema — no remaining dataset-specific unknown.
 
 ---
 
-## Task 1: Stage-1 dataset builder — pure core (`build_mmarco_pairs.py`)
+## Task 1: Stage-1 dataset builder — pure core (`build_mrtydi_pairs.py`)
 
 **Files:**
-- Create: `scripts/build_mmarco_pairs.py`
-- Test: `tests/scripts/test_build_mmarco_pairs.py`
+- Create: `scripts/build_mrtydi_pairs.py`
+- Test: `tests/scripts/test_build_mrtydi_pairs.py`
 
-- [ ] **Step 1: Write the failing test for `to_pairs`**
+- [ ] **Step 1: Write the failing tests for `to_pairs` and `record_to_texts`**
 
 ```python
-# tests/scripts/test_build_mmarco_pairs.py
-"""Pure-function tests for the mMARCO stage-1 builder (no ML deps)."""
+# tests/scripts/test_build_mrtydi_pairs.py
+"""Pure-function tests for the mr-TyDi stage-1 builder (no ML deps)."""
 
-from scripts.build_mmarco_pairs import subsample_indices, to_pairs
+from scripts.build_mrtydi_pairs import record_to_texts, to_pairs
 
 
-def test_to_pairs_emits_positive_then_negative_with_binary_scores():
-    rows = to_pairs("какой срок исковой давности", "три года по общему правилу", "ставка налога")
+def test_to_pairs_emits_positive_then_negatives_with_binary_scores():
+    rows = to_pairs("какой срок", "три года", ["ставка налога", "состав суда"])
     assert rows == [
-        {"query": "какой срок исковой давности", "text": "три года по общему правилу", "teacher_score": 1.0},
-        {"query": "какой срок исковой давности", "text": "ставка налога", "teacher_score": 0.0},
+        {"query": "какой срок", "text": "три года", "teacher_score": 1.0},
+        {"query": "какой срок", "text": "ставка налога", "teacher_score": 0.0},
+        {"query": "какой срок", "text": "состав суда", "teacher_score": 0.0},
     ]
 
 
-def test_to_pairs_skips_blank_fields():
-    assert to_pairs("", "pos", "neg") == []
-    assert to_pairs("q", "", "neg") == []
-    assert to_pairs("q", "pos", "") == []
+def test_to_pairs_skips_blank_query_or_positive():
+    assert to_pairs("", "pos", ["neg"]) == []
+    assert to_pairs("q", "", ["neg"]) == []
+
+
+def test_to_pairs_drops_blank_negatives_individually():
+    rows = to_pairs("q", "pos", ["", "real neg", "   "])
+    assert rows == [
+        {"query": "q", "text": "pos", "teacher_score": 1.0},
+        {"query": "q", "text": "real neg", "teacher_score": 0.0},
+    ]
+
+
+def test_record_to_texts_extracts_first_positive_and_caps_negatives():
+    record = {
+        "query": "вопрос",
+        "positive_passages": [{"docid": "a", "text": "позитив", "title": "t"}],
+        "negative_passages": [
+            {"docid": "b", "text": "neg1", "title": "t"},
+            {"docid": "c", "text": "neg2", "title": "t"},
+            {"docid": "d", "text": "neg3", "title": "t"},
+        ],
+    }
+    assert record_to_texts(record, max_negs=2) == ("вопрос", "позитив", ["neg1", "neg2"])
+
+
+def test_record_to_texts_handles_missing_positive():
+    record = {"query": "q", "positive_passages": [], "negative_passages": []}
+    assert record_to_texts(record, max_negs=5) == ("q", "", [])
 ```
 
 - [ ] **Step 2: Run to verify it fails**
 
-Run: `py -3.13 -m pytest tests/scripts/test_build_mmarco_pairs.py -v`
-Expected: FAIL — `ModuleNotFoundError: No module named 'scripts.build_mmarco_pairs'`.
+Run: `py -3.13 -m pytest tests/scripts/test_build_mrtydi_pairs.py -v`
+Expected: FAIL — `ModuleNotFoundError: No module named 'scripts.build_mrtydi_pairs'`.
 
-- [ ] **Step 3: Write the minimal module with `to_pairs`**
+- [ ] **Step 3: Write the minimal module**
 
 ```python
-# scripts/build_mmarco_pairs.py
-"""Build the stage-1 reranker pre-train set from Russian mMARCO (spec Phase 1 §3.1).
+# scripts/build_mrtydi_pairs.py
+"""Build the stage-1 reranker pre-train set from Russian mr-TyDi (spec Phase 1 §3.1).
 
-Stream ``unicamp-dl/mmarco`` (ru split) triples -> ``{query, text, teacher_score}``
-jsonl with synthetic binary labels (positive=1.0, negative=0.0). The pairwise loss
-only needs within-query ordering, so no teacher pass over mMARCO is required.
-``datasets`` is imported lazily so stub-backed unit tests never load it.
+Stream ``castorini/mr-tydi`` (russian) -> ``{query, text, teacher_score}`` jsonl with
+synthetic binary labels (positive=1.0, negative=0.0). Each record carries 1 positive
+and ~30 pre-mined hard negatives, so no teacher pass and no own negative-mining is
+needed — the pairwise loss only needs within-query ordering. ``datasets`` is imported
+lazily so stub-backed unit tests never load it. Requires ``datasets==3.6.0`` +
+``trust_remote_code=True`` (mr-TyDi is a script dataset; datasets 4.0+ dropped it).
 """
 
 from __future__ import annotations
@@ -101,126 +126,131 @@ import argparse
 import json
 from pathlib import Path
 
-PAIRS_OUT = Path("var/data/rerank/mmarco_pairs.jsonl")
-MMARCO_DATASET = "unicamp-dl/mmarco"
-MMARCO_CONFIG = "russian"
+PAIRS_OUT = Path("var/data/rerank/mrtydi_pairs.jsonl")
+MRTYDI_DATASET = "castorini/mr-tydi"
+MRTYDI_CONFIG = "russian"
 
 
-def to_pairs(query: str, positive: str, negative: str) -> list[dict]:
-    """One (query, pos, neg) triple -> two scored rows; drop triples with any
-    blank field (unusable — no ordering signal)."""
-    if not (query.strip() and positive.strip() and negative.strip()):
+def to_pairs(query: str, positive: str, negatives: list[str]) -> list[dict]:
+    """One record -> scored rows: positive=1.0, each non-blank negative=0.0.
+    A blank query or positive yields nothing (no usable ordering signal)."""
+    if not (query.strip() and positive.strip()):
         return []
-    return [
-        {"query": query, "text": positive, "teacher_score": 1.0},
-        {"query": query, "text": negative, "teacher_score": 0.0},
-    ]
+    rows = [{"query": query, "text": positive, "teacher_score": 1.0}]
+    for neg in negatives:
+        if neg.strip():
+            rows.append({"query": query, "text": neg, "teacher_score": 0.0})
+    return rows
+
+
+def record_to_texts(record: dict, *, max_negs: int) -> tuple[str, str, list[str]]:
+    """Pull (query, positive_text, [negative_texts]) from a mr-TyDi record.
+    Uses the first positive passage; caps negatives at ``max_negs``."""
+    query = record["query"]
+    positives = record.get("positive_passages") or []
+    negatives = record.get("negative_passages") or []
+    positive = positives[0]["text"] if positives else ""
+    neg_texts = [n["text"] for n in negatives[:max_negs]]
+    return query, positive, neg_texts
 ```
 
-- [ ] **Step 4: Run to verify `to_pairs` tests pass**
+- [ ] **Step 4: Run to verify it passes**
 
-Run: `py -3.13 -m pytest tests/scripts/test_build_mmarco_pairs.py -v`
-Expected: PASS (both `to_pairs` tests).
+Run: `py -3.13 -m pytest tests/scripts/test_build_mrtydi_pairs.py -v`
+Expected: PASS (all five tests).
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add scripts/build_mmarco_pairs.py tests/scripts/test_build_mmarco_pairs.py
-git commit -m "feat(reranker): mMARCO stage-1 builder — to_pairs core"
+git add scripts/build_mrtydi_pairs.py tests/scripts/test_build_mrtydi_pairs.py
+git commit -m "feat(reranker): mr-TyDi stage-1 builder — to_pairs/record_to_texts core"
 ```
 
 ---
 
-## Task 2: Stage-1 builder — deterministic subsample + streaming loader + CLI
+## Task 2: Stage-1 builder — `take_first` + streaming loader + CLI
+
+mr-TyDi russian train is small (~5k queries), so we keep the first `--limit` records (deterministic, correct for any dataset size) rather than windowed sampling. `take_first` is a pure generator (testable); `iter_records` wraps it with the lazy `datasets` load.
 
 **Files:**
-- Modify: `scripts/build_mmarco_pairs.py`
-- Test: `tests/scripts/test_build_mmarco_pairs.py`
+- Modify: `scripts/build_mrtydi_pairs.py`
+- Test: `tests/scripts/test_build_mrtydi_pairs.py`
 
-- [ ] **Step 1: Write the failing test for `subsample_indices`**
+- [ ] **Step 1: Write the failing test for `take_first`**
 
 ```python
-# append to tests/scripts/test_build_mmarco_pairs.py
-def test_subsample_indices_is_deterministic_and_bounded():
-    a = subsample_indices(total=1000, limit=10, seed=42)
-    b = subsample_indices(total=1000, limit=10, seed=42)
-    assert a == b                      # deterministic
-    assert len(a) == 10
-    assert all(0 <= i < 1000 for i in a)
-    assert len(set(a)) == 10           # no dupes
+# append to tests/scripts/test_build_mrtydi_pairs.py
+from scripts.build_mrtydi_pairs import take_first
 
 
-def test_subsample_indices_caps_at_total():
-    assert sorted(subsample_indices(total=5, limit=999, seed=1)) == [0, 1, 2, 3, 4]
+def test_take_first_yields_at_most_limit_in_order():
+    assert list(take_first(["a", "b", "c", "d"], 2)) == ["a", "b"]
+
+
+def test_take_first_handles_fewer_than_limit():
+    assert list(take_first(["a", "b"], 10)) == ["a", "b"]
 ```
 
 - [ ] **Step 2: Run to verify it fails**
 
-Run: `py -3.13 -m pytest tests/scripts/test_build_mmarco_pairs.py::test_subsample_indices_is_deterministic_and_bounded -v`
-Expected: FAIL — `ImportError: cannot import name 'subsample_indices'`.
+Run: `py -3.13 -m pytest tests/scripts/test_build_mrtydi_pairs.py -k take_first -v`
+Expected: FAIL — `ImportError: cannot import name 'take_first'`.
 
-- [ ] **Step 3: Add `subsample_indices`**
+- [ ] **Step 3: Add `take_first`**
 
 ```python
-# add to scripts/build_mmarco_pairs.py (after to_pairs)
-import random
+# add to scripts/build_mrtydi_pairs.py (after record_to_texts)
+from typing import Iterable, Iterator
 
 
-def subsample_indices(*, total: int, limit: int, seed: int) -> set[int]:
-    """Deterministic set of up to ``limit`` distinct indices in ``[0, total)``.
-
-    Used to pick which streamed triples to keep without materializing the whole
-    (huge) dataset: we know the stream length up front only loosely, so callers
-    pass a target ``total`` window and we sample positions within it.
-    """
-    rng = random.Random(seed)
-    if limit >= total:
-        return set(range(total))
-    return set(rng.sample(range(total), limit))
+def take_first(records: Iterable, limit: int) -> Iterator:
+    """Yield the first ``limit`` items of an iterable (deterministic subsample of
+    a streaming dataset). ``limit <= 0`` yields nothing."""
+    for i, record in enumerate(records):
+        if i >= limit:
+            break
+        yield record
 ```
 
-- [ ] **Step 4: Run to verify subsample tests pass**
+- [ ] **Step 4: Run to verify take_first tests pass**
 
-Run: `py -3.13 -m pytest tests/scripts/test_build_mmarco_pairs.py -v`
-Expected: PASS (all four tests).
+Run: `py -3.13 -m pytest tests/scripts/test_build_mrtydi_pairs.py -v`
+Expected: PASS (all seven tests).
 
 - [ ] **Step 5: Add the lazy streaming loader + `main` (no new test — IO/ML path)**
 
-Match the column names confirmed in Task 0 Step 3. If they are not `query`/`positive`/`negative`, edit the three `row[...]` keys accordingly.
+Matches the mr-TyDi schema confirmed in Task 0 Step 2 (`query`, `positive_passages`, `negative_passages`).
 
 ```python
-# add to scripts/build_mmarco_pairs.py
-def iter_triples(limit: int, seed: int, *, window: int):
-    """Yield up to ``limit`` (query, positive, negative) tuples from streamed
-    Russian mMARCO, sampling positions within the first ``window`` records.
-    Lazy ``datasets`` import keeps unit tests ML-free."""
+# add to scripts/build_mrtydi_pairs.py
+def iter_records(limit: int, *, max_negs: int):
+    """Yield up to ``limit`` (query, positive, [negatives]) tuples from streamed
+    Russian mr-TyDi. Lazy ``datasets`` import keeps unit tests ML-free."""
     from datasets import load_dataset
 
-    keep = subsample_indices(total=window, limit=limit, seed=seed)
-    ds = load_dataset(MMARCO_DATASET, MMARCO_CONFIG, split="train", streaming=True)
-    for i, row in enumerate(ds):
-        if i >= window:
-            break
-        if i in keep:
-            yield row["query"], row["positive"], row["negative"]
+    ds = load_dataset(
+        MRTYDI_DATASET, MRTYDI_CONFIG, split="train",
+        streaming=True, trust_remote_code=True,
+    )
+    for record in take_first(ds, limit):
+        yield record_to_texts(record, max_negs=max_negs)
 
 
 def main(argv: list[str] | None = None) -> None:
-    parser = argparse.ArgumentParser(prog="build_mmarco_pairs")
+    parser = argparse.ArgumentParser(prog="build_mrtydi_pairs")
     parser.add_argument("--out", default=str(PAIRS_OUT))
-    parser.add_argument("--limit", type=int, default=50000,
-                        help="number of triples to keep (=> 2x rows)")
-    parser.add_argument("--window", type=int, default=500000,
-                        help="sample within the first N streamed records")
-    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--limit", type=int, default=10000,
+                        help="number of queries to keep (dataset has ~5k; >size = all)")
+    parser.add_argument("--negs", type=int, default=10,
+                        help="hard negatives kept per query (mr-TyDi has ~30)")
     args = parser.parse_args(argv)
 
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
     n_rows = 0
     with out.open("w", encoding="utf-8") as fh:
-        for q, pos, neg in iter_triples(args.limit, args.seed, window=args.window):
-            for row in to_pairs(q, pos, neg):
+        for query, positive, negatives in iter_records(args.limit, max_negs=args.negs):
+            for row in to_pairs(query, positive, negatives):
                 fh.write(json.dumps(row, ensure_ascii=False) + "\n")
                 n_rows += 1
     print(f"Wrote {n_rows} rows to {out}")
@@ -233,8 +263,8 @@ if __name__ == "__main__":
 - [ ] **Step 6: Commit**
 
 ```bash
-git add scripts/build_mmarco_pairs.py tests/scripts/test_build_mmarco_pairs.py
-git commit -m "feat(reranker): mMARCO subsample + streaming loader + CLI"
+git add scripts/build_mrtydi_pairs.py tests/scripts/test_build_mrtydi_pairs.py
+git commit -m "feat(reranker): mr-TyDi take_first + streaming loader + CLI"
 ```
 
 ---
@@ -594,16 +624,16 @@ Per spec §3.4 Step A: tiny run proving the pipeline is green before renting GPU
 Run: `py -3.13 -c "from app.services.kb_store import get_store; print(len(__import__('scripts.build_pravo_golden', fromlist=['documents_with_chunks']).documents_with_chunks(get_store())))"`
 Expected: a count ~ thousands. If `0` / error → first run `scripts.ingest_pravo` (see Phase 0 runbook) with the e5-small env pins.
 
-- [ ] **Step 2: Build a 10k-triple mMARCO smoke set**
+- [ ] **Step 2: Build a mr-TyDi smoke set**
 
-Run: `py -3.13 -m scripts.build_mmarco_pairs --limit 10000 --out var/data/rerank/mmarco_smoke.jsonl`
-Expected: `Wrote 20000 rows to var/data/rerank/mmarco_smoke.jsonl`.
+Run: `py -3.13 -m scripts.build_mrtydi_pairs --limit 2000 --negs 8 --out var/data/rerank/mrtydi_smoke.jsonl`
+Expected: `Wrote <N> rows to var/data/rerank/mrtydi_smoke.jsonl` (≈ 2000 × (1+8) ≈ 18000 rows, fewer if the dataset is smaller).
 
 - [ ] **Step 3: Stage-1 smoke train (1 epoch, CPU, detached)**
 
 Run (detached, then babysit with Monitor):
 ```bash
-py -3.13 -m scripts.train_reranker --pairs var/data/rerank/mmarco_smoke.jsonl \
+py -3.13 -m scripts.train_reranker --pairs var/data/rerank/mrtydi_smoke.jsonl \
   --out var/models/kbai-reranker-ru-stage1 --loss pairwise --epochs 1 --device cpu
 ```
 Expected: completes; `train_meta.json` written with non-NaN `val_pearson_vs_teacher`.
@@ -641,14 +671,14 @@ If pipeline green and student ≥ base on mrr@5/hit@1 → proceed to the GPU ful
 
 - [ ] **Step 1: Build full datasets**
 
-Run: `py -3.13 -m scripts.build_mmarco_pairs --limit 50000 --out var/data/rerank/mmarco_pairs.jsonl`
-(pravo pairs from Task 6 Step 4 are reused — domain set is small and fixed.)
+Run: `py -3.13 -m scripts.build_mrtydi_pairs --limit 100000 --negs 20 --out var/data/rerank/mrtydi_pairs.jsonl`
+(`--limit` above dataset size keeps all ~5k queries; raise `--negs` toward the ~30 available for more pairs. pravo pairs from Task 6 Step 4 are reused — domain set is small and fixed.)
 
 - [ ] **Step 2: Stage-1 full train on GPU**
 
 Run (on the rented GPU box, CUDA auto-detected):
 ```bash
-py -3.13 -m scripts.train_reranker --pairs var/data/rerank/mmarco_pairs.jsonl \
+py -3.13 -m scripts.train_reranker --pairs var/data/rerank/mrtydi_pairs.jsonl \
   --out var/models/kbai-reranker-ru-stage1 --loss pairwise --epochs 2
 ```
 Expected: completes in hours not days; non-NaN pearson.
@@ -679,6 +709,6 @@ git commit -m "docs(reranker): Phase 1 GPU run — <GO/NO-GO> verdict + metrics"
 ## Self-Review notes
 
 - **Spec coverage:** §3.1 → Tasks 1–2; §3.2 → Tasks 3–4; §3.3 (`--init-from`, stage table) → Task 5; §3.4 Step A (CPU smoke) → Task 6; §3.4 Step B (GPU) → Task 7; §4 gate → Tasks 6–7; §5 anti-leak → Task 4 (load_golden_questions + check_rerank_leak). All covered.
-- **Lazy-import convention:** every ML/IO entry point (`iter_triples`, `main` in both builders, `train`) imports heavy deps inside the function — unit tests in Tasks 1/3/5 import only pure helpers.
+- **Lazy-import convention:** every ML/IO entry point (`iter_records`, `main` in both builders, `train`) imports heavy deps inside the function — unit tests in Tasks 1/3/5 import only pure helpers.
 - **Verified internal APIs:** `score_and_flush_by_chunk(queries, retrieve, golden, score_fn, *, out, k)`, `as_retrieve`, `count_rows`, `Pair` (build_rerank_dataset), `heading_to_query` / `documents_with_chunks` (build_pravo_golden), `make_mvp_retriever` (app.eval.adapter), and the `CrossEncoder(...).predict` teacher pattern were all read from source at plan authoring — Task 4 mirrors `build_rerank_dataset.main` exactly.
-- **Single genuine execution-time unknown (flagged inline, not a placeholder):** the real Russian mMARCO column names — Task 0 Step 3 records them; Task 2 Step 5 adapts the three `row[...]` keys if they differ from `query`/`positive`/`negative`. This is an external-dataset fact to confirm, not undecided design.
+- **External dataset confirmed at execution:** mr-TyDi russian schema (`query`, `positive_passages[{docid,text,title}]`, `negative_passages[…]`) verified live (Task 0 Step 2); Tasks 1–2 are written to it. `datasets==3.6.0` + `trust_remote_code=True` required (script dataset). No remaining dataset unknowns.
