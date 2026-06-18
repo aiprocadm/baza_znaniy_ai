@@ -17,7 +17,7 @@
 ## File Structure
 
 - **Create** `scripts/build_mrtydi_pairs.py` — stage-1 dataset builder: stream Russian mr-TyDi records → `{query, text, teacher_score}` jsonl (synthetic binary labels; 1 positive + capped hard negatives per query). Pure helpers (`to_pairs`, `record_to_texts`, `take_first`) unit-tested; `datasets` import lazy.
-- **Create** `scripts/build_pravo_pairs.py` — stage-2 structural miner: heading→query, article→positive, bi-encoder top-k→hard-negs, bge teacher scores, anti-leak vs golden_pravo. Reuses `heading_to_query` (build_pravo_golden) + `build_pairs`/`normalize_question` (build_rerank_dataset). Store/teacher imports lazy.
+- **Create** `scripts/build_pravo_pairs.py` — stage-2 structural miner: heading→query, article→positive, bi-encoder top-k→hard-negs, bge teacher scores, anti-leak vs golden_pravo **and** golden_pravo_natural (via canonical `load_golden`). Reuses `heading_to_query` (build_pravo_golden) + `build_pairs`/`normalize_question` (build_rerank_dataset). Store/teacher imports lazy.
 - **Modify** `scripts/train_reranker.py` — add `--init-from` (default `BASE_MODEL`); thread into `from_pretrained`. ~4 lines.
 - **Create** `tests/scripts/test_build_mrtydi_pairs.py` — pure-function tests, no ML deps.
 - **Create** `tests/scripts/test_build_pravo_pairs.py` — pure-function tests, no ML deps.
@@ -372,6 +372,8 @@ git commit -m "feat(reranker): structural pravo miner — articles_to_queries co
 
 - [ ] **Step 1: Write the failing test for golden-query loading + leak exclusion**
 
+> **CRITICAL — real golden format.** The committed golden JSONL (`data/eval/golden_pravo*.jsonl`) is the `app.eval.dataset.GoldenItem` format: the question lives under the **`instruction`** key (NOT `question`), with `relevant_chunks` nested under `meta`. Read it with the canonical `load_golden` reader (which maps `instruction` → `.question`), exactly as `build_rerank_dataset.main` does — do NOT hand-roll a `["question"]` lookup (it crashes with `KeyError` on the real file). `app.eval.dataset` is a pure, fast import (no ML), and `build_pravo_golden` already imports from it at module top, so a top-level import here is consistent.
+
 ```python
 # append to tests/scripts/test_build_pravo_pairs.py
 import json as _json
@@ -379,11 +381,11 @@ import json as _json
 from scripts.build_pravo_pairs import load_golden_questions
 
 
-def test_load_golden_questions_reads_question_field(tmp_path):
+def test_load_golden_questions_reads_instruction_field(tmp_path):
     p = tmp_path / "golden_pravo.jsonl"
     p.write_text(
-        _json.dumps({"question": "Общий срок исковой давности", "relevant_chunks": ["a.md:0"]}) + "\n"
-        + _json.dumps({"question": "Специальные сроки", "relevant_chunks": ["b.md:0"]}) + "\n",
+        _json.dumps({"instruction": "Общий срок исковой давности", "meta": {"relevant_chunks": ["a.md:0"]}}) + "\n"
+        + _json.dumps({"instruction": "Специальные сроки", "meta": {"relevant_chunks": ["b.md:0"]}}) + "\n",
         encoding="utf-8",
     )
     assert load_golden_questions(p) == frozenset(
@@ -397,25 +399,24 @@ def test_load_golden_questions_missing_file_is_empty(tmp_path):
 
 - [ ] **Step 2: Run to verify it fails**
 
-Run: `py -3.13 -m pytest tests/scripts/test_build_pravo_pairs.py::test_load_golden_questions_reads_question_field -v`
+Run: `py -3.13 -m pytest tests/scripts/test_build_pravo_pairs.py::test_load_golden_questions_reads_instruction_field -v`
 Expected: FAIL — `ImportError: cannot import name 'load_golden_questions'`.
 
-- [ ] **Step 3: Add `load_golden_questions`**
+- [ ] **Step 3: Add `load_golden_questions` + the natural-golden constant + the `load_golden` import**
+
+Add to the module's top imports (next to `from scripts.build_pravo_golden import heading_to_query`): `from app.eval.dataset import load_golden`. Add the constant `GOLDEN_PRAVO_NATURAL = Path("data/eval/golden_pravo_natural.jsonl")` next to `GOLDEN_PRAVO`. Then:
 
 ```python
 # add to scripts/build_pravo_pairs.py
 def load_golden_questions(path: Path) -> frozenset[str]:
     """Held-out golden questions to exclude from mined training pairs (anti-leak,
     spec §3.2). Missing file => empty set (golden not built yet is not an error
-    here; the leak assert in build_pairs is the real backstop)."""
+    here; the leak assert in build_pairs is the real backstop). Reads the canonical
+    GoldenItem JSONL (``instruction`` field) via ``load_golden`` — NOT a hand-rolled
+    key, which previously crashed on the real format."""
     if not path.exists():
         return frozenset()
-    questions = {
-        json.loads(line)["question"]
-        for line in path.read_text(encoding="utf-8").splitlines()
-        if line.strip()
-    }
-    return frozenset(questions)
+    return frozenset(item.question for item in load_golden(path))
 ```
 
 - [ ] **Step 4: Run to verify it passes**
@@ -435,6 +436,7 @@ def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(prog="build_pravo_pairs")
     parser.add_argument("--out", default=str(PAIRS_OUT))
     parser.add_argument("--golden", default=str(GOLDEN_PRAVO))
+    parser.add_argument("--golden-natural", default=str(GOLDEN_PRAVO_NATURAL))
     parser.add_argument("--teacher", default=DEFAULT_TEACHER)
     parser.add_argument("--k", type=int, default=20, help="hard negatives mined per query")
     parser.add_argument("--batch", type=int, default=16)
@@ -453,7 +455,12 @@ def main(argv: list[str] | None = None) -> None:
         raise SystemExit("Store is empty — run scripts.ingest_pravo first (check KB_MVP_DB_PATH).")
 
     queries = articles_to_queries(docs)          # [(query, source_key=filename), ...]
-    golden = load_golden_questions(Path(args.golden))
+    # Exclude BOTH golden sets (spec §3.2): the structural auto-golden AND the
+    # natural-language eval golden — leaking the latter into training contaminates
+    # the Phase 1 decision gate.
+    golden = load_golden_questions(Path(args.golden)) | load_golden_questions(
+        Path(args.golden_natural)
+    )
 
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
