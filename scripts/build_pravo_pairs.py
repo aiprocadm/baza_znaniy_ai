@@ -15,9 +15,11 @@ import json
 from pathlib import Path
 
 from scripts.build_pravo_golden import heading_to_query
+from app.eval.dataset import load_golden
 
 PAIRS_OUT = Path("var/data/rerank/pravo_pairs.jsonl")
 GOLDEN_PRAVO = Path("data/eval/golden_pravo.jsonl")
+GOLDEN_PRAVO_NATURAL = Path("data/eval/golden_pravo_natural.jsonl")
 DEFAULT_TEACHER = "BAAI/bge-reranker-v2-m3"
 
 
@@ -39,15 +41,12 @@ def articles_to_queries(docs) -> list[tuple[str, str]]:
 def load_golden_questions(path: Path) -> frozenset[str]:
     """Held-out golden questions to exclude from mined training pairs (anti-leak,
     spec §3.2). Missing file => empty set (golden not built yet is not an error
-    here; the leak assert in build_pairs is the real backstop)."""
+    here; the leak assert in build_pairs is the real backstop). Reads the canonical
+    GoldenItem JSONL (``instruction`` field) via ``load_golden`` — NOT a hand-rolled
+    key, which previously crashed on the real format."""
     if not path.exists():
         return frozenset()
-    questions = {
-        json.loads(line)["question"]
-        for line in path.read_text(encoding="utf-8").splitlines()
-        if line.strip()
-    }
-    return frozenset(questions)
+    return frozenset(item.question for item in load_golden(path))
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -56,6 +55,7 @@ def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(prog="build_pravo_pairs")
     parser.add_argument("--out", default=str(PAIRS_OUT))
     parser.add_argument("--golden", default=str(GOLDEN_PRAVO))
+    parser.add_argument("--golden-natural", default=str(GOLDEN_PRAVO_NATURAL))
     parser.add_argument("--teacher", default=DEFAULT_TEACHER)
     parser.add_argument("--k", type=int, default=20, help="hard negatives mined per query")
     parser.add_argument("--batch", type=int, default=16)
@@ -74,7 +74,7 @@ def main(argv: list[str] | None = None) -> None:
         raise SystemExit("Store is empty — run scripts.ingest_pravo first (check KB_MVP_DB_PATH).")
 
     queries = articles_to_queries(docs)
-    golden = load_golden_questions(Path(args.golden))
+    golden = load_golden_questions(Path(args.golden)) | load_golden_questions(Path(args.golden_natural))
 
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
