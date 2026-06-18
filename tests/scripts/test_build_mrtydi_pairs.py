@@ -41,3 +41,14 @@ def test_record_to_texts_extracts_first_positive_and_caps_negatives():
 def test_record_to_texts_handles_missing_positive():
     record = {"query": "q", "positive_passages": [], "negative_passages": []}
     assert record_to_texts(record, max_negs=5) == ("q", "", [])
+
+
+from scripts.build_mrtydi_pairs import take_first
+
+
+def test_take_first_yields_at_most_limit_in_order():
+    assert list(take_first(["a", "b", "c", "d"], 2)) == ["a", "b"]
+
+
+def test_take_first_handles_fewer_than_limit():
+    assert list(take_first(["a", "b"], 10)) == ["a", "b"]
