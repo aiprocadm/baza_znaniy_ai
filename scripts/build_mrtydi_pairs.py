@@ -40,3 +40,52 @@ def record_to_texts(record: dict, *, max_negs: int) -> tuple[str, str, list[str]
     positive = positives[0]["text"] if positives else ""
     neg_texts = [n["text"] for n in negatives[:max_negs]]
     return query, positive, neg_texts
+
+
+from typing import Iterable, Iterator
+
+
+def take_first(records: Iterable, limit: int) -> Iterator:
+    """Yield the first ``limit`` items of an iterable (deterministic subsample of
+    a streaming dataset). ``limit <= 0`` yields nothing."""
+    for i, record in enumerate(records):
+        if i >= limit:
+            break
+        yield record
+
+
+def iter_records(limit: int, *, max_negs: int):
+    """Yield up to ``limit`` (query, positive, [negatives]) tuples from streamed
+    Russian mr-TyDi. Lazy ``datasets`` import keeps unit tests ML-free."""
+    from datasets import load_dataset
+
+    ds = load_dataset(
+        MRTYDI_DATASET, MRTYDI_CONFIG, split="train",
+        streaming=True, trust_remote_code=True,
+    )
+    for record in take_first(ds, limit):
+        yield record_to_texts(record, max_negs=max_negs)
+
+
+def main(argv: list[str] | None = None) -> None:
+    parser = argparse.ArgumentParser(prog="build_mrtydi_pairs")
+    parser.add_argument("--out", default=str(PAIRS_OUT))
+    parser.add_argument("--limit", type=int, default=10000,
+                        help="number of queries to keep (dataset has ~5k; >size = all)")
+    parser.add_argument("--negs", type=int, default=10,
+                        help="hard negatives kept per query (mr-TyDi has ~30)")
+    args = parser.parse_args(argv)
+
+    out = Path(args.out)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    n_rows = 0
+    with out.open("w", encoding="utf-8") as fh:
+        for query, positive, negatives in iter_records(args.limit, max_negs=args.negs):
+            for row in to_pairs(query, positive, negatives):
+                fh.write(json.dumps(row, ensure_ascii=False) + "\n")
+                n_rows += 1
+    print(f"Wrote {n_rows} rows to {out}")
+
+
+if __name__ == "__main__":
+    main()
