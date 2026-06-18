@@ -11,7 +11,6 @@ lazy so stub-backed unit tests stay ML-free.
 from __future__ import annotations
 
 import argparse
-import json
 from pathlib import Path
 
 from scripts.build_pravo_golden import heading_to_query
