@@ -34,3 +34,65 @@ def articles_to_queries(docs) -> list[tuple[str, str]]:
         if query:
             out.append((query, filename))
     return out
+
+
+def load_golden_questions(path: Path) -> frozenset[str]:
+    """Held-out golden questions to exclude from mined training pairs (anti-leak,
+    spec §3.2). Missing file => empty set (golden not built yet is not an error
+    here; the leak assert in build_pairs is the real backstop)."""
+    if not path.exists():
+        return frozenset()
+    questions = {
+        json.loads(line)["question"]
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    }
+    return frozenset(questions)
+
+
+def main(argv: list[str] | None = None) -> None:
+    import logging
+
+    parser = argparse.ArgumentParser(prog="build_pravo_pairs")
+    parser.add_argument("--out", default=str(PAIRS_OUT))
+    parser.add_argument("--golden", default=str(GOLDEN_PRAVO))
+    parser.add_argument("--teacher", default=DEFAULT_TEACHER)
+    parser.add_argument("--k", type=int, default=20, help="hard negatives mined per query")
+    parser.add_argument("--batch", type=int, default=16)
+    args = parser.parse_args(argv)
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
+
+    from app.eval.adapter import make_mvp_retriever
+    from app.services.kb_store import get_store
+    from scripts.build_pravo_golden import documents_with_chunks
+    from scripts.build_rerank_dataset import as_retrieve, count_rows, score_and_flush_by_chunk
+    from sentence_transformers import CrossEncoder
+
+    store = get_store()
+    docs = documents_with_chunks(store)
+    if not docs:
+        raise SystemExit("Store is empty — run scripts.ingest_pravo first (check KB_MVP_DB_PATH).")
+
+    queries = articles_to_queries(docs)
+    golden = load_golden_questions(Path(args.golden))
+
+    out = Path(args.out)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    if out.exists():
+        out.unlink()  # fresh run — keep source_key resume markers clean
+
+    retrieve = as_retrieve(make_mvp_retriever(store))
+    encoder = CrossEncoder(args.teacher, max_length=512)
+
+    def _score(chunk_pairs) -> list[float]:
+        scores = encoder.predict([(p.query, p.text) for p in chunk_pairs], batch_size=args.batch)
+        return [float(s) for s in scores]
+
+    new_pairs = score_and_flush_by_chunk(queries, retrieve, golden, _score, out=out, k=args.k)
+    if count_rows(out) == 0:
+        raise SystemExit("No pairs mined — check the corpus and golden exclusion.")
+    print(f"Wrote {new_pairs} teacher-scored pairs to {out}")
+
+
+if __name__ == "__main__":
+    main()
