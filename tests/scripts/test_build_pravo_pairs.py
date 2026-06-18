@@ -25,8 +25,12 @@ def test_articles_to_queries_skips_empty_topic():
 def test_load_golden_questions_reads_instruction_field(tmp_path):
     p = tmp_path / "golden_pravo.jsonl"
     p.write_text(
-        _json.dumps({"instruction": "Общий срок исковой давности", "meta": {"relevant_chunks": ["a.md:0"]}}) + "\n"
-        + _json.dumps({"instruction": "Специальные сроки", "meta": {"relevant_chunks": ["b.md:0"]}}) + "\n",
+        _json.dumps(
+            {"instruction": "Общий срок исковой давности", "meta": {"relevant_chunks": ["a.md:0"]}}
+        )
+        + "\n"
+        + _json.dumps({"instruction": "Специальные сроки", "meta": {"relevant_chunks": ["b.md:0"]}})
+        + "\n",
         encoding="utf-8",
     )
     assert load_golden_questions(p) == frozenset(

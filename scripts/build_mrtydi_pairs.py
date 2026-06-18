@@ -60,8 +60,11 @@ def iter_records(limit: int, *, max_negs: int):
     from datasets import load_dataset
 
     ds = load_dataset(
-        MRTYDI_DATASET, MRTYDI_CONFIG, split="train",
-        streaming=True, trust_remote_code=True,
+        MRTYDI_DATASET,
+        MRTYDI_CONFIG,
+        split="train",
+        streaming=True,
+        trust_remote_code=True,
     )
     for record in take_first(ds, limit):
         yield record_to_texts(record, max_negs=max_negs)
@@ -70,10 +73,15 @@ def iter_records(limit: int, *, max_negs: int):
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(prog="build_mrtydi_pairs")
     parser.add_argument("--out", default=str(PAIRS_OUT))
-    parser.add_argument("--limit", type=int, default=10000,
-                        help="number of queries to keep (dataset has ~5k; >size = all)")
-    parser.add_argument("--negs", type=int, default=10,
-                        help="hard negatives kept per query (mr-TyDi has ~30)")
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=10000,
+        help="number of queries to keep (dataset has ~5k; >size = all)",
+    )
+    parser.add_argument(
+        "--negs", type=int, default=10, help="hard negatives kept per query (mr-TyDi has ~30)"
+    )
     args = parser.parse_args(argv)
 
     out = Path(args.out)
