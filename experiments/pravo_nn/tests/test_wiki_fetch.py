@@ -41,6 +41,7 @@ def test_batch_url_has_random_plaintext_params():
     url = batch_url(api_url="https://ru.wikipedia.org/w/api.php", limit=20)
     assert "generator=random" in url
     assert "explaintext=1" in url
+    assert "exintro=1" in url  # lead-only -> all `limit` extracts in one request
     assert "grnlimit=20" in url
     assert "prop=extracts" in url
 

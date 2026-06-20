@@ -20,13 +20,21 @@ class WikiFetchError(Exception):
 
 
 def batch_url(*, api_url: str, limit: int) -> str:
-    """One request that yields `limit` random article plaintext extracts."""
+    """One request that yields `limit` random article plaintext extracts.
+
+    `exintro=1` returns only the lead section. This is deliberate: full-page
+    extracts paginate via a `continue` token (the API returns ONE extract per
+    request and a cursor for the rest), so without it `grnlimit` random pages
+    yield only 1 extract per call. Intro extracts are small enough that
+    `exlimit=max` returns all `limit` of them in a single request — and the lead
+    paragraph is clean connected prose (no reference-list / "Примечания" cruft),
+    which is exactly the grammar signal we want."""
     params = {
         "action": "query",
         "format": "json",
         "prop": "extracts",
         "explaintext": "1",
-        "exsectionformat": "wiki",  # keep "== Heading ==" markers for clean.py to strip
+        "exintro": "1",  # lead section only -> exlimit=max returns all `limit` at once
         "exlimit": "max",
         "generator": "random",
         "grnnamespace": "0",  # article namespace only
