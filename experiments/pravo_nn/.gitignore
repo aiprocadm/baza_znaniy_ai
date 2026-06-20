@@ -9,3 +9,11 @@ data/tokenizer/
 data/train.bin
 data/val.bin
 data/checkpoints/
+
+# mini-GPT v2 mixed-corpus artifacts (generated, tens of MB). Manifests are
+# kept (provenance) — ignore the wiki dir CONTENTS, not the dir, so the manifest
+# inside it stays trackable (git can't re-include a file under an ignored dir).
+data/wiki/wiki.txt
+data/wiki/raw/
+data/corpus_mixed.txt
+data/train_legal.bin
