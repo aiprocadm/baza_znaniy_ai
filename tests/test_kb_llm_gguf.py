@@ -2,7 +2,52 @@
 
 from __future__ import annotations
 
-from app.services.kb_llm import GgufEvalProvider, select_provider
+from app.services.kb_llm import (
+    GgufEvalProvider,
+    _strip_trailing_citation_run,
+    select_provider,
+)
+
+# Real runaway tails captured from the bundled Qwen2.5-3B on a RAG prompt.
+_RUNAWAY_INCREMENT = (
+    "Сотрудник работает удалённо не более трёх дней в неделю [3.1]. "
+    "Согласование через корпоративный портал [3.2]. "
+    "[2] [4] [5] [6] [7] [8] [9] [10] [11] [12]"
+)
+_RUNAWAY_CYCLE = (
+    "Согласование через портал компании. "
+    "[2] [1] [4] [5] [3] [4] [5] [1] [3] [2] [5] [4] [1] [3] [2"
+)
+
+
+def test_strip_removes_runaway_citation_tail() -> None:
+    assert _strip_trailing_citation_run(_RUNAWAY_INCREMENT) == (
+        "Сотрудник работает удалённо не более трёх дней в неделю [3.1]. "
+        "Согласование через корпоративный портал [3.2]."
+    )
+    assert _strip_trailing_citation_run(_RUNAWAY_CYCLE) == ("Согласование через портал компании.")
+
+
+def test_strip_preserves_legit_citations() -> None:
+    # inline + single/double trailing citations (with terminal punctuation) stay
+    assert (
+        _strip_trailing_citation_run("Срок исковой давности — три года [196].")
+        == "Срок исковой давности — три года [196]."
+    )
+    assert _strip_trailing_citation_run("См. [3.1] и [3.2].") == "См. [3.1] и [3.2]."
+    assert _strip_trailing_citation_run("Без цитат вообще.") == "Без цитат вообще."
+
+
+class _RunawayInner:
+    def generate(self, prompt: str, *, context=None) -> str:
+        return _RUNAWAY_INCREMENT
+
+
+def test_gguf_provider_strips_runaway_tail() -> None:
+    prov = GgufEvalProvider(model_path="/m.gguf", inner=_RunawayInner())
+    resp = prov.generate("q", system="s")
+    assert "[5] [6]" not in resp.text
+    assert resp.text.endswith("[3.2].")
 
 
 class _FakeInner:

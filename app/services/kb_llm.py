@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -422,6 +423,22 @@ def _extract_text(data: Any) -> str:
     return str(text) if isinstance(text, str) else ""
 
 
+_TRAILING_CITATION_RUN = re.compile(r"(?:\s*\[\s*\d[\d.]*\s*\]){4,}(?:\s*\[\s*\d[\d.]*)?\s*$")
+
+
+def _strip_trailing_citation_run(text: str) -> str:
+    """Drop a runaway tail of >=4 consecutive bracketed citation markers.
+
+    The bundled keyless model greedy-decodes and, on RAG prompts that ask it to
+    cite sources as ``[N]``, spews ``[1] [2] [3] …`` after the real answer instead
+    of stopping. Sampling and chat-template tweaks do not reliably suppress this
+    (verified live), so we deterministically trim a trailing run of >=4 markers
+    (optionally ending in a truncated ``[N`` fragment). Inline citations and short
+    legitimate trailing runs that end in punctuation are preserved.
+    """
+    return _TRAILING_CITATION_RUN.sub("", text).rstrip()
+
+
 class GgufEvalProvider:
     """Adapter exposing the in-process llama.cpp provider via the eval interface.
 
@@ -477,7 +494,7 @@ class GgufEvalProvider:
         text = inner.generate(full_prompt, context=context)  # type: ignore[attr-defined]
         elapsed_ms = (time.perf_counter() - started) * 1000.0
         return LLMResponse(
-            text=(text or "").strip(),
+            text=_strip_trailing_citation_run((text or "").strip()),
             provider="gguf",
             model=self.model,
             elapsed_ms=round(elapsed_ms, 2),
