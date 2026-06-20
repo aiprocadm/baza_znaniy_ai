@@ -41,3 +41,27 @@ def get_batch(
     x = torch.stack([torch.from_numpy(data[i : i + block_size].astype(np.int64)) for i in ix])
     y = torch.stack([torch.from_numpy(data[i + 1 : i + 1 + block_size].astype(np.int64)) for i in ix])
     return x.to(device), y.to(device)
+
+
+def encode_corpus_split(
+    text: str,
+    tokenizer: BPETokenizer,
+    *,
+    train_path,
+    val_path,
+    val_frac: float = 0.05,
+) -> tuple[int, int]:
+    """Encode once, then reserve the LAST `val_frac` of tokens as a held-out
+    val.bin. Returns (n_train, n_val)."""
+    ids = tokenizer.encode(text)
+    if ids and max(ids) > 65535:
+        raise ValueError(f"token id {max(ids)} exceeds uint16; vocab too large for .bin")
+    arr = np.array(ids, dtype=np.uint16)
+    n_val = int(len(arr) * val_frac)
+    split = len(arr) - n_val
+    train_arr, val_arr = arr[:split], arr[split:]
+    for out_path, chunk in ((train_path, train_arr), (val_path, val_arr)):
+        out = Path(out_path)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        chunk.tofile(out)
+    return len(train_arr), len(val_arr)
