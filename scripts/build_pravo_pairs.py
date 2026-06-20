@@ -73,7 +73,9 @@ def main(argv: list[str] | None = None) -> None:
         raise SystemExit("Store is empty — run scripts.ingest_pravo first (check KB_MVP_DB_PATH).")
 
     queries = articles_to_queries(docs)
-    golden = load_golden_questions(Path(args.golden)) | load_golden_questions(Path(args.golden_natural))
+    golden = load_golden_questions(Path(args.golden)) | load_golden_questions(
+        Path(args.golden_natural)
+    )
 
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)

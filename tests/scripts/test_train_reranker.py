@@ -133,7 +133,7 @@ def test_query_grouped_batches_deterministic_and_drops_unrankable():
     assert all(len(enumerate_pairs(g)) >= 1 for g in b1)
 
 
-def test_init_from_defaults_to_base_model(monkeypatch):
+def test_init_from_defaults_to_base_model(monkeypatch, tmp_path):
     import scripts.train_reranker as tr
 
     captured = {}
@@ -143,23 +143,37 @@ def test_init_from_defaults_to_base_model(monkeypatch):
         return {"val_pairs": 0, "val_pearson_vs_teacher": 0.0, "device": "cpu"}
 
     monkeypatch.setattr(tr, "train", fake_train)
-    monkeypatch.setattr(tr, "load_pairs", lambda p: [
-        {"query": "a", "text": "t", "teacher_score": 1.0},
-        {"query": "b", "text": "u", "teacher_score": 0.0},
-    ])
-    tr.main(["--pairs", "x.jsonl", "--out", "o", "--epochs", "1"])
+    monkeypatch.setattr(
+        tr,
+        "load_pairs",
+        lambda p: [
+            {"query": "a", "text": "t", "teacher_score": 1.0},
+            {"query": "b", "text": "u", "teacher_score": 0.0},
+        ],
+    )
+    tr.main(["--pairs", "x.jsonl", "--out", str(tmp_path / "o"), "--epochs", "1"])
     assert captured["init_from"] == "cointegrated/rubert-tiny2"
 
 
-def test_init_from_override_is_passed_through(monkeypatch):
+def test_init_from_override_is_passed_through(monkeypatch, tmp_path):
     import scripts.train_reranker as tr
 
     captured = {}
-    monkeypatch.setattr(tr, "train", lambda rt, rv, **kw: captured.update(kw) or
-                        {"val_pairs": 0, "val_pearson_vs_teacher": 0.0, "device": "cpu"})
-    monkeypatch.setattr(tr, "load_pairs", lambda p: [
-        {"query": "a", "text": "t", "teacher_score": 1.0},
-        {"query": "b", "text": "u", "teacher_score": 0.0},
-    ])
-    tr.main(["--pairs", "x.jsonl", "--out", "o", "--init-from", "var/models/stage1"])
+    monkeypatch.setattr(
+        tr,
+        "train",
+        lambda rt, rv, **kw: captured.update(kw)
+        or {"val_pairs": 0, "val_pearson_vs_teacher": 0.0, "device": "cpu"},
+    )
+    monkeypatch.setattr(
+        tr,
+        "load_pairs",
+        lambda p: [
+            {"query": "a", "text": "t", "teacher_score": 1.0},
+            {"query": "b", "text": "u", "teacher_score": 0.0},
+        ],
+    )
+    tr.main(
+        ["--pairs", "x.jsonl", "--out", str(tmp_path / "o"), "--init-from", "var/models/stage1"]
+    )
     assert captured["init_from"] == "var/models/stage1"
