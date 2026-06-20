@@ -48,6 +48,13 @@ def load_golden_questions(path: Path) -> frozenset[str]:
     return frozenset(item.question for item in load_golden(path))
 
 
+def limit_queries(queries: list[tuple[str, str]], limit: int) -> list[tuple[str, str]]:
+    """First ``limit`` queries (0 or negative => all). Caps the teacher pass for a
+    bounded smoke, and lets a full run be chunked under the ~10-min background-
+    process reaping window (CPU teacher over all 6141 articles takes hours)."""
+    return queries[:limit] if limit and limit > 0 else list(queries)
+
+
 def main(argv: list[str] | None = None) -> None:
     import logging
 
@@ -58,6 +65,9 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--teacher", default=DEFAULT_TEACHER)
     parser.add_argument("--k", type=int, default=20, help="hard negatives mined per query")
     parser.add_argument("--batch", type=int, default=16)
+    parser.add_argument(
+        "--limit", type=int, default=0, help="cap to first N articles (0 = all; for smoke/chunking)"
+    )
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
 
@@ -72,7 +82,7 @@ def main(argv: list[str] | None = None) -> None:
     if not docs:
         raise SystemExit("Store is empty — run scripts.ingest_pravo first (check KB_MVP_DB_PATH).")
 
-    queries = articles_to_queries(docs)
+    queries = limit_queries(articles_to_queries(docs), args.limit)
     golden = load_golden_questions(Path(args.golden)) | load_golden_questions(
         Path(args.golden_natural)
     )

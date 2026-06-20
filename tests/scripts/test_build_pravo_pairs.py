@@ -2,7 +2,7 @@
 
 import json as _json
 
-from scripts.build_pravo_pairs import articles_to_queries, load_golden_questions
+from scripts.build_pravo_pairs import articles_to_queries, limit_queries, load_golden_questions
 
 
 def test_articles_to_queries_uses_heading_topic_and_source_key():
@@ -40,3 +40,14 @@ def test_load_golden_questions_reads_instruction_field(tmp_path):
 
 def test_load_golden_questions_missing_file_is_empty(tmp_path):
     assert load_golden_questions(tmp_path / "nope.jsonl") == frozenset()
+
+
+def test_limit_queries_caps_to_first_n():
+    q = [("q1", "a"), ("q2", "b"), ("q3", "c")]
+    assert limit_queries(q, 2) == [("q1", "a"), ("q2", "b")]
+
+
+def test_limit_queries_zero_or_negative_returns_all():
+    q = [("q1", "a"), ("q2", "b")]
+    assert limit_queries(q, 0) == q
+    assert limit_queries(q, -1) == q
