@@ -170,3 +170,47 @@ from rank 2–5 up to rank 1. That is exactly the move that matters for a RAG pr
 
 Pipeline banked: resumable ingest, structural + natural goldens, two-way harness,
 detached-run recipe for the slow teacher. Final decision is the user's.
+
+## Phase 1 CPU smoke (2026-06-21) — two-stage student trained end-to-end
+
+Ran the full Phase 1 pipeline (plan Task 6) on CPU, detached (no GPU on this box;
+`torch 2.12.0+cpu`). All artifacts under `var/` (untracked).
+
+**Pipeline (all green):** `build_mrtydi_pairs --limit 2000 --negs 8` → 18 000 stage-1
+pairs → `train_reranker --loss pairwise --epochs 1` (stage-1, **val_pearson 0.44**,
+`var/models/kbai-reranker-ru-stage1`) → `build_pravo_pairs --limit 300 --k 12` →
+**3552** teacher-scored pairs (**anti-leak vs both goldens = 0/0**) →
+`train_reranker --init-from stage1 --epochs 1 --lr 1e-5` (stage-2 v2).
+
+**Gate (golden_pravo_natural, n=36):** student **catastrophically below base.**
+
+| run | hit@1 | hit@5 | mrr@5 | hit@10 |
+|---|---|---|---|---|
+| base (e5-small) | 0.778 | 0.917 | 0.832 | 0.944 |
+| teacher bge (Phase 0) | 0.889 | 0.944 | 0.917 | 0.972 |
+| student v2 (stage-2, 1 ep) | 0.056 | 0.278 | 0.148 | 0.667 |
+| student v3 (stage-2, 4 ep, lr 3e-5) | 0.111 | 0.306 | 0.172 | 0.639 |
+
+**Root cause (NOT a bug — systematic-debugging Phase 1 evidence):**
+- Integration/sign/degeneracy **refuted**: through the *identical* rerank path
+  (`app/retriever/rerank.py` → `CrossEncoder.predict` → sort desc), bge puts gold at
+  rank 0 on every probed item; student scores have real spread (std ≈ 0.07–0.10, not
+  constant). Score-dump `var/diag_reranker_scores.py` on 4 natural items: student
+  *demotes* gold the bi-encoder already ranked #1 (0→5, 0→3); **stage-1-only is even
+  worse** (gold ranks 9/14/6 vs two-stage 5/11/3).
+- Diagnosis: the smoke-budget student is **undertrained / too weak** to beat a
+  near-ceiling e5 base. Reranking a base that already nails hit@1 with weak,
+  relevance-misaligned scores actively degrades it (hit@1 below random).
+
+**Cheap CPU test — "more epochs" (1→4 stage-2):** loss 0.68→0.51, val_pearson
+0.27→0.35, hit@1 0.056→0.111 — everything moves the right way (undertraining
+confirmed *directionally*), but the gain (+0.055 hit@1) is ~10× too small to close
+the −0.667 gap. **Cheap lever exhausted.** Bottleneck is upstream: weak stage-1
+(2000 mr-TyDi queries / 1 epoch), small pravo set (300 queries), and possibly
+rubert-tiny2 (29M) capacity vs bge (568M) on a near-ceiling base.
+
+**Verdict:** smoke gate **NO-GO**, but it is the *expected* outcome for a 1–4-epoch
+budget against a strong base — pipeline + headroom are validated, the student just
+needs the full budget. Next real measurement = **Task 7 GPU full run** (full
+mr-TyDi, 2 epochs stage-1; more pravo pairs) on a CUDA box — cannot run here.
+Decision (GPU run vs reconsider the learned-student bet) is the user's.
