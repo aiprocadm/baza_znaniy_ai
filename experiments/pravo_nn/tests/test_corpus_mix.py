@@ -2,8 +2,8 @@ from experiments.pravo_nn.corpus_mix.assemble import mix_corpora
 
 
 def test_mix_is_balanced_by_bytes():
-    law = "закон " * 1000      # large
-    wiki = "статья " * 100     # small
+    law = "закон " * 1000  # large
+    wiki = "статья " * 100  # small
     mixed, manifest = mix_corpora(law, wiki)
     # the larger source is truncated to the smaller's budget -> roughly equal
     assert abs(manifest["law_bytes"] - manifest["wiki_bytes"]) <= len("закон ".encode())

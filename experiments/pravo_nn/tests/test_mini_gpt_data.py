@@ -34,7 +34,10 @@ def test_get_batch_shapes_and_shift(tmp_path):
     assert x.dtype == torch.int64
     # within each sampled window, y is x shifted by one position
     x1, y1 = get_batch(
-        data, block_size=8, batch_size=4, device="cpu",
+        data,
+        block_size=8,
+        batch_size=4,
+        device="cpu",
         generator=torch.Generator().manual_seed(0),
     )
     assert torch.equal(x1[:, 1:], y1[:, :-1])

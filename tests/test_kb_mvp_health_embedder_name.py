@@ -8,6 +8,7 @@ Two fields are locked:
   retrieval-degradation banner so it can surface the issue
   independently of per-query context.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -70,11 +71,11 @@ def test_health_retrieval_degraded_under_hash(hash_embedder_client):
     assert "retrieval" in body, "health() must expose a 'retrieval' block"
     retrieval = body["retrieval"]
 
-    assert retrieval.get("degraded") is True, (
-        "retrieval.degraded must be True when the hashing embedder is active"
-    )
+    assert (
+        retrieval.get("degraded") is True
+    ), "retrieval.degraded must be True when the hashing embedder is active"
 
     reason_keys = [r.get("reason") for r in retrieval.get("reasons", [])]
-    assert "hashing_embedder" in reason_keys, (
-        f"Expected 'hashing_embedder' in retrieval.reasons, got: {reason_keys}"
-    )
+    assert (
+        "hashing_embedder" in reason_keys
+    ), f"Expected 'hashing_embedder' in retrieval.reasons, got: {reason_keys}"

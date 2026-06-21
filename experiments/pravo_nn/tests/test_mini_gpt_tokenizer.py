@@ -64,6 +64,7 @@ def test_split_pattern_is_persisted_and_restored(tmp_path):
 
 def test_loaded_tokenizer_ignores_changed_module_constant(tmp_path, monkeypatch):
     import experiments.pravo_nn.mini_gpt.tokenizer as tokmod
+
     tok = BPETokenizer()
     tok.train(SAMPLE, vocab_size=300)
     tok.save(tmp_path)
