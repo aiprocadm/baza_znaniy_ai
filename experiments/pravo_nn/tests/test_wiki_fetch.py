@@ -15,7 +15,12 @@ _PAYLOAD = json.dumps(
         "batchcomplete": "",
         "query": {
             "pages": {
-                "12": {"pageid": 12, "ns": 0, "title": "Пушкин", "extract": "Поэт.\n== Жизнь ==\nРодился."},
+                "12": {
+                    "pageid": 12,
+                    "ns": 0,
+                    "title": "Пушкин",
+                    "extract": "Поэт.\n== Жизнь ==\nРодился.",
+                },
                 "34": {"pageid": 34, "ns": 0, "title": "Стуб", "extract": ""},
             }
         },

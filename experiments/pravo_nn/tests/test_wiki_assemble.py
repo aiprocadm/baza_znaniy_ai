@@ -10,13 +10,13 @@ from experiments.pravo_nn.wiki_collector.config import WikiConfig
 def test_accumulate_stops_at_target_and_dedupes():
     arts = [
         ("A", "x" * 100),
-        ("A", "x" * 100),   # duplicate title — skipped
+        ("A", "x" * 100),  # duplicate title — skipped
         ("B", "y" * 100),
-        ("C", "z" * 100),   # should not be reached once target hit at B
+        ("C", "z" * 100),  # should not be reached once target hit at B
     ]
     kept, total = accumulate(iter(arts), target_bytes=150)
     titles = [t for t, _ in kept]
-    assert titles == ["A", "B"]      # dedup + stopped after crossing 150 bytes
+    assert titles == ["A", "B"]  # dedup + stopped after crossing 150 bytes
     assert total >= 150
 
 
