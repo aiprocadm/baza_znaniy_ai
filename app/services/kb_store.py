@@ -65,7 +65,9 @@ VALID_MESSAGE_ROLES = {"user", "assistant", "system"}
 
 class _EmbedderLike(Protocol):
     name: str
-    dimension: int
+
+    @property
+    def dimension(self) -> int: ...
 
     def embed(self, text: str) -> List[float]: ...
 

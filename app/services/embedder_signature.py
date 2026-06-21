@@ -17,7 +17,9 @@ SIGNATURE_KEY = "sig"
 
 class _HasSignature(Protocol):
     name: str
-    dimension: int
+
+    @property
+    def dimension(self) -> int: ...
 
 
 class EmbedderMismatchError(RuntimeError):
