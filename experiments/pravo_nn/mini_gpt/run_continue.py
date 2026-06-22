@@ -28,7 +28,7 @@ if __name__ == "__main__":
     train(
         max_steps=max_steps,
         batch_size=8,
-        log_interval=50,   # finer cadence (~6 min/line) so monitoring sees progress, not a 28-min blind gap
+        log_interval=50,  # finer cadence (~6 min/line) so monitoring sees progress, not a 28-min blind gap
         eval_interval=250,
         resume_from=_DATA / "checkpoints" / "ckpt.pt",
     )
