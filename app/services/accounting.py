@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Protocol, Any, cast
+from typing import Protocol, Any
 from sqlmodel import select
 
 from app.models.file import BillingEventRecord, RagRunRecord, RagRunSourceRecord, UsageEventRecord
@@ -91,11 +91,11 @@ class SqlUsageSink:
             session.add(run)
             session.commit()
             session.refresh(run)
+            assert run.id is not None  # populated by session.refresh above
             for source in sources:
                 session.add(
                     RagRunSourceRecord(
-                        # ``run.id`` is populated by ``session.refresh`` above.
-                        rag_run_id=int(cast(int, run.id)),
+                        rag_run_id=run.id,
                         source_file=source.get("file"),
                         source_page=source.get("page"),
                         score=source.get("score"),

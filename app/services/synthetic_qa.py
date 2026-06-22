@@ -8,7 +8,7 @@ import re
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Any, Iterator, Protocol, cast
+from typing import Iterator, Protocol, cast
 
 LOGGER = logging.getLogger(__name__)
 
@@ -488,9 +488,10 @@ def load_processed_chunk_ids(path: Path) -> set[int]:
                 continue
             raw_id = meta.get("source_chunk_id")
             try:
-                # ``raw_id`` may be ``None``/non-numeric; ``int()`` raising
-                # TypeError/ValueError is the intended skip path below.
-                processed.add(int(cast(Any, raw_id)))
+                # ``raw_id`` may be ``None``/non-numeric; narrow ``None`` away for
+                # the type checker. A bad value still makes ``int()`` raise
+                # TypeError/ValueError — the intended skip path below.
+                processed.add(int(cast("str | int", raw_id)))
             except (TypeError, ValueError):
                 continue
     return processed
