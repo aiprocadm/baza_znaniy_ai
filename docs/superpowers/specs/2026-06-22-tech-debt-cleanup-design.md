@@ -71,33 +71,38 @@ docs no longer claim a backend/ guard exists.
 
 ---
 
-## Stream 2 — Config footguns (1–2 PR)
+## Stream 2 — Config footguns (1 PR, characterization test only)
 
-Two startup-time guards that surface knowledge currently buried in docs.
+**Investigation finding (2026-06-22):** both config traps are ALREADY guarded in
+the codebase. This stream is reduced to closing the single remaining coverage
+gap — no new runtime behaviour.
 
-### 2a. Loud hashing-embedder warning
+### 2b. Dimension-mismatch guard — ALREADY DONE, do not reimplement
 
-When the app starts with `KB_EMBEDDINGS_BACKEND` resolving to the `hash`
-fallback (the default when no real backend is configured), emit a clear `WARNING`
-log: search quality will be near-random; configure Ollama/API. Source of the
-fallback decision: `app/services/kb_embeddings.py`.
+`app/services/embedder_signature.py:verify_or_store()` raises
+`EmbedderMismatchError` (with a `kb-cli reindex --embedder <name>` instruction)
+when the active embedder's signature disagrees with the stored index signature.
+It is wired into `KnowledgeBaseStore.__init__` via `_verify_embedder_signature()`
+(`app/services/kb_store.py:232`), so it fires when the store opens (startup /
+first use), including a TOCTOU lock and a legacy-index backfill path. The
+`/api/kb` health endpoint additionally reports `EMBEDDING_DIM_MISMATCH`
+(CRITICAL), and the FAISS/Qdrant backends raise on dimension mismatch.
+Covered by **7 passing tests** in `tests/test_embedder_signature.py` (unit +
+store-level integration + legacy-upgrade path). **Leave it untouched.**
 
-### 2b. Dimension-mismatch guard (forgotten reindex)
+### 2a. Hashing-embedder warning — exists, missing a test
 
-At startup, compare the vector dimension stored in the index against the current
-embedder's dimension. On mismatch, emit a loud `WARNING` pointing at
-`kb-cli reindex --embedder <name>`. **Default behaviour: warn, do not refuse
-start** — an optional env flag (e.g. `KB_STRICT_EMBEDDER=1`) upgrades it to a
-hard refusal for operators who want a fail-closed deployment. Reuse/extend the
-existing check in `app/eval/guards.py:ensure_real_embedder` rather than writing a
-new dimension probe.
+`app/services/kb_embeddings.py:_build_from_env()` already logs a `WARNING` when it
+falls back to the hashing embedder while `KB_API_KEY` is set (gated on the key so
+unit tests stay quiet; fires lazily at first `get_embedder()` build). The only
+gap: **no test pins this behaviour.** Add a characterization test so the working
+warning cannot silently regress. Do NOT broaden the trigger or move it to
+startup — that was considered and rejected as YAGNI (it would add test noise for
+no real-world gain).
 
-**Risk:** low-medium (startup path). **TDD:** test that the hash backend logs a
-warning; test that a dimension mismatch logs a warning by default and raises
-under the strict flag. Behaviour of search itself is unchanged.
-
-**Definition of done:** both traps are observable in logs at startup; strict flag
-documented in `.env.example`.
+**Risk:** minimal (test-only). **Definition of done:** a test asserts the warning
+fires when falling back to hash with `KB_API_KEY` set, and does NOT fire without
+the key. No production code changes.
 
 ---
 
@@ -149,7 +154,7 @@ never gates streams 1–3. **Definition of done (per pass):** N more files in
 | Stream | PRs | Risk | Primary verification |
 |--------|-----|------|----------------------|
 | 1 backend/ delete | 1 | medium (CI) | full suite green, no orphaned `needs:` |
-| 2 config footguns | 1–2 | low-med | TDD on startup warnings/strict flag |
+| 2 config footguns | 1 | minimal | characterization test for hash warning (2b already done) |
 | 3 markers | 1 | minimal | manual read of four banners |
 | 4 mypy ratchet | N | low | ratchet green, baseline strictly down |
 
