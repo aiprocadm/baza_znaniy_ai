@@ -141,7 +141,7 @@ class UserRecord(SQLModel, table=True):
     @field_validator("email")
     @classmethod
     def _normalise_email(cls, value: Optional[str]) -> Optional[str]:
-        if value in (None, ""):
+        if value is None or value == "":
             return None
         try:
             return normalise_email(value)

@@ -24,6 +24,12 @@ CLEAN_FILES: list[str] = [
     "app/api/v1/search.py",
     "app/services/vectorstore.py",
     "app/api/v1/users.py",
+    # 2026-06-22 drive-to-zero pass
+    "app/services/synthetic_qa.py",
+    "app/worker/main.py",
+    "app/llm/api_provider.py",
+    "app/models/entities.py",
+    "app/services/accounting.py",
 ]
 
 

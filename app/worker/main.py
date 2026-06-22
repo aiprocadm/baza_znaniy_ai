@@ -7,6 +7,7 @@ import logging
 import signal
 from contextlib import suppress
 from datetime import timezone
+from functools import partial
 
 from app.core.config import get_settings
 from app.ingest import IngestService, IngestWorker
@@ -37,7 +38,7 @@ def _install_signal_handlers() -> None:
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGTERM, signal.SIGINT):
         try:
-            loop.add_signal_handler(sig, lambda s=sig: _handle_signal(s))
+            loop.add_signal_handler(sig, partial(_handle_signal, sig))
         except NotImplementedError:  # pragma: no cover - Windows fallback
             signal.signal(sig, lambda *_args, _sig=sig: _handle_signal(_sig))
         except RuntimeError:  # pragma: no cover - loop not running yet

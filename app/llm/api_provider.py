@@ -72,7 +72,9 @@ class ApiProvider:
         self.ensure_ready()
 
         assert httpx is not None  # narrow type after readiness check
-        url = self.settings.llm_api_base_url.rstrip("/") + "/v1/chat/completions"
+        # ``ensure_ready`` above guarantees a non-empty base URL.
+        base_url = cast(str, self.settings.llm_api_base_url)
+        url = base_url.rstrip("/") + "/v1/chat/completions"
 
         payload: dict[str, Any] = {
             "model": self.settings.llm_api_model,
