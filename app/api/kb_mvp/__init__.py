@@ -22,8 +22,12 @@ from __future__ import annotations
 from .common import router, public, protected
 
 # Importing the endpoint modules registers their routes on the shared
-# ``public`` / ``protected`` routers via decorator side-effects.
-from . import health, documents, search, chat  # noqa: F401,E402
+# ``public`` / ``protected`` routers via decorator side-effects. ``health`` is
+# aliased so it does not shadow the re-exported ``health`` *function* below
+# (line 64); the route-registration side-effect fires regardless of the bound
+# name, and ``from app.api.kb_mvp import health`` still resolves to the function.
+from . import health as _health_module  # noqa: F401,E402
+from . import documents, search, chat  # noqa: F401,E402
 
 # Wire sub-routers into the top-level router (same order/paths as before).
 router.include_router(public)
@@ -61,7 +65,7 @@ from .rag import (  # noqa: E402,F401
     _generate_answer,
     _retrieve_with_rerank,
 )
-from .health import health, providers  # noqa: E402,F401,F811
+from .health import health, providers  # noqa: E402,F401
 from .documents import (  # noqa: E402,F401
     create_document,
     delete_document,

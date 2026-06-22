@@ -30,6 +30,13 @@ CLEAN_FILES: list[str] = [
     "app/llm/api_provider.py",
     "app/models/entities.py",
     "app/services/accounting.py",
+    # 2026-06-23 drive-to-zero pass 2
+    "app/api/kb_mvp/documents.py",
+    "app/api/kb_mvp/__init__.py",
+    "app/memory/__init__.py",
+    "app/api/v1/admin.py",
+    "app/models/engine_guard.py",
+    "app/api/error_responses.py",
 ]
 
 

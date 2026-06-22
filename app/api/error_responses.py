@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Any, cast
 
 from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from starlette.types import ExceptionHandler
 
 from app.api.status_codes import HTTP_UNPROCESSABLE_CONTENT
 
@@ -66,8 +67,14 @@ async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONR
 def register_error_handlers(app: FastAPI) -> None:
     """Install standardised exception handlers on *app*."""
 
-    app.add_exception_handler(HTTPException, http_exception_handler)
-    app.add_exception_handler(RequestValidationError, validation_exception_handler)
+    # Starlette types ``add_exception_handler`` for a handler taking the base
+    # ``Exception``; our handlers narrow to the registered subtype, which is the
+    # only type Starlette dispatches to them. Casting documents that the
+    # signatures are compatible by construction (no runtime effect).
+    app.add_exception_handler(HTTPException, cast(ExceptionHandler, http_exception_handler))
+    app.add_exception_handler(
+        RequestValidationError, cast(ExceptionHandler, validation_exception_handler)
+    )
     app.add_exception_handler(Exception, unhandled_exception_handler)
 
 
