@@ -11,7 +11,7 @@ This file provides guidance to OpenAI Codex when working with code in this repos
 
 The repo intentionally ships **two parallel HTTP surfaces**:
 
-- `/api/kb/*` — single-tenant MVP, single `KB_API_KEY` env, SQLite state. Source: `app/api/kb_mvp.py` (large file, ~1200 LoC).
+- `/api/kb/*` — single-tenant MVP, single `KB_API_KEY` env, SQLite state. Source: `app/api/kb_mvp/` (package; split from the former single-file kb_mvp.py).
 - `/api/v1/*` — multi-tenant with JWT/RBAC, Postgres + Qdrant. Source: `app/api/v1/*.py`.
 
 Full rationale and the "when to revisit" criteria are in `docs/architecture.md`. **Unifying them is a known anti-pattern** — it forces MVP installs to carry ~2 GB of multi-tenant deps. If you spot the duplication and feel a refactor urge, read `docs/architecture.md` first.
