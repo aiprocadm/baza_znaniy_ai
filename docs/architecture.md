@@ -14,6 +14,15 @@ The codebase exposes two parallel HTTP API surfaces:
   qdrant-client, sentence-transformers, llama-cpp-python). Designed for
   multi-tenant SaaS or large internal deployments.
 
+## Where do I edit X?
+
+| I need to change… | Edit… |
+|---|---|
+| End-user chat / citation UI | `data/www/` |
+| Admin / ops / diagnostics UI | `frontend/` |
+| Single-tenant MVP API (`/api/kb/*`) | `app/api/kb_mvp/` |
+| Multi-tenant API (`/api/v1/*`) | `app/api/v1/` |
+
 ### Why two paths
 
 The MVP path was added later for two reasons:

@@ -1,5 +1,11 @@
 # KB.AI Operations Console (Frontend)
 
+> **TWO-FRONTENDS NOTE:** this `frontend/` app is the **operations-console**
+> (admin/diagnostic UI — TS, Vitest, Tailwind live here). Its twin is the
+> built-in **end-user MVP UI** in `data/www/` (vanilla HTML, served by FastAPI).
+> Admin/ops changes go here; end-user chat changes go in `data/www/`. See
+> `docs/architecture.md`.
+
 Современный интерфейс управления платформой KB.AI на React + Vite + TailwindCSS.
 
 ## Что здесь есть

@@ -9,6 +9,12 @@ This package is the split of the former single-file ``kb_mvp.py``. The
 public import surface (``router`` plus the helpers/models/prompt that
 tests and ``app/eval`` import) is re-exported here so
 ``from app.api.kb_mvp import X`` keeps working unchanged.
+
+TWIN-SURFACE NOTE — do not unify. This is the SINGLE-TENANT MVP surface
+(/api/kb/*, one KB_API_KEY, SQLite state). Its deliberate twin is the
+MULTI-TENANT mature surface in app/api/v1/* (JWT/RBAC, Postgres + Qdrant).
+Merging them is a known anti-pattern (forces MVP installs to carry ~2 GB of
+multi-tenant deps). See docs/architecture.md before touching either.
 """
 
 from __future__ import annotations
