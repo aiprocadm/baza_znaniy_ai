@@ -27,7 +27,9 @@ def get_device() -> str:
     return "cuda" if torch.cuda.is_available() else "cpu"
 
 
-def save_checkpoint(model, cfg: GPTConfig, *, tokenizer_dir: str, step: int, val_loss: float, path, optimizer=None) -> None:
+def save_checkpoint(
+    model, cfg: GPTConfig, *, tokenizer_dir: str, step: int, val_loss: float, path, optimizer=None
+) -> None:
     out = Path(path)
     out.parent.mkdir(parents=True, exist_ok=True)
     payload = {
@@ -52,7 +54,9 @@ def _lr_at(step: int, *, base_lr: float, warmup: int, total: int, min_lr: float)
 
 
 @torch.no_grad()
-def estimate_loss(model, data, *, block_size: int, batch_size: int, device: str, eval_iters: int = 20) -> float:
+def estimate_loss(
+    model, data, *, block_size: int, batch_size: int, device: str, eval_iters: int = 20
+) -> float:
     model.train(False)  # inference mode (disables dropout) for a clean val measurement
     losses = []
     for _ in range(eval_iters):
@@ -113,7 +117,11 @@ def train(
     n_params = sum(p.numel() for p in model.parameters())
     LOGGER.info(
         "device=%s params=%.2fM block=%d vocab=%d start_step=%d",
-        device, n_params / 1e6, cfg.block_size, cfg.vocab_size, start_step,
+        device,
+        n_params / 1e6,
+        cfg.block_size,
+        cfg.vocab_size,
+        start_step,
     )
 
     data = load_bin(data_dir / "train.bin")
@@ -124,7 +132,9 @@ def train(
     last_val = float("inf")
     for local in range(max_steps):
         for g in opt.param_groups:
-            g["lr"] = _lr_at(local, base_lr=base_lr, warmup=warmup, total=max_steps, min_lr=base_lr / 10)
+            g["lr"] = _lr_at(
+                local, base_lr=base_lr, warmup=warmup, total=max_steps, min_lr=base_lr / 10
+            )
         x, y = get_batch(data, block_size=cfg.block_size, batch_size=batch_size, device=device)
         _, loss = model(x, targets=y)
         opt.zero_grad(set_to_none=True)
@@ -135,22 +145,46 @@ def train(
         if local % log_interval == 0:
             LOGGER.info("step %d (local %d/%d) loss %.4f", abs_step, local, max_steps, last_loss)
         if val_data is not None and local > 0 and local % eval_interval == 0:
-            last_val = estimate_loss(model, val_data, block_size=cfg.block_size, batch_size=batch_size, device=device, eval_iters=eval_iters)
+            last_val = estimate_loss(
+                model,
+                val_data,
+                block_size=cfg.block_size,
+                batch_size=batch_size,
+                device=device,
+                eval_iters=eval_iters,
+            )
             LOGGER.info("step %d val_loss %.4f", abs_step, last_val)
         if local > 0 and local % ckpt_interval == 0:
             save_checkpoint(
-                model, cfg, tokenizer_dir="data/tokenizer", step=abs_step,
+                model,
+                cfg,
+                tokenizer_dir="data/tokenizer",
+                step=abs_step,
                 val_loss=(last_val if val_data is not None else last_loss),
-                path=ckpt_path, optimizer=opt,
+                path=ckpt_path,
+                optimizer=opt,
             )
 
     final_val = (
-        estimate_loss(model, val_data, block_size=cfg.block_size, batch_size=batch_size, device=device, eval_iters=eval_iters)
-        if val_data is not None else last_loss
+        estimate_loss(
+            model,
+            val_data,
+            block_size=cfg.block_size,
+            batch_size=batch_size,
+            device=device,
+            eval_iters=eval_iters,
+        )
+        if val_data is not None
+        else last_loss
     )
     save_checkpoint(
-        model, cfg, tokenizer_dir="data/tokenizer", step=start_step + max_steps,
-        val_loss=final_val, path=ckpt_path, optimizer=opt,
+        model,
+        cfg,
+        tokenizer_dir="data/tokenizer",
+        step=start_step + max_steps,
+        val_loss=final_val,
+        path=ckpt_path,
+        optimizer=opt,
     )
     LOGGER.info("done; final train-loss %.4f val-loss %.4f -> %s", last_loss, final_val, ckpt_path)
     return ckpt_path
@@ -165,8 +199,13 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--batch-size", type=int, default=32)
     p.add_argument("--eval-interval", type=int, default=500)
     default_ckpt = str(_DATA / "checkpoints" / "ckpt.pt")
-    p.add_argument("--resume", nargs="?", const=default_ckpt, default=None,
-                   help="resume (warm-start) from a checkpoint; bare flag uses the default ckpt path")
+    p.add_argument(
+        "--resume",
+        nargs="?",
+        const=default_ckpt,
+        default=None,
+        help="resume (warm-start) from a checkpoint; bare flag uses the default ckpt path",
+    )
     args = p.parse_args(argv)
     train(
         max_steps=args.max_steps,

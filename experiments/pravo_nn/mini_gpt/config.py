@@ -11,7 +11,7 @@ from dataclasses import dataclass
 @dataclass(frozen=True)
 class GPTConfig:
     vocab_size: int = 8000  # overwritten at train time to the tokenizer's real size
-    block_size: int = 256   # context length (tokens)
+    block_size: int = 256  # context length (tokens)
     n_layer: int = 6
     n_head: int = 6
     n_embd: int = 384

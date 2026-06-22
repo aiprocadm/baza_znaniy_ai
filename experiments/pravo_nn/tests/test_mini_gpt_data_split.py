@@ -13,7 +13,8 @@ def _tok():
 def test_encode_split_writes_disjoint_train_and_val(tmp_path):
     tok = _tok()
     n_train, n_val = encode_corpus_split(
-        SAMPLE, tok,
+        SAMPLE,
+        tok,
         train_path=tmp_path / "train.bin",
         val_path=tmp_path / "val.bin",
         val_frac=0.1,

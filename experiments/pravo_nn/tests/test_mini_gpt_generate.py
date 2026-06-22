@@ -26,9 +26,7 @@ def _make_ckpt(tmp_path):
 def test_load_checkpoint_restores_identical_weights(tmp_path):
     ckpt_path, model, _ = _make_ckpt(tmp_path)
     loaded, meta = load_checkpoint(ckpt_path, device="cpu")
-    for (k1, v1), (k2, v2) in zip(
-        model.state_dict().items(), loaded.state_dict().items()
-    ):
+    for (k1, v1), (k2, v2) in zip(model.state_dict().items(), loaded.state_dict().items()):
         assert k1 == k2 and torch.equal(v1, v2)
     assert meta["step"] == 1 and meta["val_loss"] == 9.9
 
