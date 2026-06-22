@@ -13,7 +13,7 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 include = ["app*", "scripts*"]
-exclude = ["tests*", "backend*", "frontend*", "data*", "var*", "ops*", "srv*", "docx*", "models*", "alembic*"]
+exclude = ["tests*", "frontend*", "data*", "var*", "ops*", "srv*", "docx*", "models*", "alembic*"]
 
 [tool.setuptools.dynamic]
 dependencies = { file = ["requirements-runtime.txt"] }
@@ -26,20 +26,14 @@ dev = { file = ["requirements-dev.txt"] }
 [tool.black]
 line-length = 100
 target-version = ["py312"]
-extend-exclude = "^/backend/"
 
 [tool.ruff]
 line-length = 100
-extend-exclude = ["backend"]
 
 [tool.ruff.lint]
 ignore = ["E402"]
 
 [tool.mypy]
-# Match the ruff/black exclusion: backend/ is legacy, gated behind a CI label.
-# Note: this is a regex, not a glob.
-exclude = ["^backend/"]
-
 # Third-party libraries we depend on that don't ship type stubs.
 # Telling mypy to skip them removes ~70 "import-not-found" / "import-untyped"
 # errors from the report so the remaining errors are real type problems.

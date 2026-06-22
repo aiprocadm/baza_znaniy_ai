@@ -53,5 +53,3 @@ Until then, treat the two paths as separate products in the same repo.
   full multi-tenant stack).
 - **MVP-only dev:** `uvicorn scripts.dev_server_mvp:app` (loads only the
   `/api/kb/*` router, lightweight deps).
-- **Legacy:** `backend/app/*` is deprecated, kept only for compatibility tests
-  in CI job `legacy-compatibility-tests`.

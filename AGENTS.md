@@ -6,7 +6,6 @@ This file provides guidance to OpenAI Codex when working with code in this repos
 
 - **Production / CI / containers:** `uvicorn app.api.main:app` → `app/core/app.py:create_app`. Full stack (both API surfaces, multi-tenant deps).
 - **MVP-only dev server (light deps, no Qdrant):** `uvicorn scripts.dev_server_mvp:app --reload --port 8001`.
-- **Legacy:** `backend/app/*` is deprecated. CI gates any `backend/**` change behind a `legacy-path-approved` label or `[legacy-ok]` flag in PR title/body. Do not touch it without that approval — the guard in `.github/workflows/ci.yml` will fail the build.
 
 ## Two-path API design — do NOT merge
 
@@ -39,7 +38,7 @@ py -3 -m pytest -m "not requires_postgres"   # skip Postgres-marked tests
 py -3 -m ruff check .                        # lint
 py -3 -m black --check .                     # style
 py -3 -m ruff check . --fix; py -3 -m black .   # autoformat (equiv. `make format`)
-py -3 -m mypy app                            # type-check (excludes backend/)
+py -3 -m mypy app                            # type-check the active runtime tree
 py -3 -m alembic upgrade head                # migrations
 py -3 -m scripts.kb_cli health               # ops CLI: also backup/restore/reindex
 docker compose -f compose.yml up -d --build  # full stack (README quick start)
