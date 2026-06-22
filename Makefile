@@ -7,7 +7,7 @@ PORT ?= 8000
 IMAGE ?= kb-ai:local
 TORCH_INDEX ?= https://download.pytorch.org/whl/cpu
 
-.PHONY: venv install dev lint format test run worker up down migrate seed build clean \
+.PHONY: venv install dev lint format test run worker up down migrate build clean \
         web-install web-lint web-format web-test web-build web-run
 
 venv:
@@ -46,9 +46,6 @@ down:
 
 migrate:
         alembic upgrade head
-
-seed:
-        python -m backend.app.db.seed
 
 build:
         docker build -t $(IMAGE) .

@@ -3,7 +3,6 @@
 - **Runtime source of truth:** `app/`.
 - **Primary UI branch:** `frontend/`.
 - **Embedded diagnostic console:** `app/ui` (встроенный runtime UI для диагностики).
-- **`backend/`** рассматривается как **legacy/experimental** path; изменения допустимы, но требуют явного подтверждения в PR-процессе.
 
 # KB.AI: целевая архитектура (backend + frontend)
 

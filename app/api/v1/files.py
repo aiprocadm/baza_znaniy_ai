@@ -24,8 +24,12 @@ def list_files(
     statement = (
         select(FileRecord, DocumentRecord)
         .where(FileRecord.tenant_id == tenant)
-        .join(DocumentRecord, FileRecord.document_id == DocumentRecord.id, isouter=True)
-        .order_by(FileRecord.created_at.desc())
+        .join(
+            DocumentRecord,
+            FileRecord.document_id == DocumentRecord.id,  # type: ignore[arg-type]  # SQLAlchemy ORM == yields a join condition; SQLModel stubs type it as bool
+            isouter=True,
+        )
+        .order_by(FileRecord.created_at.desc())  # type: ignore[attr-defined]  # SQLModel stubs type the mapped column as its python value (datetime), hiding .desc()
     )
     records = session.exec(statement).all()
     items = [

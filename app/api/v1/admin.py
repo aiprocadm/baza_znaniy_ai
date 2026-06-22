@@ -27,7 +27,9 @@ def list_jobs(
 ) -> JobsResponse:
     """Return information about queued and historical jobs."""
 
-    statement = select(JobRecord).order_by(JobRecord.created_at.desc())
+    statement = select(JobRecord).order_by(
+        JobRecord.created_at.desc()  # type: ignore[attr-defined]  # SQLAlchemy column .desc(), stub gap
+    )
     if tenant_slug:
         statement = statement.where(JobRecord.tenant_slug == tenant_slug)
     if job_type:

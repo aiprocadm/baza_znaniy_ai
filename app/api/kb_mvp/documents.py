@@ -209,6 +209,10 @@ def delete_document(doc_id: int, request: Request) -> dict[str, Any]:
         data_dir = _resolve_data_dir().resolve()
         expected_root = (data_dir / "kb_files").resolve()
         candidate = (data_dir / doc.file_relpath).resolve()
+        # Two names on purpose: ``candidate`` stays a plain ``Path`` for the
+        # traversal check below; ``to_unlink`` is ``Path | None`` so the "refuse"
+        # branch can null it and mypy can track that. Don't collapse them back.
+        to_unlink: Path | None = candidate
         try:
             candidate.relative_to(expected_root)
         except ValueError:
@@ -219,10 +223,10 @@ def delete_document(doc_id: int, request: Request) -> dict[str, Any]:
             )
             # Refuse to unlink anything outside kb_files/ — but still drop the row
             # so the corruption is at least cleared from the DB
-            candidate = None
-        if candidate is not None:
+            to_unlink = None
+        if to_unlink is not None:
             try:
-                candidate.unlink(missing_ok=True)
+                to_unlink.unlink(missing_ok=True)
             except OSError as exc:
                 LOGGER.warning("failed to remove blob for doc %d: %s", doc_id, exc)
 

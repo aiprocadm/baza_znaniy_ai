@@ -139,14 +139,20 @@ def _dict_to_hit(payload: Mapping[str, object], fallback_score: float) -> Search
         score = float(raw_score)  # type: ignore[arg-type]
     except (TypeError, ValueError):
         score = fallback_score
+    # ``payload`` values are typed ``object`` (Mapping[str, object]). The
+    # ``or <int>`` fallback means int() only ever sees the original runtime
+    # value or the literal default; the inline ignores match the existing
+    # ``score`` pattern above and change no runtime behaviour. ``raw_filename``
+    # is hoisted so the isinstance guard can narrow it to ``str | None``.
+    raw_filename = payload.get("filename")
     return SearchHit(
-        document_id=int(payload.get("document_id") or 0),
+        document_id=int(payload.get("document_id") or 0),  # type: ignore[call-overload]
         document_title=str(payload.get("document_title") or ""),
-        chunk_index=int(payload.get("chunk_index") or 0),
+        chunk_index=int(payload.get("chunk_index") or 0),  # type: ignore[call-overload]
         text=str(payload.get("text") or ""),
         score=score,
         source=str(payload.get("source") or "text"),
-        filename=payload.get("filename") if isinstance(payload.get("filename"), str) else None,
+        filename=raw_filename if isinstance(raw_filename, str) else None,
     )
 
 

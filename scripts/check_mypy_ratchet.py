@@ -24,6 +24,29 @@ CLEAN_FILES: list[str] = [
     "app/api/v1/search.py",
     "app/services/vectorstore.py",
     "app/api/v1/users.py",
+    # 2026-06-22 drive-to-zero pass
+    "app/services/synthetic_qa.py",
+    "app/worker/main.py",
+    "app/llm/api_provider.py",
+    "app/models/entities.py",
+    "app/services/accounting.py",
+    # 2026-06-23 drive-to-zero pass 2
+    "app/api/kb_mvp/documents.py",
+    "app/api/kb_mvp/__init__.py",
+    "app/memory/__init__.py",
+    "app/api/v1/admin.py",
+    "app/models/engine_guard.py",
+    "app/api/error_responses.py",
+    # 2026-06-23 drive-to-zero pass 3
+    "app/api/v1/files.py",
+    "app/api/router.py",
+    "app/llm/manager.py",
+    "app/services/kb_llm.py",
+    # 2026-06-23 drive-to-zero pass 4
+    "app/services/kb_rerank.py",
+    "app/rag/context.py",
+    "app/api/kb_mvp/chat.py",
+    "app/chat/postgres_store.py",
 ]
 
 

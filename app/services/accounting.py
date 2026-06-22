@@ -91,10 +91,11 @@ class SqlUsageSink:
             session.add(run)
             session.commit()
             session.refresh(run)
+            assert run.id is not None  # populated by session.refresh above
             for source in sources:
                 session.add(
                     RagRunSourceRecord(
-                        rag_run_id=int(run.id),
+                        rag_run_id=run.id,
                         source_file=source.get("file"),
                         source_page=source.get("page"),
                         score=source.get("score"),

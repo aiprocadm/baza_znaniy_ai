@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, Literal
 
-from sqlalchemy.engine import Engine, make_url
+from sqlalchemy.engine import URL, Engine, make_url
 
 FALLBACK_MARKER = "__kb_ai_engine_fallback__"
 
@@ -48,7 +48,7 @@ class _FallbackConnection:
     def __enter__(self) -> "_FallbackConnection":  # pragma: no cover - trivial
         return self
 
-    def __exit__(self, exc_type, exc, tb) -> bool:  # pragma: no cover - trivial
+    def __exit__(self, exc_type, exc, tb) -> Literal[False]:  # pragma: no cover - trivial
         return False
 
     def execute(self, statement: Any) -> _FallbackResult:
@@ -110,6 +110,7 @@ class SyncEngineGuard:
         if candidate is not None:
             return
 
+        fallback: URL | str  # declared here so mypy sees both branch types
         try:
             fallback = make_url(self._url)
         except Exception:

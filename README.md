@@ -103,7 +103,7 @@ kb-cli health                                    # health-check для cron
 
 ## Архитектура
 
-- **Source-of-truth backend entrypoint:** `app/api/main.py` (инициализирует
+- **Source-of-truth API entrypoint:** `app/api/main.py` (инициализирует
   `app/core/app.py:create_app`). Контейнеры/CI пинят `uvicorn app.api.main:app`.
 - **Source-of-truth runtime path:** `app/` (API, ingestion, worker, retrieval, LLM, встроенный UI).
 - **UI active branch:** `frontend/` — primary web UI. `data/www/` — встроенная

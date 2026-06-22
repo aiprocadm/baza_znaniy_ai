@@ -78,7 +78,9 @@ def _ensure_llm_package_exports() -> None:
         setattr(package, name, value)
 
     existing = set(getattr(package, "__all__", []))
-    package.__all__ = sorted(existing | set(exports))
+    # setattr avoids mypy's "Cannot assign to __all__ of a module" on the
+    # ModuleType stub; identical to ``package.__all__ = ...`` at runtime.
+    setattr(package, "__all__", sorted(existing | set(exports)))
 
 
 _ensure_llm_package_exports()
@@ -105,7 +107,7 @@ def ensure_valid_scaling(scaling: object) -> float:
     candidate = _unwrap_scaling_candidate(scaling)
 
     try:
-        value = float(candidate)
+        value = float(candidate)  # type: ignore[arg-type]  # candidate is intentionally object; a non-numeric raises TypeError, caught below
     except (TypeError, ValueError) as exc:  # pragma: no cover - defensive programming
         raise ValueError("Scaling factor must be a numeric value") from exc
 

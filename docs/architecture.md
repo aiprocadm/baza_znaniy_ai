@@ -5,14 +5,22 @@
 The codebase exposes two parallel HTTP API surfaces:
 
 - **`/api/kb/*`** (MVP) — single-tenant, auth via single `KB_API_KEY` env var,
-  state in one SQLite file (`KB_MVP_DB_PATH`), primarily uses OpenAI-compatible LLM providers (DeepSeek/Groq/Ollama/etc.), with fallback to the app's `state.llm_provider` (llama.cpp when mounted in production) and extractive answers as last resort. Source: `app/api/kb_mvp.py`. Lightweight dependency tree
-  (FastAPI + httpx). Designed for ≤10 person SMB self-hosted deployments.
+  state in one SQLite file (`KB_MVP_DB_PATH`), primarily uses OpenAI-compatible LLM providers (DeepSeek/Groq/Ollama/etc.), with fallback to the app's `state.llm_provider` (llama.cpp when mounted in production) and extractive answers as last resort. Source: the `app/api/kb_mvp/` package (split from the former single-file kb_mvp.py). Lightweight dependency tree (FastAPI + httpx). Designed for ≤10 person SMB self-hosted deployments.
 
 - **`/api/v1/*`** (mature) — multi-tenant with JWT auth + RBAC,
   separate SQL database (PostgreSQL in production, SQLite in dev) for tenant metadata, Qdrant for vectors, supports llama.cpp +
   LoRA adapters. Source: `app/api/v1/*.py`. Heavy dependency tree (sqlmodel,
   qdrant-client, sentence-transformers, llama-cpp-python). Designed for
   multi-tenant SaaS or large internal deployments.
+
+## Where do I edit X?
+
+| I need to change… | Edit… |
+|---|---|
+| End-user chat / citation UI | `data/www/` |
+| Admin / ops / diagnostics UI | `frontend/` |
+| Single-tenant MVP API (`/api/kb/*`) | `app/api/kb_mvp/` |
+| Multi-tenant API (`/api/v1/*`) | `app/api/v1/` |
 
 ### Why two paths
 
@@ -53,5 +61,3 @@ Until then, treat the two paths as separate products in the same repo.
   full multi-tenant stack).
 - **MVP-only dev:** `uvicorn scripts.dev_server_mvp:app` (loads only the
   `/api/kb/*` router, lightweight deps).
-- **Legacy:** `backend/app/*` is deprecated, kept only for compatibility tests
-  in CI job `legacy-compatibility-tests`.

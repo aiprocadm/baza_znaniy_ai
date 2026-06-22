@@ -82,7 +82,10 @@ def select_citations(
             continue
         seen.add(key)
         enriched = dict(hit)
-        meta = enriched.get("meta") if isinstance(enriched.get("meta"), dict) else {}
+        # Hoisted to one local so isinstance can narrow it; don't fold back into
+        # a double ``enriched.get("meta")`` — mypy can't narrow across two calls.
+        raw_meta = enriched.get("meta")
+        meta = raw_meta if isinstance(raw_meta, dict) else {}
         enriched.setdefault("article", meta.get("article"))
         enriched.setdefault("clause", meta.get("clause"))
         enriched.setdefault("revision", meta.get("revision"))

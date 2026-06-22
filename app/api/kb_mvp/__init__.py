@@ -9,6 +9,12 @@ This package is the split of the former single-file ``kb_mvp.py``. The
 public import surface (``router`` plus the helpers/models/prompt that
 tests and ``app/eval`` import) is re-exported here so
 ``from app.api.kb_mvp import X`` keeps working unchanged.
+
+TWIN-SURFACE NOTE — do not unify. This is the SINGLE-TENANT MVP surface
+(/api/kb/*, one KB_API_KEY, SQLite state). Its deliberate twin is the
+MULTI-TENANT mature surface in app/api/v1/* (JWT/RBAC, Postgres + Qdrant).
+Merging them is a known anti-pattern (forces MVP installs to carry ~2 GB of
+multi-tenant deps). See docs/architecture.md before touching either.
 """
 
 from __future__ import annotations
@@ -16,8 +22,12 @@ from __future__ import annotations
 from .common import router, public, protected
 
 # Importing the endpoint modules registers their routes on the shared
-# ``public`` / ``protected`` routers via decorator side-effects.
-from . import health, documents, search, chat  # noqa: F401,E402
+# ``public`` / ``protected`` routers via decorator side-effects. ``health`` is
+# aliased so it does not shadow the re-exported ``health`` *function* below
+# (line 64); the route-registration side-effect fires regardless of the bound
+# name, and ``from app.api.kb_mvp import health`` still resolves to the function.
+from . import health as _health_module  # noqa: F401,E402
+from . import documents, search, chat  # noqa: F401,E402
 
 # Wire sub-routers into the top-level router (same order/paths as before).
 router.include_router(public)
@@ -55,7 +65,7 @@ from .rag import (  # noqa: E402,F401
     _generate_answer,
     _retrieve_with_rerank,
 )
-from .health import health, providers  # noqa: E402,F401,F811
+from .health import health, providers  # noqa: E402,F401
 from .documents import (  # noqa: E402,F401
     create_document,
     delete_document,
