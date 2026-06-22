@@ -9,12 +9,23 @@ we patch _try_build_st_embedder to return None, which is what the real function
 does when the dependency or weights are missing — the exact condition the warning
 is designed to catch."""
 
+from __future__ import annotations
+
 import logging
 from unittest.mock import patch
 
+import app.services.kb_embeddings as emb
 from app.services.kb_embeddings import _build_from_env
 
 _PATCH = "app.services.kb_embeddings._try_build_st_embedder"
+
+
+def setup_function(_):
+    emb.reset_embedder()
+
+
+def teardown_function(_):
+    emb.reset_embedder()
 
 
 def test_hash_fallback_warns_when_api_key_set(caplog):
@@ -23,6 +34,7 @@ def test_hash_fallback_warns_when_api_key_set(caplog):
         with caplog.at_level(logging.WARNING, logger="app.services.kb_embeddings"):
             embedder = _build_from_env(env)
     assert embedder.name == "hash"
+    assert embedder.dimension == 256
     assert any(
         "hashing embedder" in rec.getMessage() and "near-random" in rec.getMessage()
         for rec in caplog.records
