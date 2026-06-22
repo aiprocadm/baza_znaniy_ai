@@ -78,6 +78,8 @@ def _ensure_llm_package_exports() -> None:
         setattr(package, name, value)
 
     existing = set(getattr(package, "__all__", []))
+    # setattr avoids mypy's "Cannot assign to __all__ of a module" on the
+    # ModuleType stub; identical to ``package.__all__ = ...`` at runtime.
     setattr(package, "__all__", sorted(existing | set(exports)))
 
 

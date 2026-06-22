@@ -472,6 +472,8 @@ class GgufEvalProvider:
             from app.core.config import Settings
             from app.llm.llama_cpp_provider import LlamaCppProvider
 
+            # Path(...): Settings.llm_model_path is typed Path, _model_path is str
+            # (pydantic already coerced str→Path at runtime, so this is equivalent).
             settings = Settings(llm_provider="llama-cpp", llm_model_path=Path(self._model_path))
             self._inner = LlamaCppProvider(settings)
         return self._inner
