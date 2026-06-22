@@ -22,7 +22,7 @@ import logging
 import threading
 import time
 from dataclasses import dataclass
-from typing import List, Mapping, Optional, Sequence, SupportsInt, Union, cast
+from typing import List, Mapping, Optional, Sequence
 
 from app.services._envutil import env as _env
 from app.services.kb_store import SearchHit
@@ -139,15 +139,16 @@ def _dict_to_hit(payload: Mapping[str, object], fallback_score: float) -> Search
         score = float(raw_score)  # type: ignore[arg-type]
     except (TypeError, ValueError):
         score = fallback_score
-    # ``payload`` values are typed ``object`` (Mapping[str, object]); the
-    # ``or <default>`` falls back to an int literal, so ``int()`` only ever sees
-    # the original value (an int/str at runtime) or the literal. Cast documents
-    # that the argument is int-coercible without altering runtime behaviour.
+    # ``payload`` values are typed ``object`` (Mapping[str, object]). The
+    # ``or <int>`` fallback means int() only ever sees the original runtime
+    # value or the literal default; the inline ignores match the existing
+    # ``score`` pattern above and change no runtime behaviour. ``raw_filename``
+    # is hoisted so the isinstance guard can narrow it to ``str | None``.
     raw_filename = payload.get("filename")
     return SearchHit(
-        document_id=int(cast(Union[str, SupportsInt], payload.get("document_id") or 0)),
+        document_id=int(payload.get("document_id") or 0),  # type: ignore[call-overload]
         document_title=str(payload.get("document_title") or ""),
-        chunk_index=int(cast(Union[str, SupportsInt], payload.get("chunk_index") or 0)),
+        chunk_index=int(payload.get("chunk_index") or 0),  # type: ignore[call-overload]
         text=str(payload.get("text") or ""),
         score=score,
         source=str(payload.get("source") or "text"),
