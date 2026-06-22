@@ -29,7 +29,6 @@ services:
       - .env
     environment:
       BACKEND_ENTRYPOINT: "app.api.main:app"
-      BACKEND_LEGACY_ENTRYPOINT: "backend.app.main:app"
       INGEST_AUTOSTART_WORKER: "false"
       INGEST_USE_LOCAL_QUEUE: "false"
       QDRANT_URL: "http://qdrant:6333"
