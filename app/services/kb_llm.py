@@ -142,6 +142,9 @@ def _build_config(provider: str, env: Mapping[str, str] | None = None) -> LLMCon
     model = _env(model_env, env) if model_env else None
     if not model:
         model = preset["default_model"]
+    # Every preset defines a non-empty ``default_model``, so ``model`` is now a
+    # non-empty str; assert it for the type checker (the preset value is ``Any``).
+    assert model is not None
 
     api_key = None
     key_env = preset.get("key_env")
@@ -469,7 +472,7 @@ class GgufEvalProvider:
             from app.core.config import Settings
             from app.llm.llama_cpp_provider import LlamaCppProvider
 
-            settings = Settings(llm_provider="llama-cpp", llm_model_path=self._model_path)
+            settings = Settings(llm_provider="llama-cpp", llm_model_path=Path(self._model_path))
             self._inner = LlamaCppProvider(settings)
         return self._inner
 

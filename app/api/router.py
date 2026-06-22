@@ -54,11 +54,11 @@ def _include_with_prefix(target: APIRouter, source: APIRouter, prefix: str) -> N
     for route in routes:
         prefixed = f"{prefix}{route.path}".replace("//", "/")
         if route_type is not None:
-            target._routes.append(
+            target._routes.append(  # type: ignore[attr-defined]  # _routes exists only on the test-stub APIRouter (tests/stubs/fastapi); real FastAPI uses include_router above
                 route_type(route.method, prefixed, route.handler, route.status_code)
             )
         else:  # pragma: no cover - defensive
-            target._routes.append(route)
+            target._routes.append(route)  # type: ignore[attr-defined]  # _routes exists only on the test-stub APIRouter (tests/stubs/fastapi); real FastAPI uses include_router above
 
 
 _include_with_prefix(api_router, kb_mvp_router, "/api/kb")
