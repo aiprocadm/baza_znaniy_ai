@@ -209,6 +209,9 @@ def delete_document(doc_id: int, request: Request) -> dict[str, Any]:
         data_dir = _resolve_data_dir().resolve()
         expected_root = (data_dir / "kb_files").resolve()
         candidate = (data_dir / doc.file_relpath).resolve()
+        # Two names on purpose: ``candidate`` stays a plain ``Path`` for the
+        # traversal check below; ``to_unlink`` is ``Path | None`` so the "refuse"
+        # branch can null it and mypy can track that. Don't collapse them back.
         to_unlink: Path | None = candidate
         try:
             candidate.relative_to(expected_root)

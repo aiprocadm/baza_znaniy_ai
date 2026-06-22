@@ -110,7 +110,7 @@ class SyncEngineGuard:
         if candidate is not None:
             return
 
-        fallback: URL | str
+        fallback: URL | str  # declared here so mypy sees both branch types
         try:
             fallback = make_url(self._url)
         except Exception:
