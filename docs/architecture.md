@@ -5,7 +5,7 @@
 The codebase exposes two parallel HTTP API surfaces:
 
 - **`/api/kb/*`** (MVP) — single-tenant, auth via single `KB_API_KEY` env var,
-  state in one SQLite file (`KB_MVP_DB_PATH`), primarily uses OpenAI-compatible LLM providers (DeepSeek/Groq/Ollama/etc.), with fallback to the app's `state.llm_provider` (llama.cpp when mounted in production) and extractive answers as last resort. Source: `app/api/kb_mvp.py`. Lightweight dependency tree
+  state in one SQLite file (`KB_MVP_DB_PATH`), primarily uses OpenAI-compatible LLM providers (DeepSeek/Groq/Ollama/etc.), with fallback to the app's `state.llm_provider` (llama.cpp when mounted in production) and extractive answers as last resort. Source: `app/api/kb_mvp/` (package; split from the former single-file kb_mvp.py). Lightweight dependency tree
   (FastAPI + httpx). Designed for ≤10 person SMB self-hosted deployments.
 
 - **`/api/v1/*`** (mature) — multi-tenant with JWT auth + RBAC,
