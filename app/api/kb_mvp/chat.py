@@ -210,8 +210,8 @@ async def ask_stream(payload: AskRequest, request: Request) -> StreamingResponse
         model_name: Optional[str] = None
         chunks: list[str] = []
 
-        async def emit_stream(source: AsyncIterator[str]) -> bool:
-            """Forward chunks from *source*. Returns True on success."""
+        async def emit_stream(source: AsyncIterator[str]) -> AsyncIterator[str]:
+            """Forward chunks from *source* as SSE events (async generator)."""
 
             received_any = False
             try:

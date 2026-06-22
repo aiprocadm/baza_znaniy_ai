@@ -5,7 +5,7 @@ from __future__ import annotations
 import time
 import uuid
 from contextlib import contextmanager
-from typing import Iterator, List, Optional, Tuple
+from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 import psycopg
 from psycopg import sql
@@ -25,7 +25,9 @@ class PostgresChatStore(ChatStoreProtocol):
         self._init_schema()
 
     @contextmanager
-    def _connection(self) -> Iterator[psycopg.Connection]:
+    def _connection(self) -> Iterator[psycopg.Connection[Dict[str, Any]]]:
+        # ``dict_row`` makes every row a ``dict[str, Any]`` at runtime, so the
+        # connection is generic over dict rows (enables ``row["col"]`` access).
         connection = psycopg.connect(self.dsn, row_factory=dict_row)
         try:
             yield connection
