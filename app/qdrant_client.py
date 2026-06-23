@@ -3,9 +3,15 @@
 from __future__ import annotations
 
 from functools import lru_cache
-from typing import Iterable, Iterator, Protocol, runtime_checkable, cast
+from typing import TYPE_CHECKING, Iterable, Iterator, Protocol, runtime_checkable, cast
 
 from app.core.config import get_settings
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    # Imported for typing only: the factory wants a concrete ``Settings``, but
+    # pulling it in at runtime would break the lightweight ``SimpleNamespace``
+    # config stub used by tests/test_qdrant_client.py.
+    from app.core.config import Settings
 
 
 @runtime_checkable
@@ -20,8 +26,17 @@ class QdrantSettings(Protocol):
     vector_embed_dimension: int
 
 
+# Declared up front so both the ``except`` and ``else`` branches below assign a
+# value mypy accepts (the inferred type would otherwise be ``ImportError`` from
+# the except branch alone, rejecting the ``None`` in the else branch).
+_VECTOR_STORE_IMPORT_ERROR: ImportError | None
+
 try:  # pragma: no cover - optional dependency surface during import
     from app.retriever import VectorStore, get_vector_store as _get_vector_store_factory
+
+    # Canonical filter contract — imported from the submodule to match the
+    # repo-wide convention (every consumer uses ``app.retriever.vector_store``).
+    from app.retriever.vector_store import SearchFilters
 except ImportError as exc:  # pragma: no cover - import guard executed in tests
     _VECTOR_STORE_IMPORT_ERROR = exc
     _get_vector_store_factory = None  # type: ignore[assignment]
@@ -56,7 +71,11 @@ def _cached_vector_store() -> VectorStore:
             "package is installed correctly",
         ) from _VECTOR_STORE_IMPORT_ERROR
 
-    store = _get_vector_store_factory(_cached_settings())
+    # ``_cached_settings`` is typed as the minimal ``QdrantSettings`` Protocol,
+    # but the factory wants the concrete ``Settings``. The real settings object
+    # is a ``Settings`` instance (the Protocol is a structural subset); cast to
+    # bridge the two without widening the Protocol.
+    store = _get_vector_store_factory(cast("Settings", _cached_settings()))
     if store is None:  # pragma: no cover - defensive guard against misconfigured factories
         raise RuntimeError("Vector store factory returned None")
     return store
@@ -75,7 +94,11 @@ def upsert_chunks(chunks: Iterable[dict[str, object]]) -> None:
 
 
 def search_chunks(query: str, top_k: int = 10) -> list[dict[str, object]]:
-    return _resolve_vector_store().search(query, top_k)
+    # ``filters`` became a required keyword arg on the VectorStore Protocol with
+    # the SearchFilters contract unification (#553-#556). This single-tenant
+    # legacy shim has no tenant context, so it scopes to the default tenant
+    # (matching ``DEFAULT_TENANT`` in app/core/deps.py).
+    return _resolve_vector_store().search(query, top_k, filters=SearchFilters(tenant_id="default"))
 
 
 def reset_collection() -> None:

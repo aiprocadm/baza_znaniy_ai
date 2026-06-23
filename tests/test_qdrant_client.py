@@ -5,10 +5,22 @@ from __future__ import annotations
 import importlib
 import sys
 from collections import deque
-from types import SimpleNamespace
+from dataclasses import dataclass
+from types import ModuleType, SimpleNamespace
 from typing import Iterable
 
 import pytest
+
+
+@dataclass(frozen=True)
+class _StubSearchFilters:
+    """Minimal stand-in for app.retriever.vector_store.SearchFilters.
+
+    Mirrors the one field the shim sets (``tenant_id``); the real dataclass has
+    more, but the shim only constructs ``SearchFilters(tenant_id=...)``.
+    """
+
+    tenant_id: str
 
 
 class VectorStoreStub:
@@ -18,6 +30,7 @@ class VectorStoreStub:
         self.ensure_ready_called = False
         self.upsert_received = None
         self.search_calls = []
+        self.search_filters = []
         self.search_result = search_result if search_result is not None else []
 
     def ensure_ready(self) -> None:  # pragma: no cover - trivial
@@ -26,8 +39,12 @@ class VectorStoreStub:
     def upsert(self, chunks: Iterable[dict[str, object]]):  # pragma: no cover - trivial
         self.upsert_received = list(chunks)
 
-    def search(self, query: str, top_k: int):  # pragma: no cover - trivial
+    def search(self, query: str, top_k: int, *, filters):  # pragma: no cover - trivial
+        # ``filters`` is keyword-only and required, mirroring the real
+        # ``VectorStore`` Protocol (app/retriever/vector_store.py). The shim
+        # must always supply it; a positional-only call would raise here.
         self.search_calls.append((query, top_k))
+        self.search_filters.append(filters)
         return self.search_result
 
 
@@ -70,10 +87,17 @@ def qc_module(monkeypatch):
     )
 
     config_stub = SimpleNamespace(get_settings=lambda: settings)
-    retriever_stub = SimpleNamespace(get_vector_store=lambda _settings: None)
+    # Mirror the production import surface: ``app.qdrant_client`` imports
+    # ``VectorStore``/``get_vector_store`` from the package and ``SearchFilters``
+    # from the ``vector_store`` submodule. The stub must provide all three or the
+    # module-level import guard swallows it and ``SearchFilters`` stays unbound.
+    retriever_stub = SimpleNamespace(VectorStore=object, get_vector_store=lambda _settings: None)
+    vector_store_stub = ModuleType("app.retriever.vector_store")
+    vector_store_stub.SearchFilters = _StubSearchFilters  # type: ignore[attr-defined]
 
     monkeypatch.setitem(sys.modules, "app.core.config", config_stub)
     monkeypatch.setitem(sys.modules, "app.retriever", retriever_stub)
+    monkeypatch.setitem(sys.modules, "app.retriever.vector_store", vector_store_stub)
 
     qc = importlib.import_module("app.qdrant_client")
     qc = importlib.reload(qc)
@@ -99,6 +123,9 @@ def test_basic_operations_use_vector_store(qc_module, monkeypatch):
     result = qc_module.search_chunks("hello", top_k=3)
     assert result == expected_search
     assert stub.search_calls == [("hello", 3)]
+    # The shim must pass a canonical SearchFilters scoped to the default tenant.
+    assert len(stub.search_filters) == 1
+    assert stub.search_filters[0].tenant_id == "default"
 
 
 def test_reset_collection_supported(qc_module, monkeypatch):
