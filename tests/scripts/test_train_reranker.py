@@ -34,6 +34,28 @@ def test_load_pairs_rejects_empty(tmp_path):
         load_pairs(p)
 
 
+def test_load_pairs_tolerates_unicode_line_separators(tmp_path):
+    """A passage carrying U+2028/U+2029/U+0085 must not be split mid-record.
+
+    ``json.dumps(ensure_ascii=False)`` leaves these characters unescaped (they
+    are legal in JSON strings), but ``str.splitlines()`` treats them as line
+    boundaries — so a naive splitlines() parser splits one JSONL record into two
+    and chokes on the unterminated string. Real mr-TyDi passages contain U+2028,
+    so the loader must split on ``\\n`` only. Regression for the 5366-query
+    stage-1 build that died with "Unterminated string".
+    """
+    p = tmp_path / "pairs.jsonl"
+    rows = [
+        {"query": "q1", "text": "line one line two", "teacher_score": 1.0},
+        {"query": "q1", "text": "tail paranel", "teacher_score": 0.0},
+    ]
+    p.write_text(
+        "\n".join(json.dumps(r, ensure_ascii=False) for r in rows) + "\n",
+        encoding="utf-8",
+    )
+    assert load_pairs(p) == rows
+
+
 def test_soft_label_passthrough_for_probabilities():
     assert soft_label(0.0) == 0.0
     assert soft_label(0.73) == 0.73
