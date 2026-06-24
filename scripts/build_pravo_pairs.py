@@ -55,6 +55,30 @@ def limit_queries(queries: list[tuple[str, str]], limit: int) -> list[tuple[str,
     return queries[:limit] if limit and limit > 0 else list(queries)
 
 
+def plan_output(
+    out: Path, queries: list[tuple[str, str]], *, resume: bool
+) -> tuple[list[tuple[str, str]], bool]:
+    """Decide what to mine and whether the run is fresh, for ``--resume`` support.
+
+    Returns ``(queries_to_mine, fresh)``. A *fresh* run (no ``--resume``, or no
+    existing output) mines every query and the caller unlinks any stale file. A
+    *resume* run against an existing file drops queries whose source article is
+    already teacher-scored on disk (via ``completed_source_keys`` /
+    ``filter_done_queries`` — the same source_key markers ``score_and_flush_by_chunk``
+    appends) so the new pairs append instead of re-mining. Lets the stage-2 set
+    grow article-by-article across kills/sleeps rather than restart each run.
+
+    Imports the two resume helpers lazily; both are pure JSONL/list ops (no ML),
+    so this stays unit-testable without the heavy store/teacher stack.
+    """
+    from scripts.build_rerank_dataset import completed_source_keys, filter_done_queries
+
+    if resume and out.exists():
+        done = completed_source_keys(out)
+        return filter_done_queries(queries, done), False
+    return list(queries), True
+
+
 def main(argv: list[str] | None = None) -> None:
     import logging
 
@@ -67,6 +91,12 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--batch", type=int, default=16)
     parser.add_argument(
         "--limit", type=int, default=0, help="cap to first N articles (0 = all; for smoke/chunking)"
+    )
+    parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="append to an existing --out, skipping articles already mined "
+        "(grow the set across runs/kills instead of restarting); default = fresh run",
     )
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
@@ -89,8 +119,11 @@ def main(argv: list[str] | None = None) -> None:
 
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
-    if out.exists():
+    queries, fresh = plan_output(out, queries, resume=args.resume)
+    if fresh and out.exists():
         out.unlink()  # fresh run — keep source_key resume markers clean
+    elif not fresh:
+        logging.info("resume: %d articles to mine (rest already on disk)", len(queries))
 
     retrieve = as_retrieve(make_mvp_retriever(store))
     encoder = CrossEncoder(args.teacher, max_length=512)

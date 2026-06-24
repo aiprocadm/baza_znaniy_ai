@@ -21,8 +21,12 @@ DEFAULT_OUT = Path("var/models/kbai-reranker-ru")
 
 
 def load_pairs(path: Path) -> list[dict]:
+    # Split on "\n" only, NOT str.splitlines(): real mr-TyDi passages carry
+    # U+2028/U+2029/U+0085, which json.dumps(ensure_ascii=False) leaves unescaped
+    # (legal in JSON) but splitlines() treats as line boundaries — that splits a
+    # single JSONL record into two and dies with "Unterminated string".
     rows = [
-        json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()
+        json.loads(line) for line in path.read_text(encoding="utf-8").split("\n") if line.strip()
     ]
     if not rows:
         raise SystemExit(f"Empty pairs file: {path}")
