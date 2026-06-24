@@ -1,0 +1,49 @@
+"""Чистая логика frozen-гейта качества reranker'а на корпусе права.
+
+Без I/O и без модели: работает по уже замороженным спискам ранжированных
+chunk-ключей, поэтому гейт исполняется детерминированно в CI без загрузки
+``bge-reranker-v2-m3``. Две проверки: метрики teacher не ниже абсолютных floors
+и превосходство teacher над base не меньше зафиксированных дельт.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Mapping, Sequence
+from typing import Any
+
+from app.eval.metrics import RETRIEVAL_KS, aggregate, score_item
+
+# Допуск на float-сравнения (зеркалит публичный гейт в test_eval_frozen.py).
+EPS = 1e-9
+
+
+def aggregate_side(
+    items: Sequence[Mapping[str, Any]],
+    side: str,
+    ks: Sequence[int] = RETRIEVAL_KS,
+) -> dict[str, float]:
+    """Агрегировать метрики ретривала для одной замороженной стороны.
+
+    ``side`` — ключ списка ранжирования в каждом item ("base_ranked" /
+    "teacher_ranked"); ``item["relevant"]`` — релевантные chunk-ключи.
+    """
+    rows = [score_item(it["relevant"], it[side], ks) for it in items]
+    return aggregate(rows)
+
+
+def gate_failures(
+    base: Mapping[str, float],
+    teacher: Mapping[str, float],
+    thresholds: Mapping[str, Mapping[str, float]],
+) -> list[str]:
+    """Вернуть список человекочитаемых нарушений; пустой список = гейт пройден."""
+    failures: list[str] = []
+    for metric, floor in thresholds.get("teacher_floors", {}).items():
+        got = float(teacher.get(metric, 0.0))
+        if got + EPS < float(floor):
+            failures.append(f"teacher {metric}={got:.4f} below floor {floor}")
+    for metric, dmin in thresholds.get("min_delta_over_base", {}).items():
+        delta = float(teacher.get(metric, 0.0)) - float(base.get(metric, 0.0))
+        if delta + EPS < float(dmin):
+            failures.append(f"teacher-over-base {metric} delta={delta:.4f} below min {dmin}")
+    return failures
