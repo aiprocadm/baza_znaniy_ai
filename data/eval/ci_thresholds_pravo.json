@@ -1,0 +1,9 @@
+{
+  "_comment": "Pravo retrieval floors + min teacher-over-base deltas for the frozen pravo gate (tests/test_eval_frozen_pravo.py). Measured on golden_pravo_natural by scripts/freeze_pravo_eval.py. Floors sit ~0.05 below measured teacher; deltas sit below the measured teacher-minus-base gap. Raise (never lower) only after a real re-measure. Separate from ci_thresholds.json, which is scoped to golden_public.",
+  "_measured_2026_06_25": {
+    "base": { "hit@1": 0.750, "hit@3": 0.889, "mrr@5": 0.810, "recall@10": 0.676 },
+    "teacher": { "hit@1": 0.889, "hit@3": 0.944, "mrr@5": 0.917, "recall@10": 0.707 }
+  },
+  "teacher_floors": { "hit@1": 0.84, "hit@3": 0.89, "mrr@5": 0.86, "recall@10": 0.65 },
+  "min_delta_over_base": { "hit@1": 0.05, "mrr@5": 0.04 }
+}
