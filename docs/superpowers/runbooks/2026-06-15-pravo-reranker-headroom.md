@@ -214,3 +214,35 @@ budget against a strong base — pipeline + headroom are validated, the student 
 needs the full budget. Next real measurement = **Task 7 GPU full run** (full
 mr-TyDi, 2 epochs stage-1; more pravo pairs) on a CUDA box — cannot run here.
 Decision (GPU run vs reconsider the learned-student bet) is the user's.
+
+## Quality gate (Track A, 2026-06-25)
+
+The teacher reranker win is now guarded by an offline frozen gate. Measured on
+`golden_pravo_natural` (n=36), `bge-reranker-v2-m3` over the bi-encoder base:
+
+| metric | base | teacher | delta |
+|---|---|---|---|
+| hit@1 | 0.750 | 0.889 | +0.139 |
+| hit@3 | 0.889 | 0.944 | +0.056 |
+| mrr@5 | 0.810 | 0.917 | +0.106 |
+| recall@10 | 0.676 | 0.707 | +0.030 |
+
+- **Gate (runs in default CI, no model):** `tests/test_eval_frozen_pravo.py` —
+  recomputes metrics from `data/eval/frozen_pravo_natural.json` and asserts the
+  floors + teacher-over-base deltas in `data/eval/ci_thresholds_pravo.json`
+  (separate from `ci_thresholds.json`, which is scoped to `golden_public`).
+- **Refreeze (after a corpus / golden / reranker-model change):**
+  1. `KB_EMBEDDINGS_BACKEND=st py -3.13 -m scripts.freeze_pravo_eval`
+     (rewrites the frozen fixture; ~30 min on CPU, teacher must still beat base
+     and `SIG MATCH` must hold).
+  2. Update `_measured_2026_06_25` and re-derive `teacher_floors` (~0.05 below
+     measured) / `min_delta_over_base` in `ci_thresholds_pravo.json`. Raise floors
+     never lower them.
+  3. Re-validate live before committing:
+     `KB_PRAVO_LIVE=1 KB_EMBEDDINGS_BACKEND=st py -3.13 -m pytest -m integration -k pravo_rerank`
+     (opt-in via `KB_PRAVO_LIVE`; otherwise the ~30-min test self-skips and never
+     fires in a normal `pytest tests/` run).
+- **Latency is deliberately OUT of scope here.** Teacher CPU p95 ≈ 1.2 s for 20
+  candidates (budget 200 ms) is a known, deferred item — see
+  `scripts/quantize_reranker.py` notes (ONNX Runtime / fewer candidates / revised
+  budget). Track A guards quality only.
