@@ -1,5 +1,10 @@
 """Pure-function tests for the mr-TyDi stage-1 builder (no ML deps)."""
 
+from pathlib import Path
+
+import pytest
+
+import scripts.build_mrtydi_pairs as mrtydi
 from scripts.build_mrtydi_pairs import record_to_texts, to_pairs
 
 
@@ -52,3 +57,25 @@ def test_take_first_yields_at_most_limit_in_order():
 
 def test_take_first_handles_fewer_than_limit():
     assert list(take_first(["a", "b"], 10)) == ["a", "b"]
+
+
+def test_main_fails_loud_and_leaves_no_file_on_empty_stream(tmp_path: Path, monkeypatch):
+    # An empty mr-TyDi stream (network/version issue) must NOT leave a 0-row file:
+    # the turnkey runner would trust it as "already mined" and skip re-mining.
+    out = tmp_path / "mrtydi_pairs.jsonl"
+    monkeypatch.setattr(mrtydi, "iter_records", lambda limit, *, max_negs: iter(()))
+    with pytest.raises(SystemExit, match="No mr-TyDi rows"):
+        mrtydi.main(["--out", str(out)])
+    assert not out.exists()  # poisoned empty file removed -> resume re-mines next run
+
+
+def test_main_writes_rows_when_stream_has_records(tmp_path: Path, monkeypatch):
+    out = tmp_path / "mrtydi_pairs.jsonl"
+    monkeypatch.setattr(
+        mrtydi,
+        "iter_records",
+        lambda limit, *, max_negs: iter([("вопрос", "позитив", ["негатив"])]),
+    )
+    mrtydi.main(["--out", str(out)])
+    lines = out.read_text(encoding="utf-8").splitlines()
+    assert len(lines) == 2  # 1 positive + 1 negative row

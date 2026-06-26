@@ -134,6 +134,10 @@ def main(argv: list[str] | None = None) -> None:
 
     new_pairs = score_and_flush_by_chunk(queries, retrieve, golden, _score, out=out, k=args.k)
     if count_rows(out) == 0:
+        # Remove the empty file before failing: otherwise a turnkey resume run
+        # trusts it as "pravo already mined", skips re-mining, and dies at stage-2
+        # on empty input (same poison trap fixed in build_mrtydi_pairs).
+        out.unlink(missing_ok=True)
         raise SystemExit("No pairs mined — check the corpus and golden exclusion.")
     print(f"Wrote {new_pairs} teacher-scored pairs to {out}")
 

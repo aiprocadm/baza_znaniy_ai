@@ -268,6 +268,15 @@ stage-1 train → structural pravo pairs (bge teacher) → stage-2 train
 `recall@5` regression). Exit 0 = GO, 1 = NO-GO. Full log at
 `var/log/reranker_gpu_run.log`.
 
+**Preflight (fail before burning GPU hours).** Before any step runs, the runner
+does a cheap, torch-free prerequisite check on exactly what the *pending* steps
+need: a non-empty pravo store (direct SQLite count — never `get_store()`, which
+would load the embedder) iff `pravo_pairs` will mine, and the golden eval file
+iff any `eval_*` will run. A fresh GPU box that forgot `scripts.ingest_pravo`
+aborts in seconds (exit 2) instead of hours into stage-1 training. `--dry-run`
+prints the same check; `--skip-preflight` bypasses it; resumed runs whose pairs
+already exist are never blocked by an empty store.
+
 **Ops lessons baked in** (from the CPU-smoke run above):
 - **One torch process at a time** — steps are sequential subprocesses; the runner
   never imports torch itself.
