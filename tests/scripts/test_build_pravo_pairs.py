@@ -2,6 +2,8 @@
 
 import json as _json
 
+import pytest
+
 from scripts.build_pravo_pairs import (
     articles_to_queries,
     limit_queries,
@@ -99,3 +101,72 @@ def test_plan_output_resume_without_file_is_fresh(tmp_path):
     queries, fresh = plan_output(out, q, resume=True)
     assert fresh is True
     assert queries == q
+
+
+# --------------------------------------------------------------------------- #
+# main(): a non-resume mine promotes atomically; a killed mine can't poison the
+# runner's resume (which trusts OUT's existence as "already mined").
+# --------------------------------------------------------------------------- #
+def _stub_main_deps(monkeypatch):
+    """Patch main()'s heavy collaborators so only the atomic temp/promote glue
+    runs — no store, no teacher, no torch."""
+    monkeypatch.setattr("app.services.kb_store.get_store", lambda: object())
+    monkeypatch.setattr(
+        "scripts.build_pravo_golden.documents_with_chunks",
+        lambda store: [("a.md", "Статья 1. Тема", [0])],
+    )
+    monkeypatch.setattr("app.eval.adapter.make_mvp_retriever", lambda store: (lambda q, k: []))
+    monkeypatch.setattr("scripts.build_rerank_dataset.as_retrieve", lambda r: r)
+    monkeypatch.setattr("sentence_transformers.CrossEncoder", lambda *a, **k: object())
+
+
+def _run_main(pravo, tmp_path, out):
+    pravo.main(
+        [
+            "--out",
+            str(out),
+            # point golden files at non-existent paths -> empty exclusion set
+            "--golden",
+            str(tmp_path / "none.jsonl"),
+            "--golden-natural",
+            str(tmp_path / "none2.jsonl"),
+        ]
+    )
+
+
+def test_main_nonresume_promotes_atomically_on_success(tmp_path, monkeypatch):
+    import scripts.build_pravo_pairs as pravo
+
+    _stub_main_deps(monkeypatch)
+
+    def _mine(queries, retrieve, golden, score_fn, *, out, k):
+        out.write_text('{"query":"q","text":"t","teacher_score":0.5}\n', encoding="utf-8")
+        return 1
+
+    monkeypatch.setattr("scripts.build_rerank_dataset.score_and_flush_by_chunk", _mine)
+    out = tmp_path / "pravo_pairs.jsonl"
+    _run_main(pravo, tmp_path, out)
+    assert out.exists()  # promoted from the temp on success
+    assert not (tmp_path / "pravo_pairs.jsonl.part").exists()  # temp consumed
+
+
+def test_main_nonresume_leaves_no_final_file_when_mine_crashes(tmp_path, monkeypatch):
+    # A kill/exception mid-mine must not leave a partial OUT: the turnkey runner
+    # would trust it as "already mined", skip re-mining, and train stage-2 on a
+    # truncated set. The partial lives only in the .part temp, which is removed.
+    import scripts.build_pravo_pairs as pravo
+
+    _stub_main_deps(monkeypatch)
+
+    def _mine(queries, retrieve, golden, score_fn, *, out, k):
+        out.write_text(
+            '{"query":"q","text":"t","teacher_score":0.5}\n', encoding="utf-8"
+        )  # partial
+        raise RuntimeError("teacher died mid-mine")
+
+    monkeypatch.setattr("scripts.build_rerank_dataset.score_and_flush_by_chunk", _mine)
+    out = tmp_path / "pravo_pairs.jsonl"
+    with pytest.raises(RuntimeError, match="teacher died"):
+        _run_main(pravo, tmp_path, out)
+    assert not out.exists()  # no partial final file -> runner re-mines next run
+    assert not (tmp_path / "pravo_pairs.jsonl.part").exists()  # temp cleaned up
