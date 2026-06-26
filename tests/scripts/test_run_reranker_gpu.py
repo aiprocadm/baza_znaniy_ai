@@ -1,13 +1,16 @@
 """Pure-logic tests for the turnkey reranker GPU orchestrator (no ML, no subprocess).
 
 Covers the two testable cores: the declarative step plan (build_plan) and the
-GO/NO-GO decision read from eval run-JSONs (read_metrics + decide). The subprocess
-execution glue (run_step) is exercised operationally on the GPU box, not here.
+GO/NO-GO decision read from eval run-JSONs (read_metrics + decide). The real
+torch subprocess is never spawned here; run_step's *control flow* (interrupt
+-> terminate the child) is exercised with a fake Popen.
 """
 
 from __future__ import annotations
 
+import io
 import json as _json
+import subprocess
 from pathlib import Path
 
 import os
@@ -290,3 +293,116 @@ def test_resumed_run_appends_log_without_erasing_prior_tail(tmp_path, monkeypatc
     assert second.startswith(first)  # the first run's tail survives the resume
     assert second.count("reranker GPU run") == 2  # both run headers are present
     assert "#" * 64 in second  # runs are visually delimited
+
+
+def test_verdict_failure_lands_in_log_with_distinct_exit_code(tmp_path, monkeypatch) -> None:
+    # The verdict is the run's whole point. If it can't be computed (e.g. a
+    # truncated eval JSON makes read_metrics fail loud), that must land in the
+    # persistent log tail with its own exit code — not escape as a bare traceback
+    # that bypasses the log the runbook relies on, the way every other failure
+    # (preflight, each step) is already logged before returning.
+    eval_plan = [
+        runner.Step("eval_base", "m", [], tmp_path / "base.json"),
+        runner.Step("eval_student", "m", [], tmp_path / "student.json"),
+        runner.Step("eval_teacher", "m", [], tmp_path / "teacher.json"),
+    ]
+    monkeypatch.setattr(runner, "build_plan", lambda profile="full": eval_plan)
+    monkeypatch.setattr(runner, "run_step", lambda step, log_fh: 0)  # no subprocess
+
+    def _boom(*a, **k):
+        raise ValueError("broken.json: eval report has no retrieval metrics ['hit@1']")
+
+    monkeypatch.setattr(runner, "decide", _boom)
+    log = tmp_path / "run.log"
+    code = runner.main(["--skip-preflight", "--log", str(log)])
+    assert code == 3  # distinct from NO-GO (1), preflight (2), step exit codes
+    tail = log.read_text(encoding="utf-8")
+    assert "could not compute verdict" in tail
+    assert "no retrieval metrics" in tail  # the fail-loud reason is preserved
+
+
+# --------------------------------------------------------------------------- #
+# Ctrl-C must not orphan the torch child (it would keep holding VRAM)
+# --------------------------------------------------------------------------- #
+class _FakeStdout:
+    """A proc.stdout that yields some lines, then optionally raises mid-stream."""
+
+    def __init__(self, lines, raise_at_end=None):
+        self._lines = list(lines)
+        self._raise = raise_at_end
+
+    def __iter__(self):
+        yield from self._lines
+        if self._raise is not None:
+            raise self._raise
+
+
+class _FakePopen:
+    """Stand-in for the torch subprocess: records terminate()/kill()/wait()."""
+
+    def __init__(self, *, lines=(), raise_at_end=None, ignores_sigterm=False, returncode=0):
+        self.stdout = _FakeStdout(lines, raise_at_end)
+        self.terminated = False
+        self.killed = False
+        self._ignores_sigterm = ignores_sigterm
+        self.returncode = returncode
+
+    def terminate(self):
+        self.terminated = True
+
+    def kill(self):
+        self.killed = True
+
+    def wait(self, timeout=None):
+        # A child that ignores SIGTERM never exits within the grace window.
+        if timeout is not None and self._ignores_sigterm and not self.killed:
+            raise subprocess.TimeoutExpired(cmd="x", timeout=timeout)
+        return self.returncode
+
+
+def test_run_step_terminates_child_on_keyboard_interrupt(tmp_path, monkeypatch) -> None:
+    # Ctrl-C on the GPU box must stop the child before the exception propagates,
+    # else an orphaned torch process keeps holding VRAM and the next run OOMs.
+    fake = _FakePopen(lines=["line1\n"], raise_at_end=KeyboardInterrupt())
+    monkeypatch.setattr(runner.subprocess, "Popen", lambda *a, **k: fake)
+    step = runner.Step("s", "m", [], tmp_path / "out")
+    log_fh = io.StringIO()
+    with pytest.raises(KeyboardInterrupt):
+        runner.run_step(step, log_fh)
+    assert fake.terminated is True
+    assert "terminating" in log_fh.getvalue()
+
+
+def test_terminate_escalates_to_kill_when_child_ignores_sigterm() -> None:
+    # SIGTERM first; if the child does not exit within the grace window, SIGKILL.
+    fake = _FakePopen(ignores_sigterm=True)
+    runner._terminate(fake, grace=0.01)
+    assert fake.terminated is True
+    assert fake.killed is True
+
+
+def test_terminate_does_not_kill_a_cooperative_child() -> None:
+    fake = _FakePopen(ignores_sigterm=False)
+    runner._terminate(fake, grace=0.01)
+    assert fake.terminated is True
+    assert fake.killed is False  # exited on SIGTERM -> no escalation
+
+
+def test_main_returns_130_and_logs_when_interrupted(tmp_path, monkeypatch) -> None:
+    # An interrupted run reports the conventional SIGINT code and leaves a note in
+    # the persistent tail — same readable-failure contract as every other path.
+    eval_plan = [
+        runner.Step("eval_base", "m", [], tmp_path / "base.json"),
+        runner.Step("eval_student", "m", [], tmp_path / "student.json"),
+        runner.Step("eval_teacher", "m", [], tmp_path / "teacher.json"),
+    ]
+    monkeypatch.setattr(runner, "build_plan", lambda profile="full": eval_plan)
+
+    def _interrupted(step, log_fh):
+        raise KeyboardInterrupt()
+
+    monkeypatch.setattr(runner, "run_step", _interrupted)
+    log = tmp_path / "run.log"
+    code = runner.main(["--skip-preflight", "--log", str(log)])
+    assert code == 130  # 128 + SIGINT(2)
+    assert "aborted by user" in log.read_text(encoding="utf-8")

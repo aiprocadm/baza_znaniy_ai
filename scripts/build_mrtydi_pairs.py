@@ -86,22 +86,34 @@ def main(argv: list[str] | None = None) -> None:
 
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
+    # Stream into a temp file and promote it to ``out`` only on full success, so a
+    # mid-stream kill leaves ``out`` absent (not a truncated file the turnkey
+    # runner would trust as "already mined" and skip — training stage-1 on a
+    # partial set). The single-pass write makes atomic rename the right tool here;
+    # build_pravo_pairs keeps its incremental append because it resumes across kills.
+    tmp = out.with_name(out.name + ".tmp")
     n_rows = 0
-    with out.open("w", encoding="utf-8") as fh:
-        for query, positive, negatives in iter_records(args.limit, max_negs=args.negs):
-            for row in to_pairs(query, positive, negatives):
-                fh.write(json.dumps(row, ensure_ascii=False) + "\n")
-                n_rows += 1
+    try:
+        with tmp.open("w", encoding="utf-8") as fh:
+            for query, positive, negatives in iter_records(args.limit, max_negs=args.negs):
+                for row in to_pairs(query, positive, negatives):
+                    fh.write(json.dumps(row, ensure_ascii=False) + "\n")
+                    n_rows += 1
+    except BaseException:
+        # Kill/interrupt/error mid-stream: drop the partial temp, never touch out.
+        tmp.unlink(missing_ok=True)
+        raise
     if n_rows == 0:
-        # Don't leave an empty file behind: a turnkey resume run would trust it as
-        # "mr-TyDi already mined" and skip re-mining forever, then fail at stage-1
-        # on empty input. Fail loud and clean instead (mirrors build_pravo_pairs).
-        out.unlink(missing_ok=True)
+        # Empty stream (network/version issue): don't promote a 0-row file — a
+        # resume run would trust it as "already mined" and fail at stage-1 on empty
+        # input. Fail loud and clean instead (mirrors build_pravo_pairs).
+        tmp.unlink(missing_ok=True)
         raise SystemExit(
             f"No mr-TyDi rows written to {out} — the dataset stream was empty. "
             "Needs datasets==3.6.0 + trust_remote_code and HF network access "
             "(datasets 4.0+ dropped the mr-TyDi script)."
         )
+    tmp.replace(out)  # atomic promote: out exists only once fully written
     print(f"Wrote {n_rows} rows to {out}")
 
 

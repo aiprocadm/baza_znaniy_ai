@@ -30,6 +30,14 @@ Ops lessons baked in (see the headroom runbook):
 This runner is also the answer to the deferred CPU-latency item (Track B): the
 production-fast reranker can only be this small distilled student, not the 568M
 bge teacher — so closing this gate is what unblocks latency too.
+
+Exit codes (every non-zero path also logs its reason to the run log):
+    0  GO (or --dry-run)
+    1  NO-GO — student did not clear the gate
+    2  preflight failed — fixable prerequisite missing, no work done
+    3  verdict uncomputable — eval JSON truncated/missing after the steps ran
+    130  interrupted (Ctrl-C) — the running child was terminated first
+    N  a pipeline step exited non-zero (its own subprocess code is propagated)
 """
 
 from __future__ import annotations
@@ -386,8 +394,27 @@ def _log(line: str, log_fh: IO[str]) -> None:
     log_fh.flush()  # crashed run still leaves a readable tail
 
 
+def _terminate(proc: "subprocess.Popen[str]", *, grace: float = 10.0) -> None:
+    """Best-effort stop of a child: SIGTERM, then SIGKILL if it ignores the grace
+    window. A torch training process can sit in a long CUDA call and not notice a
+    polite terminate, so the kill fallback is what actually frees the VRAM — the
+    next run on the box would otherwise OOM against the ghost.
+    """
+    proc.terminate()
+    try:
+        proc.wait(timeout=grace)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait()
+
+
 def run_step(step: Step, log_fh: IO[str]) -> int:
-    """Run one step as a subprocess, teeing flushed output to stdout + the log."""
+    """Run one step as a subprocess, teeing flushed output to stdout + the log.
+
+    On Ctrl-C the child is terminated (see :func:`_terminate`) before the
+    interrupt propagates, so a cancelled run never orphans a torch process still
+    holding GPU memory.
+    """
     step.produces.parent.mkdir(parents=True, exist_ok=True)
     env = {**os.environ, **step.env}
     env_note = " ".join(f"{k}={v}" for k, v in step.env.items())
@@ -404,9 +431,14 @@ def run_step(step: Step, log_fh: IO[str]) -> int:
         env=env,
     )
     assert proc.stdout is not None
-    for raw in proc.stdout:
-        _log(raw.rstrip("\n"), log_fh)
-    return proc.wait()
+    try:
+        for raw in proc.stdout:
+            _log(raw.rstrip("\n"), log_fh)
+        return proc.wait()
+    except KeyboardInterrupt:
+        _log(f"!!! interrupted — terminating {step.name} subprocess", log_fh)
+        _terminate(proc)
+        raise
 
 
 def _format_verdict(result: dict) -> str:
@@ -483,12 +515,27 @@ def main(argv: list[str] | None = None) -> int:
             if not should_run(step, by_name, force=args.force):
                 _log(f"--- skip {step.name} (up to date: {step.produces})", log_fh)
                 continue
-            code = run_step(step, log_fh)
+            try:
+                code = run_step(step, log_fh)
+            except KeyboardInterrupt:
+                # run_step already terminated the child; just record the abort.
+                _log("aborted by user (Ctrl-C) — child terminated, no verdict", log_fh)
+                return 130  # conventional 128 + SIGINT(2)
             if code != 0:
                 _log(f"!!! {step.name} FAILED (exit {code}) — aborting", log_fh)
                 return code
 
-        result = decide(*eval_outputs, min_delta=args.min_delta)
+        try:
+            result = decide(*eval_outputs, min_delta=args.min_delta)
+        except (OSError, ValueError) as exc:
+            # The verdict is the run's whole point, and read_metrics fails loud
+            # by design (truncated/missing eval JSON). Log that to the persistent
+            # tail with its own exit code instead of letting a bare traceback
+            # bypass the log — same readable-failure contract every other step
+            # already honours. FileNotFoundError/JSONDecodeError are covered as
+            # subclasses of OSError/ValueError respectively.
+            _log(f"!!! could not compute verdict: {exc}", log_fh)
+            return 3
         _log(_format_verdict(result), log_fh)
         return 0 if result["passed"] else 1
 

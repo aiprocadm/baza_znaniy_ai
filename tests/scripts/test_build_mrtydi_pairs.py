@@ -79,3 +79,20 @@ def test_main_writes_rows_when_stream_has_records(tmp_path: Path, monkeypatch):
     mrtydi.main(["--out", str(out)])
     lines = out.read_text(encoding="utf-8").splitlines()
     assert len(lines) == 2  # 1 positive + 1 negative row
+
+
+def test_main_leaves_no_final_file_when_stream_crashes_midway(tmp_path: Path, monkeypatch):
+    # A kill/exception mid-stream must NOT leave a partial FINAL file: the runner
+    # trusts out's existence as "already mined" and would skip re-mining, training
+    # stage-1 on a truncated set. The partial only ever lives in the temp file.
+    out = tmp_path / "mrtydi_pairs.jsonl"
+
+    def _crashing_stream(limit, *, max_negs):
+        yield ("вопрос", "позитив", ["негатив"])  # one record lands in the temp file
+        raise RuntimeError("stream died mid-way")
+
+    monkeypatch.setattr(mrtydi, "iter_records", _crashing_stream)
+    with pytest.raises(RuntimeError, match="stream died"):
+        mrtydi.main(["--out", str(out)])
+    assert not out.exists()  # no partial final file -> runner re-mines next run
+    assert not (tmp_path / "mrtydi_pairs.jsonl.tmp").exists()  # temp cleaned up too
