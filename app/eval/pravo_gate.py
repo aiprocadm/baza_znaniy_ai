@@ -47,3 +47,33 @@ def gate_failures(
         if delta + EPS < float(dmin):
             failures.append(f"teacher-over-base {metric} delta={delta:.4f} below min {dmin}")
     return failures
+
+
+def student_gate(
+    base: Mapping[str, float],
+    student: Mapping[str, float],
+    *,
+    min_delta: float = 0.05,
+) -> dict[str, Any]:
+    """GO/NO-GO ученика-reranker'а против base (Phase 1 §4).
+
+    GO ⟺ ученик обходит base хотя бы по одной топ-ранговой метрике
+    (``mrr@5`` ИЛИ ``hit@1``) на ``min_delta`` И не регрессирует по покрытию
+    (``recall@5`` не ниже base). Возвращает структурированный вердикт для
+    самоотчёта оркестратора: ``{"passed", "reasons", "deltas"}`` — пустой
+    ``reasons`` означает GO.
+    """
+    deltas = {
+        metric: round(float(student.get(metric, 0.0)) - float(base.get(metric, 0.0)), 4)
+        for metric in ("hit@1", "mrr@5", "recall@5")
+    }
+    reasons: list[str] = []
+    beats = deltas["mrr@5"] + EPS >= min_delta or deltas["hit@1"] + EPS >= min_delta
+    if not beats:
+        reasons.append(
+            f"student beats base by neither mrr@5 ({deltas['mrr@5']:+.4f}) nor "
+            f"hit@1 ({deltas['hit@1']:+.4f}); below min +{min_delta}"
+        )
+    if deltas["recall@5"] + EPS < 0.0:
+        reasons.append(f"student recall@5 regressed vs base (delta {deltas['recall@5']:+.4f})")
+    return {"passed": not reasons, "reasons": reasons, "deltas": deltas}
