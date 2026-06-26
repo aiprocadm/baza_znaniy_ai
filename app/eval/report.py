@@ -51,11 +51,25 @@ def to_markdown(report: dict) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _atomic_write_text(path: Path, text: str) -> None:
+    """Write ``text`` via a temp file + atomic rename.
+
+    A reader (notably the reranker gate) treats a report file's mere existence as
+    a complete, parseable result. A plain ``write_text`` truncates the target
+    first, so a process killed mid-write leaves a corrupt file the reader would
+    trust. Writing to a temp and renaming means the real path only ever holds a
+    fully-written report (or the previous one).
+    """
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(text, encoding="utf-8")
+    tmp.replace(path)
+
+
 def save_report(path: Path, report: dict) -> None:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
-    path.with_suffix(".md").write_text(to_markdown(report), encoding="utf-8")
+    _atomic_write_text(path, json.dumps(report, ensure_ascii=False, indent=2))
+    _atomic_write_text(path.with_suffix(".md"), to_markdown(report))
 
 
 def compare(run_a: dict, run_b: dict) -> str:
