@@ -30,6 +30,13 @@ Ops lessons baked in (see the headroom runbook):
 This runner is also the answer to the deferred CPU-latency item (Track B): the
 production-fast reranker can only be this small distilled student, not the 568M
 bge teacher — so closing this gate is what unblocks latency too.
+
+Exit codes (every non-zero path also logs its reason to the run log):
+    0  GO (or --dry-run)
+    1  NO-GO — student did not clear the gate
+    2  preflight failed — fixable prerequisite missing, no work done
+    3  verdict uncomputable — eval JSON truncated/missing after the steps ran
+    N  a pipeline step exited non-zero (its own subprocess code is propagated)
 """
 
 from __future__ import annotations
@@ -488,7 +495,17 @@ def main(argv: list[str] | None = None) -> int:
                 _log(f"!!! {step.name} FAILED (exit {code}) — aborting", log_fh)
                 return code
 
-        result = decide(*eval_outputs, min_delta=args.min_delta)
+        try:
+            result = decide(*eval_outputs, min_delta=args.min_delta)
+        except (OSError, ValueError) as exc:
+            # The verdict is the run's whole point, and read_metrics fails loud
+            # by design (truncated/missing eval JSON). Log that to the persistent
+            # tail with its own exit code instead of letting a bare traceback
+            # bypass the log — same readable-failure contract every other step
+            # already honours. FileNotFoundError/JSONDecodeError are covered as
+            # subclasses of OSError/ValueError respectively.
+            _log(f"!!! could not compute verdict: {exc}", log_fh)
+            return 3
         _log(_format_verdict(result), log_fh)
         return 0 if result["passed"] else 1
 
