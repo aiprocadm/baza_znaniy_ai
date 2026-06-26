@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from app.eval.pravo_gate import aggregate_side, gate_failures
+from app.eval.pravo_gate import aggregate_side, gate_failures, student_gate
 
 
 # Два вопроса, по три релевантных ключа. base ставит релевант на 2-ю позицию,
@@ -58,3 +58,47 @@ def test_gate_flags_delta_violation() -> None:
     }
     failures = gate_failures(base, teacher, thresholds)
     assert len(failures) == 1 and "delta" in failures[0]
+
+
+# --------------------------------------------------------------------------- #
+# Гейт ученика (Phase 1 §4): ученик обходит base по mrr@5 ИЛИ hit@1 на >= +0.05
+# И не регрессирует по recall@5. Чистая логика — без модели.
+# --------------------------------------------------------------------------- #
+def test_student_gate_go_on_mrr_delta() -> None:
+    base = {"hit@1": 0.78, "mrr@5": 0.83, "recall@5": 0.61}
+    student = {"hit@1": 0.80, "mrr@5": 0.90, "recall@5": 0.61}  # Δmrr@5 = +0.07
+    verdict = student_gate(base, student)
+    assert verdict["passed"] is True
+    assert verdict["deltas"]["mrr@5"] == 0.07
+    assert verdict["reasons"] == []
+
+
+def test_student_gate_go_on_hit1_delta_alone() -> None:
+    # mrr@5 ниже порога, но hit@1 проходит — логика ИЛИ.
+    base = {"hit@1": 0.75, "mrr@5": 0.83, "recall@5": 0.61}
+    student = {"hit@1": 0.81, "mrr@5": 0.84, "recall@5": 0.62}  # Δhit@1 = +0.06
+    assert student_gate(base, student)["passed"] is True
+
+
+def test_student_gate_nogo_when_both_deltas_below_min() -> None:
+    base = {"hit@1": 0.78, "mrr@5": 0.83, "recall@5": 0.61}
+    student = {"hit@1": 0.80, "mrr@5": 0.85, "recall@5": 0.61}  # +0.02 / +0.02
+    verdict = student_gate(base, student)
+    assert verdict["passed"] is False
+    assert any("below min" in r for r in verdict["reasons"])
+
+
+def test_student_gate_nogo_on_recall_regression() -> None:
+    # Дельта по hit@1 проходит, но recall@5 просел — это блокирует GO.
+    base = {"hit@1": 0.75, "mrr@5": 0.83, "recall@5": 0.61}
+    student = {"hit@1": 0.85, "mrr@5": 0.90, "recall@5": 0.58}  # recall regress
+    verdict = student_gate(base, student)
+    assert verdict["passed"] is False
+    assert any("recall@5" in r for r in verdict["reasons"])
+
+
+def test_student_gate_respects_custom_min_delta() -> None:
+    base = {"hit@1": 0.78, "mrr@5": 0.83, "recall@5": 0.61}
+    student = {"hit@1": 0.80, "mrr@5": 0.86, "recall@5": 0.61}  # Δmrr@5 = +0.03
+    assert student_gate(base, student, min_delta=0.03)["passed"] is True
+    assert student_gate(base, student, min_delta=0.05)["passed"] is False

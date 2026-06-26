@@ -1,0 +1,282 @@
+"""Turnkey runner for the Phase 1 reranker training gate (plan Task 7).
+
+One command runs the whole two-stage pipeline end to end and self-reports a
+GO/NO-GO verdict, so a rented CUDA box spends its hours on training, not on
+re-deriving the step sequence and its known pitfalls:
+
+    py -3.13 -m scripts.run_reranker_gpu             # full GPU run
+    py -3.13 -m scripts.run_reranker_gpu --dry-run   # print the plan, no work
+    py -3.13 -m scripts.run_reranker_gpu --profile smoke   # CPU pipeline smoke
+
+Pipeline (each step is its OWN subprocess):
+    1. build full mr-TyDi stage-1 pairs
+    2. stage-1 train (general Russian ranking)
+    3. mine structural pravo stage-2 pairs (bge teacher scores)
+    4. stage-2 train  (--init-from stage-1; domain adaptation)
+    5/6/7. three-way eval (base / student / teacher) on golden_pravo_natural
+    -> student_gate verdict (spec §4): GO iff student beats base by mrr@5 OR
+       hit@1 >= +min_delta AND does not regress recall@5.
+
+Ops lessons baked in (see the headroom runbook):
+- ONE torch process at a time — steps run as sequential subprocesses; this
+  module itself never imports torch.
+- Logs are flushed after every line (a crashed run still leaves a readable tail).
+- The trainer auto-detects CUDA when ``--device`` is omitted, so the full
+  profile never pins cpu; only the smoke profile (for this CPU box) does.
+- Resumable: a step whose output already exists is skipped unless ``--force``.
+
+This runner is also the answer to the deferred CPU-latency item (Track B): the
+production-fast reranker can only be this small distilled student, not the 568M
+bge teacher — so closing this gate is what unblocks latency too.
+"""
+
+from __future__ import annotations
+
+import argparse
+import os
+import subprocess
+import sys
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import IO
+
+from app.eval.pravo_gate import student_gate
+
+# --- canonical paths (match the Phase 1 plan / runbook) --------------------- #
+GOLDEN_NATURAL = Path("data/eval/golden_pravo_natural.jsonl")
+MRTYDI_OUT = Path("var/data/rerank/mrtydi_pairs.jsonl")
+PRAVO_OUT = Path("var/data/rerank/pravo_pairs.jsonl")
+STAGE1_DIR = Path("var/models/kbai-reranker-ru-stage1")
+STUDENT_DIR = Path("var/models/kbai-reranker-ru")
+EVAL_DIR = Path("var/data/eval")
+BASE_JSON = EVAL_DIR / "pravo_base.json"
+STUDENT_JSON = EVAL_DIR / "pravo_student.json"
+TEACHER_JSON = EVAL_DIR / "pravo_teacher.json"
+TEACHER_MODEL = "BAAI/bge-reranker-v2-m3"
+DEFAULT_LOG = Path("var/log/reranker_gpu_run.log")
+
+
+@dataclass
+class Step:
+    """One subprocess in the pipeline.
+
+    ``produces`` is the artifact whose existence means the step is done (used for
+    resume); ``env`` is merged over ``os.environ`` for that step only.
+    """
+
+    name: str
+    module: str
+    args: list[str]
+    produces: Path
+    env: dict[str, str] = field(default_factory=dict)
+
+    def argv(self) -> list[str]:
+        # Same interpreter that launched the runner — no hardcoded ``py -3.13``.
+        return [sys.executable, "-m", self.module, *self.args]
+
+
+def build_plan(profile: str = "full") -> list[Step]:
+    """Declarative step list for a profile ("full" GPU run or "smoke" CPU check)."""
+    if profile == "smoke":
+        mrtydi_limit, mrtydi_negs = "2000", "8"
+        stage1_epochs, stage2_epochs = "1", "1"
+        train_device = ["--device", "cpu"]  # smoke runs on this CPU box
+    else:
+        mrtydi_limit, mrtydi_negs = "100000", "20"
+        stage1_epochs, stage2_epochs = "2", "2"
+        train_device = []  # full run: let the trainer auto-detect CUDA
+
+    golden = str(GOLDEN_NATURAL)
+    return [
+        Step(
+            "mrtydi_pairs",
+            "scripts.build_mrtydi_pairs",
+            ["--limit", mrtydi_limit, "--negs", mrtydi_negs, "--out", str(MRTYDI_OUT)],
+            MRTYDI_OUT,
+        ),
+        Step(
+            "stage1_train",
+            "scripts.train_reranker",
+            [
+                "--pairs",
+                str(MRTYDI_OUT),
+                "--out",
+                str(STAGE1_DIR),
+                "--loss",
+                "pairwise",
+                "--epochs",
+                stage1_epochs,
+                *train_device,
+            ],
+            STAGE1_DIR / "train_meta.json",
+        ),
+        Step(
+            "pravo_pairs",
+            "scripts.build_pravo_pairs",
+            ["--out", str(PRAVO_OUT)],
+            PRAVO_OUT,
+        ),
+        Step(
+            "stage2_train",
+            "scripts.train_reranker",
+            [
+                "--pairs",
+                str(PRAVO_OUT),
+                "--out",
+                str(STUDENT_DIR),
+                "--init-from",
+                str(STAGE1_DIR),
+                "--loss",
+                "pairwise",
+                "--epochs",
+                stage2_epochs,
+                "--lr",
+                "1e-5",
+                *train_device,
+            ],
+            STUDENT_DIR / "train_meta.json",
+        ),
+        Step(
+            "eval_base",
+            "scripts.eval_rag",
+            ["run", "--golden", golden, "--out", str(BASE_JSON)],
+            BASE_JSON,
+        ),
+        Step(
+            "eval_student",
+            "scripts.eval_rag",
+            ["run", "--golden", golden, "--rerank", "--out", str(STUDENT_JSON)],
+            STUDENT_JSON,
+            env={"KB_RERANK_MODEL": str(STUDENT_DIR)},
+        ),
+        Step(
+            "eval_teacher",
+            "scripts.eval_rag",
+            ["run", "--golden", golden, "--rerank", "--out", str(TEACHER_JSON)],
+            TEACHER_JSON,
+            env={"KB_RERANK_MODEL": TEACHER_MODEL},
+        ),
+    ]
+
+
+def read_metrics(path: Path) -> dict[str, float]:
+    """Pull the aggregated retrieval metrics block from an eval_rag run JSON."""
+    import json
+
+    report = json.loads(Path(path).read_text(encoding="utf-8"))
+    return dict(report.get("retrieval", {}))
+
+
+def decide(
+    base_path: Path,
+    student_path: Path,
+    teacher_path: Path,
+    *,
+    min_delta: float = 0.05,
+) -> dict:
+    """Three-way verdict: run the student gate vs base, carry teacher for context."""
+    base = read_metrics(base_path)
+    student = read_metrics(student_path)
+    teacher = read_metrics(teacher_path)
+    gate = student_gate(base, student, min_delta=min_delta)
+    return {
+        "verdict": "GO" if gate["passed"] else "NO-GO",
+        "passed": gate["passed"],
+        "reasons": gate["reasons"],
+        "deltas": gate["deltas"],
+        "base": base,
+        "student": student,
+        "teacher": teacher,
+    }
+
+
+# --------------------------------------------------------------------------- #
+# Execution (operational; not unit-tested — exercised on the GPU box)
+# --------------------------------------------------------------------------- #
+def _log(line: str, log_fh: IO[str]) -> None:
+    print(line)
+    log_fh.write(line + "\n")
+    log_fh.flush()  # crashed run still leaves a readable tail
+
+
+def run_step(step: Step, log_fh: IO[str]) -> int:
+    """Run one step as a subprocess, teeing flushed output to stdout + the log."""
+    step.produces.parent.mkdir(parents=True, exist_ok=True)
+    env = {**os.environ, **step.env}
+    env_note = " ".join(f"{k}={v}" for k, v in step.env.items())
+    _log(
+        f">>> {step.name}: {' '.join(step.argv())}" + (f"  [{env_note}]" if env_note else ""),
+        log_fh,
+    )
+    proc = subprocess.Popen(
+        step.argv(),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        bufsize=1,
+        env=env,
+    )
+    assert proc.stdout is not None
+    for raw in proc.stdout:
+        _log(raw.rstrip("\n"), log_fh)
+    return proc.wait()
+
+
+def _format_verdict(result: dict) -> str:
+    lines = [
+        "",
+        "=" * 64,
+        f"PHASE 1 GATE: {result['verdict']}",
+        "=" * 64,
+        f"  deltas (student - base): {result['deltas']}",
+    ]
+    for side in ("base", "student", "teacher"):
+        m = result[side]
+        lines.append(
+            f"  {side:8s} hit@1={m.get('hit@1', 0):.3f} "
+            f"mrr@5={m.get('mrr@5', 0):.3f} recall@5={m.get('recall@5', 0):.3f}"
+        )
+    for reason in result["reasons"]:
+        lines.append(f"  - {reason}")
+    return "\n".join(lines)
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(prog="run_reranker_gpu", description=__doc__)
+    parser.add_argument("--profile", choices=("full", "smoke"), default="full")
+    parser.add_argument("--dry-run", action="store_true", help="print the plan and exit")
+    parser.add_argument("--force", action="store_true", help="re-run steps even if output exists")
+    parser.add_argument("--min-delta", type=float, default=0.05, help="GO threshold (spec §4)")
+    parser.add_argument("--log", default=str(DEFAULT_LOG))
+    args = parser.parse_args(argv)
+
+    plan = build_plan(args.profile)
+
+    if args.dry_run:
+        print(f"# plan ({args.profile}) — {len(plan)} steps; gate min_delta={args.min_delta}")
+        for step in plan:
+            env_note = "".join(f"{k}={v} " for k, v in step.env.items())
+            print(f"  {step.name}: {env_note}{' '.join(step.argv())}  -> {step.produces}")
+        print(f"  verdict: student_gate({BASE_JSON.name}, {STUDENT_JSON.name}) vs base")
+        return 0
+
+    log_path = Path(args.log)
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    with log_path.open("w", encoding="utf-8") as log_fh:
+        _log(f"# reranker GPU run — profile={args.profile} min_delta={args.min_delta}", log_fh)
+        for step in plan:
+            if step.produces.exists() and not args.force:
+                _log(f"--- skip {step.name} (exists: {step.produces})", log_fh)
+                continue
+            code = run_step(step, log_fh)
+            if code != 0:
+                _log(f"!!! {step.name} FAILED (exit {code}) — aborting", log_fh)
+                return code
+
+        result = decide(BASE_JSON, STUDENT_JSON, TEACHER_JSON, min_delta=args.min_delta)
+        _log(_format_verdict(result), log_fh)
+        return 0 if result["passed"] else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

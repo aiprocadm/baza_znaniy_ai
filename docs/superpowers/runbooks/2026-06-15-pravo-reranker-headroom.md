@@ -246,3 +246,41 @@ The teacher reranker win is now guarded by an offline frozen gate. Measured on
   candidates (budget 200 ms) is a known, deferred item — see
   `scripts/quantize_reranker.py` notes (ONNX Runtime / fewer candidates / revised
   budget). Track A guards quality only.
+
+## Turnkey GPU run (Task 7, 2026-06-26)
+
+Phase 1 Tasks 1–6 are shipped (PR #607); the only thing left is the **GPU full
+run** — operational, blocked solely on CUDA. `scripts/run_reranker_gpu.py` makes
+it one command so rented GPU time goes to training, not to re-deriving the step
+sequence and its pitfalls.
+
+```bash
+py -3.13 -m scripts.run_reranker_gpu --dry-run        # print the 7-step plan, do nothing
+py -3.13 -m scripts.run_reranker_gpu                  # full run on the CUDA box
+py -3.13 -m scripts.run_reranker_gpu --profile smoke  # same pipeline, CPU, tiny budget
+```
+
+**What it runs** (each step is its own subprocess): full mr-TyDi pairs →
+stage-1 train → structural pravo pairs (bge teacher) → stage-2 train
+(`--init-from` stage-1) → three-way eval (base / student / teacher) on
+`golden_pravo_natural` → **GO/NO-GO** via `app.eval.pravo_gate.student_gate`
+(spec §4: student beats base by `mrr@5` **or** `hit@1` ≥ +0.05 **and** no
+`recall@5` regression). Exit 0 = GO, 1 = NO-GO. Full log at
+`var/log/reranker_gpu_run.log`.
+
+**Ops lessons baked in** (from the CPU-smoke run above):
+- **One torch process at a time** — steps are sequential subprocesses; the runner
+  never imports torch itself.
+- **Flushed logging** — every line is flushed, so a killed run still has a tail.
+- **CUDA auto-detect** — the `full` profile omits `--device` (trainer picks cuda);
+  only `smoke` pins `--device cpu` for this box.
+- **Resumable** — a step whose output already exists is skipped unless `--force`
+  (a crashed run resumes from the last completed artifact).
+
+**Latency (Track B) closure by reference.** The production-fast reranker can only
+be *this small distilled student* — the 568M bge teacher is structurally too big
+for the CPU 200 ms budget (int8 dynamic quant measured ~1.4×, still ~4–6× over;
+ONNX would not bridge a 20×-params gap). So this gate **is** the latency path:
+a student that passes §4 and is fast on CPU resolves quality and latency together.
+If the GPU run is NO-GO, the honest fallback is a revised latency budget +
+`KB_RERANK_CANDIDATES` tuning, documented as the close of the learned-reranker bet.
