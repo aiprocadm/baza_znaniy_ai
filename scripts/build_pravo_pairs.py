@@ -125,6 +125,16 @@ def main(argv: list[str] | None = None) -> None:
     elif not fresh:
         logging.info("resume: %d articles to mine (rest already on disk)", len(queries))
 
+    # Non-resume (the turnkey runner's path, and the default): mine into a temp
+    # file and atomically promote it to OUT only on full success, so a killed run
+    # leaves OUT absent rather than a truncated file the runner would trust as
+    # "already mined" and train stage-2 on. --resume instead appends to OUT
+    # directly — its whole purpose is a partial file that survives kills to
+    # continue from, so atomic rename would defeat it.
+    target = out if args.resume else out.with_name(out.name + ".part")
+    if not args.resume:
+        target.unlink(missing_ok=True)  # drop a leftover temp from a hard-killed run
+
     retrieve = as_retrieve(make_mvp_retriever(store))
     encoder = CrossEncoder(args.teacher, max_length=512)
 
@@ -132,13 +142,23 @@ def main(argv: list[str] | None = None) -> None:
         scores = encoder.predict([(p.query, p.text) for p in chunk_pairs], batch_size=args.batch)
         return [float(s) for s in scores]
 
-    new_pairs = score_and_flush_by_chunk(queries, retrieve, golden, _score, out=out, k=args.k)
-    if count_rows(out) == 0:
+    try:
+        new_pairs = score_and_flush_by_chunk(
+            queries, retrieve, golden, _score, out=target, k=args.k
+        )
+    except BaseException:
+        # Kill/interrupt/error mid-mine: drop the partial temp, never promote it.
+        if not args.resume:
+            target.unlink(missing_ok=True)
+        raise
+    if count_rows(target) == 0:
         # Remove the empty file before failing: otherwise a turnkey resume run
         # trusts it as "pravo already mined", skips re-mining, and dies at stage-2
         # on empty input (same poison trap fixed in build_mrtydi_pairs).
-        out.unlink(missing_ok=True)
+        target.unlink(missing_ok=True)
         raise SystemExit("No pairs mined — check the corpus and golden exclusion.")
+    if not args.resume:
+        target.replace(out)  # atomic promote: OUT exists only once fully written
     print(f"Wrote {new_pairs} teacher-scored pairs to {out}")
 
 
