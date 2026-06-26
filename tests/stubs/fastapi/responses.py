@@ -60,6 +60,27 @@ class HTMLResponse(Response):
         super().__init__(content, status_code=status_code, **kwargs)
 
 
+class FileResponse(Response):
+    """File response wrapper for serving file content."""
+
+    def __init__(
+        self,
+        path: str,
+        status_code: int = 200,
+        *,
+        filename: str | None = None,
+        media_type: str | None = None,
+        **kwargs: Any,
+    ) -> None:
+        self.path = path
+        self.filename = filename
+        self.media_type = media_type
+        # For testing, just store path as content
+        super().__init__(
+            path.encode() if isinstance(path, str) else path, status_code=status_code, **kwargs
+        )
+
+
 class StreamingResponse(Response):
     """Very small subset of ``StreamingResponse`` for unit tests."""
 
@@ -127,4 +148,4 @@ def _combine_stream_parts(parts: Iterable[Any]) -> bytes:
     return bytes(buffer)
 
 
-__all__ = ["Response", "JSONResponse", "HTMLResponse", "StreamingResponse"]
+__all__ = ["Response", "JSONResponse", "HTMLResponse", "StreamingResponse", "FileResponse"]
