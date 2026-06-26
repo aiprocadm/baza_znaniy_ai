@@ -98,18 +98,20 @@ def make_mvp_reranking_retriever(store, config=None) -> Retriever:
 
     ``make_mvp_retriever`` returns the raw bi-encoder order (``store.search``);
     reranking lives in ``kb_mvp.ask``, not the store — so this mirrors that path
-    to make the reranker measurable via the eval harness. ``enabled`` is forced on
-    (this retriever exists to rerank — avoids a silent passthrough when
-    ``KB_RERANK_ENABLED`` is unset); ``config`` overrides model/candidates/top_n,
-    otherwise ``KB_RERANK_*`` is used.
+    to make the reranker measurable via the eval harness. ``enabled`` *and*
+    ``strict`` are both forced on: this retriever exists to rerank, so a silent
+    passthrough (``KB_RERANK_ENABLED`` unset) or a silent bi-encoder fallback (a
+    broken/missing model) would both make the gate measure base order while
+    reporting it as the student's — discarding a good model as a false NO-GO.
+    ``config`` overrides model/candidates/top_n, otherwise ``KB_RERANK_*`` is used.
     """
     from dataclasses import replace
 
     from app.services import kb_rerank
 
     cfg = config if config is not None else kb_rerank.load_config()
-    if not cfg.enabled:
-        cfg = replace(cfg, enabled=True)
+    if not cfg.enabled or not cfg.strict:
+        cfg = replace(cfg, enabled=True, strict=True)
     return make_retriever(_reranking_search(store, cfg), _build_key_map(store))
 
 
