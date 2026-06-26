@@ -46,6 +46,11 @@ class RerankConfig:
     candidates: int
     top_n: int
     batch_size: int
+    # When True, a reranker load/scoring failure is raised instead of degrading
+    # to bi-encoder order. Serving keeps the graceful default (False) so a user
+    # query never 500s; the eval/gate path forces it on so a broken model fails
+    # loud rather than masquerading as base-identical metrics.
+    strict: bool = False
 
 
 @dataclass(frozen=True)
@@ -83,6 +88,7 @@ def load_config(env: Mapping[str, str] | None = None) -> RerankConfig:
         candidates=_int(_env("KB_RERANK_CANDIDATES", env), DEFAULT_CANDIDATES, low=1, high=200),
         top_n=_int(_env("KB_RERANK_TOPN", env), DEFAULT_TOP_N, low=1, high=50),
         batch_size=_int(_env("KB_RERANK_BATCH", env), 32, low=1, high=256),
+        strict=_bool(_env("KB_RERANK_STRICT", env), default=False),
     )
 
 
@@ -192,7 +198,12 @@ def rerank_hits(
     try:
         reranker = _get_reranker(effective_config)
         reranked = reranker.rerank(query, _hits_to_dicts(hits), effective_top_n)
-    except Exception:  # pragma: no cover - degrade gracefully on model failure
+    except Exception:
+        if effective_config.strict:
+            # Eval/gate path: a silent bi-encoder fallback would feed the gate
+            # base-identical metrics and discard a good model as a false NO-GO.
+            LOGGER.exception("Reranker %s failed (strict)", effective_config.model_name)
+            raise
         LOGGER.exception("Reranker %s failed; using bi-encoder order", effective_config.model_name)
         return RerankResult(
             hits=list(hits[:effective_top_n]),
