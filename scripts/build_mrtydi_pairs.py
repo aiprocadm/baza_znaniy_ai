@@ -92,6 +92,16 @@ def main(argv: list[str] | None = None) -> None:
             for row in to_pairs(query, positive, negatives):
                 fh.write(json.dumps(row, ensure_ascii=False) + "\n")
                 n_rows += 1
+    if n_rows == 0:
+        # Don't leave an empty file behind: a turnkey resume run would trust it as
+        # "mr-TyDi already mined" and skip re-mining forever, then fail at stage-1
+        # on empty input. Fail loud and clean instead (mirrors build_pravo_pairs).
+        out.unlink(missing_ok=True)
+        raise SystemExit(
+            f"No mr-TyDi rows written to {out} — the dataset stream was empty. "
+            "Needs datasets==3.6.0 + trust_remote_code and HF network access "
+            "(datasets 4.0+ dropped the mr-TyDi script)."
+        )
     print(f"Wrote {n_rows} rows to {out}")
 
 
