@@ -60,6 +60,26 @@ class Request:
         return self.scope.get("app")
 
 
+class WebSocket:
+    """Stub WebSocket for testing."""
+
+    def __init__(self, scope: Optional[dict[str, Any]] = None) -> None:
+        self.scope = scope or {}
+        self.client_state = None
+        self.application_state = None
+
+    @property
+    def app(self):
+        return self.scope.get("app")
+
+
+class WebSocketDisconnect(Exception):
+    """Stub exception for WebSocket disconnect."""
+
+    def __init__(self, code: int = 1000) -> None:
+        self.code = code
+
+
 class UploadFile:
     """Very small subset of the real UploadFile implementation."""
 
@@ -142,6 +162,14 @@ def Form(default: Any | None = None, **_: Any) -> Any | None:
 
 
 def Query(default: Any | None = None, **_: Any) -> Any | None:
+    return default
+
+
+def Header(default: Any | None = None, **_: Any) -> Any | None:
+    return default
+
+
+def Path(default: Any | None = None, **_: Any) -> Any | None:
     return default
 
 
@@ -394,13 +422,18 @@ __all__ = [
     "Depends",
     "FastAPI",
     "File",
+    "Form",
+    "Header",
     "HTMLResponse",
     "HTTPException",
     "JSONResponse",
+    "Path",
     "Query",
     "Request",
     "StreamingResponse",
     "UploadFile",
+    "WebSocket",
+    "WebSocketDisconnect",
     "status",
     "TestClient",
 ]

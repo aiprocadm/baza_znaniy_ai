@@ -88,3 +88,8 @@ def select(*args: Any, **kwargs: Any) -> tuple[str, tuple[Any, ...], dict[str, A
 
 def delete(*args: Any, **kwargs: Any) -> tuple[str, tuple[Any, ...], dict[str, Any]]:
     return "delete", args, kwargs
+
+
+def col(*args: Any, **kwargs: Any) -> tuple[str, tuple[Any, ...], dict[str, Any]]:
+    """Stub for sqlalchemy.sql.expression.col function."""
+    return "col", args, kwargs
