@@ -159,6 +159,80 @@ def build_plan(profile: str = "full") -> list[Step]:
     ]
 
 
+def pending_step_names(plan: list[Step], *, force: bool) -> list[str]:
+    """Names of steps that will actually run: with ``--force`` all of them,
+    otherwise only those whose ``produces`` artifact does not yet exist (resume).
+
+    Preflight checks prerequisites only for *pending* steps — a resumed run whose
+    pravo pairs already exist must not be blocked by an empty store, etc.
+    """
+    return [s.name for s in plan if force or not s.produces.exists()]
+
+
+def preflight_problems(
+    pending: list[str],
+    *,
+    golden_exists: bool,
+    store_docs: int,
+) -> list[str]:
+    """Cheap, torch-free prerequisite check run BEFORE any (multi-hour) step.
+
+    The runner's whole point is to not waste rented GPU time; without this, a
+    missing corpus or eval file only surfaces *after* stage-1 training, i.e. hours
+    in. Checks only what the pending steps need: a non-empty pravo store iff
+    ``pravo_pairs`` will mine, and the golden eval file iff any ``eval_*`` will run.
+    Empty list = good to go.
+    """
+    problems: list[str] = []
+    if "pravo_pairs" in pending and store_docs <= 0:
+        problems.append(
+            "pravo store is empty — run `py -3.13 -m scripts.ingest_pravo` "
+            "first (check KB_MVP_DB_PATH)"
+        )
+    if any(name.startswith("eval_") for name in pending) and not golden_exists:
+        problems.append(f"golden eval file missing: {GOLDEN_NATURAL} — build it before the run")
+    return problems
+
+
+def _count_store_documents() -> int:
+    """Document count in the MVP store via a *direct* SQLite read — deliberately
+    NOT ``get_store()``, which would construct an embedder (loads model weights;
+    breaks the runner's "never import torch / one torch process" invariant and is
+    far too heavy for a preflight). A missing DB file or missing table both mean an
+    un-ingested store, i.e. zero documents.
+    """
+    import sqlite3
+
+    from app.services.kb_store import _default_db_path  # env lookup only; torch-free
+
+    db_path = Path(_default_db_path())
+    if not db_path.exists():
+        return 0
+    with sqlite3.connect(db_path) as conn:
+        try:
+            (count,) = conn.execute("SELECT COUNT(*) FROM kb_documents").fetchone()
+        except sqlite3.OperationalError:
+            return 0  # schema not initialised yet -> empty store
+    return int(count)
+
+
+def run_preflight(pending: list[str]) -> list[str]:
+    """I/O wrapper: probe golden-file existence + store doc count, then delegate to
+    the pure :func:`preflight_problems`. The store probe is a direct SQLite count
+    (see :func:`_count_store_documents`), so the orchestrator keeps its torch-free
+    invariant and the check stays sub-second. A store that cannot even be read is
+    itself surfaced as a fixable prerequisite problem.
+    """
+    if "pravo_pairs" not in pending:
+        store_docs = -1  # store not needed by any pending step; skip the probe
+    else:
+        try:
+            store_docs = _count_store_documents()
+        except Exception as exc:  # noqa: BLE001 — surface as a fixable prerequisite
+            return [f"cannot read pravo store ({exc!r}) — check KB_MVP_DB_PATH"]
+    return preflight_problems(pending, golden_exists=GOLDEN_NATURAL.exists(), store_docs=store_docs)
+
+
 def read_metrics(path: Path) -> dict[str, float]:
     """Pull the aggregated retrieval metrics block from an eval_rag run JSON."""
     import json
@@ -246,17 +320,27 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--profile", choices=("full", "smoke"), default="full")
     parser.add_argument("--dry-run", action="store_true", help="print the plan and exit")
     parser.add_argument("--force", action="store_true", help="re-run steps even if output exists")
+    parser.add_argument(
+        "--skip-preflight",
+        action="store_true",
+        help="skip the prerequisite check (store/golden) before running",
+    )
     parser.add_argument("--min-delta", type=float, default=0.05, help="GO threshold (spec §4)")
     parser.add_argument("--log", default=str(DEFAULT_LOG))
     args = parser.parse_args(argv)
 
     plan = build_plan(args.profile)
+    pending = pending_step_names(plan, force=args.force)
 
     if args.dry_run:
         print(f"# plan ({args.profile}) — {len(plan)} steps; gate min_delta={args.min_delta}")
         for step in plan:
             env_note = "".join(f"{k}={v} " for k, v in step.env.items())
-            print(f"  {step.name}: {env_note}{' '.join(step.argv())}  -> {step.produces}")
+            mark = "RUN " if step.name in pending else "skip"
+            print(f"  [{mark}] {step.name}: {env_note}{' '.join(step.argv())}  -> {step.produces}")
+        problems = [] if args.skip_preflight else run_preflight(pending)
+        for problem in problems:
+            print(f"  preflight: {problem}")
         print(f"  verdict: student_gate({BASE_JSON.name}, {STUDENT_JSON.name}) vs base")
         return 0
 
@@ -264,6 +348,13 @@ def main(argv: list[str] | None = None) -> int:
     log_path.parent.mkdir(parents=True, exist_ok=True)
     with log_path.open("w", encoding="utf-8") as log_fh:
         _log(f"# reranker GPU run — profile={args.profile} min_delta={args.min_delta}", log_fh)
+        if not args.skip_preflight:
+            problems = run_preflight(pending)
+            if problems:
+                for problem in problems:
+                    _log(f"!!! preflight: {problem}", log_fh)
+                _log("aborting before any work — fix prerequisites and re-run", log_fh)
+                return 2
         for step in plan:
             if step.produces.exists() and not args.force:
                 _log(f"--- skip {step.name} (exists: {step.produces})", log_fh)

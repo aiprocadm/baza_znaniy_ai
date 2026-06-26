@@ -10,7 +10,13 @@ from __future__ import annotations
 import json as _json
 from pathlib import Path
 
-from scripts.run_reranker_gpu import build_plan, decide, read_metrics
+from scripts.run_reranker_gpu import (
+    build_plan,
+    decide,
+    pending_step_names,
+    preflight_problems,
+    read_metrics,
+)
 
 
 def _names(plan) -> list[str]:
@@ -85,6 +91,70 @@ def test_eval_steps_select_model_via_rerank_env() -> None:
 def test_every_step_declares_an_output_for_resumability() -> None:
     for step in build_plan("full"):
         assert step.produces is not None and isinstance(step.produces, Path)
+
+
+# --------------------------------------------------------------------------- #
+# Preflight (fail before burning GPU hours)
+# --------------------------------------------------------------------------- #
+def _plan_under(tmp_path: Path):
+    """A real plan whose every ``produces`` is repointed under tmp_path, so
+    pending-ness is decided by what THIS test writes, not the dev box's var/ tree.
+    """
+    plan = build_plan("full")
+    for step in plan:
+        step.produces = tmp_path / f"{step.name}.out"
+    return plan
+
+
+def test_pending_steps_lists_all_when_nothing_produced(tmp_path: Path) -> None:
+    plan = _plan_under(tmp_path)  # nothing written yet -> every step pending
+    assert pending_step_names(plan, force=False) == _names(plan)
+
+
+def test_pending_steps_force_includes_every_step(tmp_path: Path) -> None:
+    # --force ignores existing outputs: the full plan is always pending.
+    plan = _plan_under(tmp_path)
+    for step in plan:
+        step.produces.write_text("done", encoding="utf-8")  # all already produced
+    assert pending_step_names(plan, force=True) == _names(plan)
+
+
+def test_pending_steps_skips_a_step_whose_output_exists(tmp_path: Path) -> None:
+    plan = _plan_under(tmp_path)
+    _by_name(plan, "mrtydi_pairs").produces.write_text("done", encoding="utf-8")
+    pending = pending_step_names(plan, force=False)
+    assert "mrtydi_pairs" not in pending  # produced -> skipped
+    assert "stage1_train" in pending  # still missing -> pending
+
+
+def test_preflight_clean_when_store_full_and_golden_present() -> None:
+    problems = preflight_problems(["pravo_pairs", "eval_base"], golden_exists=True, store_docs=6141)
+    assert problems == []
+
+
+def test_preflight_flags_empty_store_when_pravo_pairs_pending() -> None:
+    problems = preflight_problems(["pravo_pairs"], golden_exists=True, store_docs=0)
+    assert len(problems) == 1
+    assert "ingest_pravo" in problems[0]
+
+
+def test_preflight_ignores_empty_store_when_pravo_pairs_already_done() -> None:
+    # Resume: pairs already mined -> the store is no longer a prerequisite.
+    problems = preflight_problems(["eval_base"], golden_exists=True, store_docs=0)
+    assert problems == []
+
+
+def test_preflight_flags_missing_golden_when_eval_pending() -> None:
+    problems = preflight_problems(["eval_student"], golden_exists=False, store_docs=6141)
+    assert len(problems) == 1
+    assert "golden" in problems[0].lower()
+
+
+def test_preflight_reports_both_problems_together() -> None:
+    problems = preflight_problems(
+        ["pravo_pairs", "eval_teacher"], golden_exists=False, store_docs=0
+    )
+    assert len(problems) == 2
 
 
 # --------------------------------------------------------------------------- #
