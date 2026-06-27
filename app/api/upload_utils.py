@@ -107,8 +107,8 @@ def _ensure_mutable_content_type() -> None:
         headers = _coerce_headers(self)
         if value is None:
             try:
-                headers.pop("content-type", None)  # type: ignore[attr-defined]
-            except Exception:  # pragma: no cover - defensive
+                del headers["content-type"]
+            except Exception:  # pragma: no cover - defensive (KeyError when absent)
                 pass
         else:
             headers["content-type"] = value
