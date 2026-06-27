@@ -1054,6 +1054,100 @@ async def upload(
     return {"ok": True, "files": stored_files, "chunks": total_chunks}
 
 
+def _retrieve_hits(
+    message: str,
+    vector_store: Any,
+    fallback_index: list[dict[str, Any]],
+    settings: Any,
+    reranker: Any,
+) -> list[dict[str, Any]]:
+    """Retrieve context hits with the layered vector → fallback → synthetic path.
+
+    Each layer only runs when the previous one yields nothing, and every search
+    is timed via ``record_search_operation`` before the result is reranked.
+    """
+
+    hits: list[dict[str, Any]] = []
+    if vector_store is not None:
+        search_start = time.perf_counter()
+        hits = vector_store.search(message, top_k=settings.retrieve_topk)
+        record_search_operation(
+            "chat_vector", "success", time.perf_counter() - search_start, len(hits)
+        )
+    if not hits and fallback_index:
+        fallback_start = time.perf_counter()
+        hits = fallback_index[: settings.retrieve_topk]
+        record_search_operation(
+            "chat_fallback", "success", time.perf_counter() - fallback_start, len(hits)
+        )
+    if not hits and isinstance(vector_store, _VectorStoreAdapter):
+        synthetic_start = time.perf_counter()
+        hits = _synthetic_hits(message, settings.retrieve_topk)
+        record_search_operation(
+            "chat_synthetic", "success", time.perf_counter() - synthetic_start, len(hits)
+        )
+    return apply_rerank(
+        message,
+        hits,
+        settings.rerank_limit,
+        settings.rerank_enabled,
+        reranker,
+    )
+
+
+def _build_chat_prompt(
+    *,
+    summary_text: str,
+    history_text: str,
+    memory_text: str,
+    context: str,
+    message: str,
+) -> str:
+    """Assemble the RAG prompt, including only the optional sections present."""
+
+    prompt_sections: list[str] = [
+        "### Система",
+        "Ты — корпоративный ассистент, отвечающий на вопросы по базе знаний.",
+        "Отвечай кратко и по-русски, опираясь на предоставленный контекст.",
+    ]
+    if summary_text:
+        prompt_sections.extend(["\n### Краткое содержание диалога", summary_text])
+    if history_text:
+        prompt_sections.extend(["\n### Недавняя история", history_text])
+    if memory_text:
+        prompt_sections.extend(["\n### Долгосрочная память", memory_text])
+    prompt_sections.extend(
+        [
+            "\n### Контекст",
+            context or "(релевантные фрагменты не найдены)",
+            "\n### Вопрос пользователя",
+            message,
+            "\n### Инструкция",
+            "Если контекст не содержит ответа, честно сообщи об этом. Укажи важные детали кратко.",
+        ]
+    )
+    return "\n".join(filter(None, prompt_sections))
+
+
+def _format_answer_with_citations(
+    answer: str, citations: list[dict[str, Any]], handles_citations: bool
+) -> str:
+    """Append a human-readable "Источники" block unless the LLM handles it."""
+
+    if not citations or handles_citations:
+        return answer
+    formatted = []
+    for idx, citation in enumerate(citations, start=1):
+        location = citation.get("page")
+        if location is None:
+            formatted.append(f"[{idx}] {citation.get('file', 'неизвестный источник')}")
+        else:
+            formatted.append(
+                f"[{idx}] {citation.get('file', 'неизвестный источник')} — страница {location}"
+            )
+    return "\n\n".join([answer.strip(), "Источники:", "\n".join(formatted)])
+
+
 @router.post("/api/chat")
 def chat(request: Request, inp: ChatIn) -> dict[str, Any]:
     settings = request.app.state.settings
@@ -1126,66 +1220,16 @@ def chat(request: Request, inp: ChatIn) -> dict[str, Any]:
                 logger.exception("Failed to load memory context")
                 memory_text = ""
 
-        if vector_store is not None:
-            search_start = time.perf_counter()
-            hits = vector_store.search(inp.message, top_k=settings.retrieve_topk)
-            record_search_operation(
-                "chat_vector",
-                "success",
-                time.perf_counter() - search_start,
-                len(hits),
-            )
-        if not hits and fallback_index:
-            fallback_start = time.perf_counter()
-            hits = fallback_index[: settings.retrieve_topk]
-            record_search_operation(
-                "chat_fallback",
-                "success",
-                time.perf_counter() - fallback_start,
-                len(hits),
-            )
-        if not hits and isinstance(vector_store, _VectorStoreAdapter):
-            synthetic_start = time.perf_counter()
-            hits = _synthetic_hits(inp.message, settings.retrieve_topk)
-            record_search_operation(
-                "chat_synthetic",
-                "success",
-                time.perf_counter() - synthetic_start,
-                len(hits),
-            )
-
-        hits = apply_rerank(
-            inp.message,
-            hits,
-            settings.rerank_limit,
-            settings.rerank_enabled,
-            reranker,
-        )
+        hits = _retrieve_hits(inp.message, vector_store, fallback_index, settings, reranker)
         context = build_context(hits, token_limit=3000)
 
-        prompt_sections: list[str] = [
-            "### Система",
-            "Ты — корпоративный ассистент, отвечающий на вопросы по базе знаний.",
-            "Отвечай кратко и по-русски, опираясь на предоставленный контекст.",
-        ]
-        if summary_text:
-            prompt_sections.extend(["\n### Краткое содержание диалога", summary_text])
-        if history_text:
-            prompt_sections.extend(["\n### Недавняя история", history_text])
-        if memory_text:
-            prompt_sections.extend(["\n### Долгосрочная память", memory_text])
-        prompt_sections.extend(
-            [
-                "\n### Контекст",
-                context or "(релевантные фрагменты не найдены)",
-                "\n### Вопрос пользователя",
-                inp.message,
-                "\n### Инструкция",
-                "Если контекст не содержит ответа, честно сообщи об этом. Укажи важные детали кратко.",
-            ]
+        prompt = _build_chat_prompt(
+            summary_text=summary_text,
+            history_text=history_text,
+            memory_text=memory_text,
+            context=context,
+            message=inp.message,
         )
-
-        prompt = "\n".join(filter(None, prompt_sections))
 
         min_citations, max_citations = settings.citations_bounds
         citations, has_minimum_citations = _select_citations(hits, min_citations, max_citations)
@@ -1212,18 +1256,9 @@ def chat(request: Request, inp: ChatIn) -> dict[str, Any]:
             except Exception:  # pragma: no cover - defensive persistence handling
                 logger.exception("Failed to persist memory entry")
 
-        answer_text = answer
-        if citations and not getattr(llm_provider, "handles_citations", False):
-            formatted = []
-            for idx, citation in enumerate(citations, start=1):
-                location = citation.get("page")
-                if location is None:
-                    formatted.append(f"[{idx}] {citation.get('file', 'неизвестный источник')}")
-                else:
-                    formatted.append(
-                        f"[{idx}] {citation.get('file', 'неизвестный источник')} — страница {location}"
-                    )
-            answer_text = "\n\n".join([answer.strip(), "Источники:", "\n".join(formatted)])
+        answer_text = _format_answer_with_citations(
+            answer, citations, getattr(llm_provider, "handles_citations", False)
+        )
 
         latency_seconds = time.perf_counter() - start
         response = {
