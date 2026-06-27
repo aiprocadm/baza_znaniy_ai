@@ -19,7 +19,7 @@ from app.api.upload_policies import ALLOWED_CONTENT_TYPES_BY_EXTENSION
 try:  # pragma: no cover - optional dependency when running with minimal stubs
     from app.core.deps import UploadLimits
 except ImportError:  # pragma: no cover - fallback for stubbed environments
-    UploadLimits = None  # type: ignore[assignment]
+    UploadLimits = None  # type: ignore[assignment, misc]
 
 
 _ALLOWED_CONTENT_TYPES: frozenset[str] = frozenset(
@@ -107,7 +107,7 @@ def _ensure_mutable_content_type() -> None:
         headers = _coerce_headers(self)
         if value is None:
             try:
-                headers.pop("content-type", None)
+                headers.pop("content-type", None)  # type: ignore[attr-defined]
             except Exception:  # pragma: no cover - defensive
                 pass
         else:

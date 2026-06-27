@@ -9,8 +9,8 @@ from dataclasses import dataclass
 try:
     from email_validator import EmailNotValidError, validate_email
 except ImportError:  # pragma: no cover - optional dependency in lightweight test envs
-    EmailNotValidError = ValueError
-    validate_email = None
+    EmailNotValidError = ValueError  # type: ignore[assignment, misc]
+    validate_email = None  # type: ignore[assignment]
 
 LOGGER = logging.getLogger(__name__)
 

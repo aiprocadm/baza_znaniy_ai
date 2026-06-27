@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import cast
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlmodel import Session, select
 
@@ -21,7 +23,7 @@ def list_tenants(session: Session = Depends(get_ingest_session)) -> list[TenantR
     return [
         TenantResponse(
             slug=tenant.slug,
-            name=tenant.name,
+            name=cast(str, tenant.name),
             is_active=tenant.is_active,
             contact_email=tenant.contact_email,
             status=tenant.status,
@@ -63,7 +65,7 @@ def create_tenant(
 
     return TenantResponse(
         slug=record.slug,
-        name=record.name,
+        name=cast(str, record.name),
         is_active=record.is_active,
         contact_email=record.contact_email,
         status=record.status,

@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any
 try:  # pragma: no cover - optional dependency guard
     from sentence_transformers import CrossEncoder
 except Exception:  # pragma: no cover - dependency not installed
-    CrossEncoder = None  # type: ignore[assignment]
+    CrossEncoder = None  # type: ignore[assignment, misc]
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from sentence_transformers import CrossEncoder as _CrossEncoder
@@ -126,7 +126,7 @@ class CrossEncoderReranker:
             batch = pairs[start : start + self._batch_size]
             if not batch:
                 continue
-            batch_scores = self._model.predict(batch)  # type: ignore[attr-defined]
+            batch_scores = self._model.predict(batch)  # type: ignore[attr-defined, arg-type]
             scores.extend(float(score) for score in batch_scores)
 
         if len(scores) < len(hits):

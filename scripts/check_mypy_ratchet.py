@@ -47,6 +47,11 @@ CLEAN_FILES: list[str] = [
     "app/rag/context.py",
     "app/api/kb_mvp/chat.py",
     "app/chat/postgres_store.py",
+    # 2026-06-27 drive-to-zero pass 5
+    "app/core/email.py",
+    "app/retriever/rerank.py",
+    "app/api/upload_utils.py",
+    "app/api/v1/tenants.py",
 ]
 
 
