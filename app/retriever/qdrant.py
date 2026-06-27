@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Callable, Iterable, Iterator, Sequence, cast
 
@@ -19,6 +20,8 @@ _PAYLOAD_BOOL = getattr(
     "BOOL",
     getattr(qmodels.PayloadSchemaType, "BOOLEAN", None),
 )
+
+LOGGER = logging.getLogger(__name__)
 
 try:  # pragma: no cover - optional dependency for real deployments
     from sentence_transformers import SentenceTransformer
@@ -392,7 +395,11 @@ class QdrantVectorStore:
                 if getattr(item, "alias_name", None) == alias_name:
                     return str(getattr(item, "collection_name"))
         except Exception:
-            pass
+            LOGGER.debug(
+                "Failed to resolve Qdrant alias %s; falling back to the alias name",
+                alias_name,
+                exc_info=True,
+            )
         return alias_name
 
     def create_alias(self, alias_name: str, collection_name: str) -> None:
@@ -499,7 +506,7 @@ class QdrantVectorStore:
         try:
             client.delete_collection(collection_name=collection_name)
         except Exception:
-            pass
+            LOGGER.warning("Failed to delete Qdrant collection %s", collection_name, exc_info=True)
 
     # ------------------------------------------------------------------
     # Backwards compatibility helpers
@@ -513,8 +520,12 @@ class QdrantVectorStore:
         client = self._client_instance()
         try:
             client.delete_collection(collection_name=self.settings.qdrant_collection)
-        except Exception:  # pragma: no cover - collection may not exist
-            pass
+        except Exception:  # collection may not exist yet — expected on first reset
+            LOGGER.debug(
+                "Could not delete collection %s before reset (may not exist)",
+                self.settings.qdrant_collection,
+                exc_info=True,
+            )
         self.ensure_ready()
 
     def export_payloads(self, batch_size: int = 256) -> Iterator[dict[str, object]]:
