@@ -3,12 +3,13 @@ import hashlib
 from decimal import Decimal
 from datetime import timedelta
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from sqlmodel import Session, select
 
 from app.core.datetime_utils import utc_now
-from app.ingest.service import IngestService, IngestWorker
+from app.ingest.service import IngestJob, IngestService, IngestWorker
 from app.models import file as file_models
 from app.models.entities import JobStatus, TenantRecord
 from app.models.file import (
@@ -586,3 +587,60 @@ def test_dequeue_recovers_stuck_processing_job(
             config_module.get_settings.cache_clear()
 
     asyncio.run(scenario())
+
+
+# --- Characterization tests for dequeue_next_job() seams ---------------------
+# These pin the behaviour of the two pure blocks extracted out of the
+# ~157-line dequeue_next_job() so the split is provably behaviour-preserving.
+
+
+def test_extract_row_id_and_status_from_mapping() -> None:
+    row = SimpleNamespace(_mapping={"id": 7, "status": "queued"})
+    assert IngestService._extract_row_id_and_status(row) == (7, "queued")
+
+
+def test_extract_row_id_and_status_from_indexable() -> None:
+    # A plain tuple row (id, status) — second access path.
+    assert IngestService._extract_row_id_and_status((9, "processing")) == (9, "processing")
+
+
+def test_extract_row_id_and_status_from_attributes() -> None:
+    row = SimpleNamespace(id=3, status="queued")
+    assert IngestService._extract_row_id_and_status(row) == (3, "queued")
+
+
+def test_ingest_job_from_record_parses_payload() -> None:
+    record = JobRecord(
+        tenant_id="acme",
+        payload={
+            "file_id": "42",
+            "filename": "doc.pdf",
+            "path": "/data/doc.pdf",
+            "sha256": "abc",
+            "document_id": "5",
+            "attempt": "2",
+        },
+    )
+    record.id = 11
+
+    job = IngestService._ingest_job_from_record(record)
+
+    assert isinstance(job, IngestJob)
+    assert job.file_id == 42
+    assert job.document_id == 5
+    assert job.attempt == 2
+    assert job.tenant_id == "acme"
+    assert job.filename == "doc.pdf"
+    assert job.job_record_id == 11
+
+
+def test_ingest_job_from_record_returns_none_without_file_id() -> None:
+    record = JobRecord(tenant_id="acme", payload={"filename": "x"})
+    assert IngestService._ingest_job_from_record(record) is None
+
+
+def test_ingest_job_from_record_falls_back_to_record_attempt() -> None:
+    record = JobRecord(tenant_id="acme", attempt=4, payload={"file_id": 1})
+    job = IngestService._ingest_job_from_record(record)
+    assert job is not None
+    assert job.attempt == 4
