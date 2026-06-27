@@ -644,3 +644,45 @@ def test_ingest_job_from_record_falls_back_to_record_attempt() -> None:
     job = IngestService._ingest_job_from_record(record)
     assert job is not None
     assert job.attempt == 4
+
+
+# --- Characterization tests for IngestService.__init__ resolver seams --------
+# Pin the param -> env -> settings precedence lifted out of the ~109-line
+# __init__ so the split is provably behaviour-preserving.
+
+
+def test_resolve_retries_precedence(monkeypatch: pytest.MonkeyPatch) -> None:
+    settings = SimpleNamespace(ingest_max_retries=3)
+
+    # Explicit param wins over everything.
+    monkeypatch.setenv("INGEST_MAX_RETRIES", "9")
+    assert IngestService._resolve_retries(5, settings) == 5
+
+    # Env wins when no param.
+    assert IngestService._resolve_retries(None, settings) == 9
+
+    # Invalid env falls back to settings.
+    monkeypatch.setenv("INGEST_MAX_RETRIES", "not-an-int")
+    assert IngestService._resolve_retries(None, settings) == 3
+
+    # Settings when neither param nor env.
+    monkeypatch.delenv("INGEST_MAX_RETRIES", raising=False)
+    assert IngestService._resolve_retries(None, settings) == 3
+
+
+def test_resolve_backoff_precedence(monkeypatch: pytest.MonkeyPatch) -> None:
+    settings = SimpleNamespace(ingest_backoff_seconds=1.5)
+    monkeypatch.delenv("INGEST_BACKOFF_SECONDS", raising=False)
+    monkeypatch.delenv("INGEST_BACKOFF_BASE", raising=False)
+
+    assert IngestService._resolve_backoff(0.25, settings) == 0.25
+
+    monkeypatch.setenv("INGEST_BACKOFF_BASE", "2.0")
+    assert IngestService._resolve_backoff(None, settings) == 2.0
+
+    monkeypatch.setenv("INGEST_BACKOFF_SECONDS", "bad")
+    assert IngestService._resolve_backoff(None, settings) == 1.5
+
+    monkeypatch.delenv("INGEST_BACKOFF_SECONDS", raising=False)
+    monkeypatch.delenv("INGEST_BACKOFF_BASE", raising=False)
+    assert IngestService._resolve_backoff(None, settings) == 1.5
