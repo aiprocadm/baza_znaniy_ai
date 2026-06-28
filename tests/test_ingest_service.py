@@ -1,7 +1,7 @@
 import asyncio
 import hashlib
 from decimal import Decimal
-from datetime import timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -9,7 +9,13 @@ import pytest
 from sqlmodel import Session, select
 
 from app.core.datetime_utils import utc_now
-from app.ingest.service import IngestJob, IngestService, IngestWorker
+from app.ingest.service import (
+    IngestJob,
+    IngestService,
+    IngestWorker,
+    _extract_npa_fields,
+    _parse_act_date,
+)
 from app.models import file as file_models
 from app.models.entities import JobStatus, TenantRecord
 from app.models.file import (
@@ -686,3 +692,74 @@ def test_resolve_backoff_precedence(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("INGEST_BACKOFF_SECONDS", raising=False)
     monkeypatch.delenv("INGEST_BACKOFF_BASE", raising=False)
     assert IngestService._resolve_backoff(None, settings) == 1.5
+
+
+# --- Characterization tests for the NPA metadata seams -----------------------
+# _parse_act_date was lifted out of the ~120-line _ingest_file so the lenient
+# "dd.mm.yyyy or None" parsing is provable without a full ingest round-trip.
+# _extract_npa_fields had no direct coverage at all; pin its precedence here.
+
+
+@pytest.mark.parametrize(
+    "raw, expected",
+    [
+        ("01.02.2024", datetime(2024, 2, 1)),
+        ("31.12.1999", datetime(1999, 12, 31)),
+        ("2024-02-01", None),  # ISO format is not the expected dd.mm.yyyy
+        ("32.13.2024", None),  # out-of-range day/month
+        ("not a date", None),
+        ("", None),
+        (None, None),
+        (20240201, None),  # non-string inputs degrade rather than raise
+    ],
+)
+def test_parse_act_date_lenient(raw: object, expected: datetime | None) -> None:
+    assert _parse_act_date(raw) == expected
+
+
+def test_extract_npa_fields_metadata_fallback_wins_over_regex() -> None:
+    content = "Тип акта: приказ\nномер: А-1"
+    fields = _extract_npa_fields(
+        content,
+        metadata={"act_type": "федеральный закон", "reg_number": "Z-9"},
+    )
+    # When metadata supplies a fallback key it short-circuits the regex scan.
+    assert fields["act_type"] == "федеральный закон"
+    assert fields["reg_number"] == "Z-9"
+
+
+def test_extract_npa_fields_regex_extraction_when_no_metadata() -> None:
+    content = (
+        "Тип акта: постановление\n"
+        "Издатель: Минюст\n"
+        "Дата принятия: 05.06.2021\n"
+        "Дата вступления в силу: 10.06.2021\n"
+    )
+    fields = _extract_npa_fields(content)
+    assert fields["act_type"] == "постановление"
+    assert fields["issuer"] == "Минюст"
+    assert fields["adoption_date"] == "05.06.2021"
+    assert fields["effective_date"] == "10.06.2021"
+
+
+@pytest.mark.parametrize(
+    "raw, expected",
+    [
+        (None, True),  # absent flag defaults to active
+        ("да", True),
+        ("true", True),
+        ("1", True),
+        ("нет", False),
+        ("0", False),
+        ("", False),
+    ],
+)
+def test_extract_npa_fields_is_active_truthiness(raw: object, expected: bool) -> None:
+    metadata = {} if raw is None else {"is_active": raw}
+    assert _extract_npa_fields("", metadata=metadata)["is_active"] is expected
+
+
+def test_extract_npa_fields_defaults_to_none_when_absent() -> None:
+    fields = _extract_npa_fields("no structured metadata here")
+    for key in ("act_type", "issuer", "reg_number", "adoption_date", "effective_date", "revision"):
+        assert fields[key] is None

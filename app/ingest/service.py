@@ -126,6 +126,23 @@ def _extract_npa_fields(content: str, metadata: dict[str, Any] | None = None) ->
     }
 
 
+def _parse_act_date(raw: object) -> datetime | None:
+    """Parse a Russian-format act date (``dd.mm.yyyy``) into a ``datetime``.
+
+    Anything that is not a non-empty ``dd.mm.yyyy`` string — ``None``, blanks,
+    non-strings and malformed dates — degrades to ``None`` rather than raising,
+    matching the lenient metadata contract of :func:`_extract_npa_fields`
+    (which is the sole producer of the strings fed here).
+    """
+
+    if not isinstance(raw, str) or not raw:
+        return None
+    try:
+        return datetime.strptime(raw, "%d.%m.%Y")
+    except ValueError:
+        return None
+
+
 logger = logging.getLogger(__name__)
 
 
@@ -1100,14 +1117,7 @@ class IngestWorker:
                 document.revision = attrs.get("revision")
                 document.is_active = bool(attrs.get("is_active", True))
                 for field_name in ("adoption_date", "effective_date"):
-                    raw = attrs.get(field_name)
-                    parsed = None
-                    if isinstance(raw, str) and raw:
-                        try:
-                            parsed = datetime.strptime(raw, "%d.%m.%Y")
-                        except ValueError:
-                            parsed = None
-                    setattr(document, field_name, parsed)
+                    setattr(document, field_name, _parse_act_date(attrs.get(field_name)))
                 session.add(document)
                 session.commit()
             batch_index = 0
