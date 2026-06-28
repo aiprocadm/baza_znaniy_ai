@@ -5,7 +5,7 @@ from __future__ import annotations
 import math
 import os
 
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -161,6 +161,69 @@ def _environment_overrides(
     return overrides, consumed
 
 
+def _set_model_config_env_file(config_obj: object, value: object) -> None:
+    """Best-effort ``env_file`` assignment on a model_config (dict or object).
+
+    ``model_config`` may be a plain dict or a typed object depending on the
+    pydantic build, so try both access styles; one is expected to fail.
+    """
+
+    try:
+        config_obj["env_file"] = value  # type: ignore[index]
+    except Exception:
+        pass
+    try:
+        setattr(config_obj, "env_file", value)
+    except Exception:
+        pass
+
+
+def _init_with_environment_overrides(
+    instance: BaseModel,
+    super_init: Callable[..., None],
+    data: dict[str, object],
+) -> None:
+    """Run ``super_init`` with eager environment-alias overrides applied.
+
+    Shared by both ``BaseSettings`` shims (the BaseModel fallback and the
+    pydantic-settings subclass). The consumed env vars are popped while
+    pydantic initialises so its own loader cannot double-resolve aliases, then
+    the original environment (and ``env_file``) is restored afterwards.
+    """
+
+    overrides, consumed = _environment_overrides(instance.__class__, skip=data.keys())
+    merged = {**overrides, **data}
+    restored: list[tuple[str, str | None]] = []
+    seen: set[str] = set()
+    for env_names in consumed.values():
+        for env_name in env_names:
+            if env_name in seen:
+                continue
+            seen.add(env_name)
+            restored.append((env_name, os.environ.get(env_name)))
+            os.environ.pop(env_name, None)
+    config_obj = getattr(instance.__class__, "model_config", None)
+    previous_env_file = getattr(config_obj, "env_file", None)
+    if config_obj is not None:
+        _set_model_config_env_file(config_obj, ())
+    try:
+        super_init(**merged)
+        if overrides:
+            payload = instance.model_dump(mode="python")
+            payload.update(overrides)
+            updated = instance.__class__.model_validate(payload)
+            instance.__dict__.update(updated.__dict__)
+            instance.__pydantic_fields_set__ = updated.__pydantic_fields_set__
+    finally:
+        if config_obj is not None:
+            _set_model_config_env_file(config_obj, previous_env_file)
+        for env_name, original in reversed(restored):
+            if original is None:
+                os.environ.pop(env_name, None)
+            else:
+                os.environ[env_name] = original
+
+
 if PydanticBaseSettings is None:
 
     import os
@@ -234,52 +297,7 @@ if PydanticBaseSettings is None:
         model_config = SettingsConfigDict()
 
         def __init__(self, **data: object) -> None:
-
-            overrides, consumed = _environment_overrides(self.__class__, skip=data.keys())
-            merged = {**overrides, **data}
-            restored: list[tuple[str, str | None]] = []
-            seen: set[str] = set()
-            for env_names in consumed.values():
-                for env_name in env_names:
-                    if env_name in seen:
-                        continue
-                    seen.add(env_name)
-                    restored.append((env_name, os.environ.get(env_name)))
-                    os.environ.pop(env_name, None)
-            config_obj = getattr(self.__class__, "model_config", None)
-            previous_env_file = getattr(config_obj, "env_file", None)
-            if config_obj is not None:
-                try:
-                    config_obj["env_file"] = ()  # type: ignore[index]
-                except Exception:
-                    pass
-                try:
-                    setattr(config_obj, "env_file", ())
-                except Exception:
-                    pass
-            try:
-                super().__init__(**merged)
-                if overrides:
-                    payload = self.model_dump(mode="python")
-                    payload.update(overrides)
-                    updated = self.__class__.model_validate(payload)
-                    self.__dict__.update(updated.__dict__)
-                    self.__pydantic_fields_set__ = updated.__pydantic_fields_set__
-            finally:
-                if config_obj is not None:
-                    try:
-                        config_obj["env_file"] = previous_env_file  # type: ignore[index]
-                    except Exception:
-                        pass
-                    try:
-                        setattr(config_obj, "env_file", previous_env_file)
-                    except Exception:
-                        pass
-                for env_name, original in reversed(restored):
-                    if original is None:
-                        os.environ.pop(env_name, None)
-                    else:
-                        os.environ[env_name] = original
+            _init_with_environment_overrides(self, super().__init__, data)
 
 else:
 
@@ -289,51 +307,7 @@ else:
         model_config = SettingsConfigDict()
 
         def __init__(self, **data: object) -> None:
-            env_overrides, consumed = _environment_overrides(self.__class__, skip=data.keys())
-            merged = {**env_overrides, **data}
-            restored: list[tuple[str, str | None]] = []
-            seen: set[str] = set()
-            for env_names in consumed.values():
-                for env_name in env_names:
-                    if env_name in seen:
-                        continue
-                    seen.add(env_name)
-                    restored.append((env_name, os.environ.get(env_name)))
-                    os.environ.pop(env_name, None)
-            config_obj = getattr(self.__class__, "model_config", None)
-            previous_env_file = getattr(config_obj, "env_file", None)
-            if config_obj is not None:
-                try:
-                    config_obj["env_file"] = ()  # type: ignore[index]
-                except Exception:
-                    pass
-                try:
-                    setattr(config_obj, "env_file", ())
-                except Exception:
-                    pass
-            try:
-                super().__init__(**merged)
-                if env_overrides:
-                    payload = self.model_dump(mode="python")
-                    payload.update(env_overrides)
-                    updated = self.__class__.model_validate(payload)
-                    self.__dict__.update(updated.__dict__)
-                    self.__pydantic_fields_set__ = updated.__pydantic_fields_set__
-            finally:
-                if config_obj is not None:
-                    try:
-                        config_obj["env_file"] = previous_env_file  # type: ignore[index]
-                    except Exception:
-                        pass
-                    try:
-                        setattr(config_obj, "env_file", previous_env_file)
-                    except Exception:
-                        pass
-                for env_name, original in reversed(restored):
-                    if original is None:
-                        os.environ.pop(env_name, None)
-                    else:
-                        os.environ[env_name] = original
+            _init_with_environment_overrides(self, super().__init__, data)
 
             values: dict[str, object] = {}
             model_fields = getattr(self.__class__, "model_fields", None)
