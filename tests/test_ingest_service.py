@@ -766,6 +766,96 @@ def test_extract_npa_fields_defaults_to_none_when_absent() -> None:
         assert fields[key] is None
 
 
+def test_apply_npa_metadata_writes_document_and_returns_attrs() -> None:
+    # _apply_npa_metadata was lifted out of _ingest_file. Pin that it mutates the
+    # document in place (content + parsed NPA fields) and returns the attrs for
+    # chunk-meta reuse — all without touching a DB session.
+    document = DocumentRecord(
+        tenant_id="acme",
+        sha256="sha",
+        meta={"act_type": "приказ", "reg_number": "Z-9", "is_active": "нет"},
+    )
+    content = "Дата принятия: 05.06.2021\nДата вступления в силу: 10.06.2021\n"
+
+    attrs = IngestWorker._apply_npa_metadata(document, content)
+
+    assert attrs["act_type"] == "приказ"
+    assert document.content == content
+    assert document.act_type == "приказ"
+    assert document.reg_number == "Z-9"
+    assert document.is_active is False
+    # dd.mm.yyyy strings are coerced to datetimes on the document.
+    assert document.adoption_date == datetime(2021, 6, 5)
+    assert document.effective_date == datetime(2021, 6, 10)
+
+
+def test_apply_npa_metadata_defaults_active_and_clears_absent_fields() -> None:
+    document = DocumentRecord(tenant_id="acme", sha256="sha")
+
+    attrs = IngestWorker._apply_npa_metadata(document, "no structured metadata")
+
+    assert attrs["is_active"] is True
+    assert document.is_active is True
+    assert document.act_type is None
+    assert document.adoption_date is None
+    assert document.effective_date is None
+
+
+def test_persist_page_threads_counters_and_returns_payloads(
+    sqlite_db: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # _persist_page was lifted out of _ingest_file's page loop. Pin its return
+    # contract: the file-global (batch_index, chunk_counter) advance exactly and
+    # the page's index payloads come back for the caller to collect.
+    monkeypatch.setenv("RAG_CHUNK", "5")  # tiny window -> many chunks per page
+    monkeypatch.setenv("RAG_OVERLAP", "0")
+    service = IngestService(max_retries=1, backoff_seconds=0)
+    worker = IngestWorker(service, embed_batch_size=2)
+
+    job = IngestJob(
+        tenant_id="acme",
+        path="/tmp/doc.txt",
+        sha256="deadbeef",
+        file_id=1,
+        filename="doc.txt",
+        document_id=None,
+    )
+    parse_result = SimpleNamespace(
+        parser_backend_used="text",
+        fallback_reason=None,
+        ocr_used=False,
+    )
+    text = " ".join(f"word{i}" for i in range(400))
+
+    with Session(service.engine) as session:
+        batch_index, chunk_counter, payloads = worker._persist_page(
+            session,
+            job=job,
+            parse_result=parse_result,
+            attrs={"act_type": "приказ"},
+            filename="doc.txt",
+            page_number=1,
+            text=text,
+            batch_index=0,
+            chunk_counter=0,
+        )
+
+        assert len(payloads) >= 2, "tiny chunk window should split into many chunks"
+        # Counter threading is exact: counter == chunks produced, batch_index ==
+        # the number of embed_batch_size boundaries crossed from a zero start.
+        assert chunk_counter == len(payloads)
+        assert batch_index == len(payloads) // worker.embed_batch_size
+        # Payloads carry the caller-supplied provenance.
+        assert all(p["file"] == "doc.txt" and p["tenant_id"] == "acme" for p in payloads)
+        assert all(p["page"] == 1 for p in payloads)
+        # Rows actually persisted: one page, len(payloads) chunks, attrs merged.
+        page = session.scalars(select(PageRecord).where(PageRecord.file_id == 1)).one()
+        assert page.number == 1
+        chunks = session.scalars(select(ChunkRecord).where(ChunkRecord.page_id == page.id)).all()
+        assert len(chunks) == len(payloads)
+        assert all(c.meta and c.meta.get("act_type") == "приказ" for c in chunks)
+
+
 # --- Characterization tests for the _process FILE_MISSING seams --------------
 # _load_file_and_job and _fail_job_file_missing were lifted out of two
 # near-identical inline blocks in IngestWorker._process. Pin their behaviour
