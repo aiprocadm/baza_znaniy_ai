@@ -1099,26 +1099,32 @@ class IngestWorker:
             success = False
             error_message = str(exc)
             logger.exception("Failed to ingest job %s", job)
-        finally:
-            with Session(self.service.engine) as session:
-                file_obj, job_record = self._load_file_and_job(session, job)
-                if not file_obj:
-                    self._fail_job_file_missing(session, job_record)
-                    return
-                document_id = job.document_id or file_obj.document_id
-                document = (
-                    session.get(DocumentRecord, document_id) if document_id is not None else None
-                )
-                self._finalize_job(
-                    session,
-                    file_obj=file_obj,
-                    document=document,
-                    job_record=job_record,
-                    success=success,
-                    chunk_count=chunk_count,
-                    error_message=error_message,
-                    attempt=job.attempt,
-                )
+
+        # Finalize OUTSIDE any ``finally``. ``except Exception`` does not catch
+        # ``BaseException`` (e.g. ``asyncio.CancelledError`` on shutdown), so on
+        # such an exception we must skip finalization and let it propagate —
+        # the job stays PROCESSING and is reclaimed by stale-recovery. A
+        # ``return`` inside a ``finally`` here would have silently swallowed the
+        # cancellation and mismarked the job.
+        with Session(self.service.engine) as session:
+            file_obj, job_record = self._load_file_and_job(session, job)
+            if not file_obj:
+                self._fail_job_file_missing(session, job_record)
+                return
+            document_id = job.document_id or file_obj.document_id
+            document = (
+                session.get(DocumentRecord, document_id) if document_id is not None else None
+            )
+            self._finalize_job(
+                session,
+                file_obj=file_obj,
+                document=document,
+                job_record=job_record,
+                success=success,
+                chunk_count=chunk_count,
+                error_message=error_message,
+                attempt=job.attempt,
+            )
 
         if not success:
             await self._handle_failure(job)
