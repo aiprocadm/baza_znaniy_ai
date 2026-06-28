@@ -364,6 +364,22 @@ def _expected_sha(file: str, page: int, text: str) -> str:
     return hashlib.sha256(payload).hexdigest()
 
 
+_CONTENT_KEYS = ("file", "page", "sha256", "text")
+
+
+def _content_only(chunks: List[dict]) -> List[dict]:
+    """Project chunk dicts to their stable content fields.
+
+    ``parse_and_chunk`` also attaches a ``meta`` provenance block (added with
+    the docling auto-parser flow in 471163f). These tests assert the parsing
+    and tokenisation contract, not provenance — provenance is covered via
+    ``ParseResult`` in tests/test_ingest_docling_backend.py — so we compare on
+    the content fields and verify ``meta`` is wired separately.
+    """
+
+    return [{key: chunk[key] for key in _CONTENT_KEYS} for chunk in chunks]
+
+
 def _make_pptx_bytes(slides: List[str]) -> bytes:
     presentation = Presentation()
     blank_index = 6 if len(presentation.slide_layouts) > 6 else 0
@@ -471,7 +487,8 @@ def test_parse_and_chunk_pdf_uses_mock_tokenizer(monkeypatch: pytest.MonkeyPatch
         for index, text in enumerate(cleaned_texts)
     ]
 
-    assert chunks == expected
+    assert _content_only(chunks) == expected
+    assert all(chunk["meta"]["chunk"]["sha256"] == chunk["sha256"] for chunk in chunks)
     assert tokenizer_calls["count"] == 1
     for text in cleaned_texts:
         assert text in encode_calls
@@ -590,7 +607,8 @@ def test_parse_and_chunk_docx_uses_mock_tokenizer(monkeypatch: pytest.MonkeyPatc
         }
     ]
 
-    assert chunks == expected
+    assert _content_only(chunks) == expected
+    assert all(chunk["meta"]["chunk"]["sha256"] == chunk["sha256"] for chunk in chunks)
     assert tokenizer_calls["count"] == 1
     assert cleaned_text in encode_calls
 
