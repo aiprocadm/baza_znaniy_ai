@@ -766,6 +766,41 @@ def test_extract_npa_fields_defaults_to_none_when_absent() -> None:
         assert fields[key] is None
 
 
+def test_apply_npa_metadata_writes_document_and_returns_attrs() -> None:
+    # _apply_npa_metadata was lifted out of _ingest_file. Pin that it mutates the
+    # document in place (content + parsed NPA fields) and returns the attrs for
+    # chunk-meta reuse — all without touching a DB session.
+    document = DocumentRecord(
+        tenant_id="acme",
+        sha256="sha",
+        meta={"act_type": "приказ", "reg_number": "Z-9", "is_active": "нет"},
+    )
+    content = "Дата принятия: 05.06.2021\nДата вступления в силу: 10.06.2021\n"
+
+    attrs = IngestWorker._apply_npa_metadata(document, content)
+
+    assert attrs["act_type"] == "приказ"
+    assert document.content == content
+    assert document.act_type == "приказ"
+    assert document.reg_number == "Z-9"
+    assert document.is_active is False
+    # dd.mm.yyyy strings are coerced to datetimes on the document.
+    assert document.adoption_date == datetime(2021, 6, 5)
+    assert document.effective_date == datetime(2021, 6, 10)
+
+
+def test_apply_npa_metadata_defaults_active_and_clears_absent_fields() -> None:
+    document = DocumentRecord(tenant_id="acme", sha256="sha")
+
+    attrs = IngestWorker._apply_npa_metadata(document, "no structured metadata")
+
+    assert attrs["is_active"] is True
+    assert document.is_active is True
+    assert document.act_type is None
+    assert document.adoption_date is None
+    assert document.effective_date is None
+
+
 # --- Characterization tests for the _process FILE_MISSING seams --------------
 # _load_file_and_job and _fail_job_file_missing were lifted out of two
 # near-identical inline blocks in IngestWorker._process. Pin their behaviour

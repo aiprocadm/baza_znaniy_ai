@@ -1189,6 +1189,25 @@ class IngestWorker:
         ).hexdigest()
 
     @staticmethod
+    def _apply_npa_metadata(document: DocumentRecord, full_text: str) -> dict[str, Any]:
+        """Extract NPA (legal-act) fields from ``full_text`` and write them onto
+        ``document``; return the extracted attrs for chunk-meta reuse.
+
+        Pure with respect to the DB session — the caller persists ``document``.
+        """
+
+        attrs = _extract_npa_fields(full_text, metadata=document.meta or {})
+        document.content = full_text
+        document.act_type = attrs.get("act_type")
+        document.issuer = attrs.get("issuer")
+        document.reg_number = attrs.get("reg_number")
+        document.revision = attrs.get("revision")
+        document.is_active = bool(attrs.get("is_active", True))
+        for field_name in ("adoption_date", "effective_date"):
+            setattr(document, field_name, _parse_act_date(attrs.get(field_name)))
+        return attrs
+
+    @staticmethod
     def _chunk_meta(
         document_sha: str,
         page_number: int,
@@ -1253,15 +1272,7 @@ class IngestWorker:
             )
             attrs: dict[str, Any] = {}
             if document is not None:
-                attrs = _extract_npa_fields(full_text, metadata=document.meta or {})
-                document.content = full_text
-                document.act_type = attrs.get("act_type")
-                document.issuer = attrs.get("issuer")
-                document.reg_number = attrs.get("reg_number")
-                document.revision = attrs.get("revision")
-                document.is_active = bool(attrs.get("is_active", True))
-                for field_name in ("adoption_date", "effective_date"):
-                    setattr(document, field_name, _parse_act_date(attrs.get(field_name)))
+                attrs = self._apply_npa_metadata(document, full_text)
                 session.add(document)
                 session.commit()
             batch_index = 0
