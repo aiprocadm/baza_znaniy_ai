@@ -1048,12 +1048,18 @@ class IngestWorker:
             processed += 1
         return processed
 
-    async def _process(self, job: IngestJob) -> None:
+    def _begin_processing(self, job: IngestJob) -> bool:
+        """Reserve a job: flip its rows to PROCESSING and clear stale pages.
+
+        Returns ``False`` (caller should stop) when the file row has vanished or
+        the file is already COMPLETED; ``True`` when ingestion should proceed.
+        """
+
         with Session(self.service.engine) as session:
             file_obj, job_record = self._load_file_and_job(session, job)
             if not file_obj:
                 self._fail_job_file_missing(session, job_record)
-                return
+                return False
             document_id = job.document_id or file_obj.document_id
             document = session.get(DocumentRecord, document_id) if document_id is not None else None
             if file_obj.status == FileStatus.COMPLETED:
@@ -1063,7 +1069,7 @@ class IngestWorker:
                     job_record.updated_at = utc_now()
                     session.add(job_record)
                     session.commit()
-                return
+                return False
             file_obj.status = FileStatus.PROCESSING
             file_obj.error = None
             file_obj.chunks = None
@@ -1082,30 +1088,28 @@ class IngestWorker:
                 session.add(job_record)
             session.commit()
 
-            page_ids = session.exec(
+            # scalars()/execute() are the SQLAlchemy-native equivalents of
+            # SQLModel's exec() wrapper: scalars() yields the bare ids for the
+            # single-column select, execute() runs the bulk-delete DML.
+            page_ids = session.scalars(
                 select(PageRecord.id).where(PageRecord.file_id == file_obj.id)
             ).all()
             if page_ids:
-                session.exec(delete(ChunkRecord).where(ChunkRecord.page_id.in_(page_ids)))
-                session.exec(delete(PageRecord).where(PageRecord.id.in_(page_ids)))
+                session.execute(delete(ChunkRecord).where(ChunkRecord.page_id.in_(page_ids)))
+                session.execute(delete(PageRecord).where(PageRecord.id.in_(page_ids)))
                 session.commit()
+        return True
 
-        success = True
-        error_message: Optional[str] = None
-        chunk_count = 0
-        try:
-            chunk_count = await self._ingest_file(job)
-        except Exception as exc:
-            success = False
-            error_message = str(exc)
-            logger.exception("Failed to ingest job %s", job)
+    def _finalize(
+        self,
+        job: IngestJob,
+        *,
+        success: bool,
+        chunk_count: int,
+        error_message: Optional[str],
+    ) -> None:
+        """Reload the rows and write terminal status after an ingest attempt."""
 
-        # Finalize OUTSIDE any ``finally``. ``except Exception`` does not catch
-        # ``BaseException`` (e.g. ``asyncio.CancelledError`` on shutdown), so on
-        # such an exception we must skip finalization and let it propagate —
-        # the job stays PROCESSING and is reclaimed by stale-recovery. A
-        # ``return`` inside a ``finally`` here would have silently swallowed the
-        # cancellation and mismarked the job.
         with Session(self.service.engine) as session:
             file_obj, job_record = self._load_file_and_job(session, job)
             if not file_obj:
@@ -1125,6 +1129,32 @@ class IngestWorker:
                 error_message=error_message,
                 attempt=job.attempt,
             )
+
+    async def _process(self, job: IngestJob) -> None:
+        if not self._begin_processing(job):
+            return
+
+        success = True
+        error_message: Optional[str] = None
+        chunk_count = 0
+        try:
+            chunk_count = await self._ingest_file(job)
+        except Exception as exc:
+            success = False
+            error_message = str(exc)
+            logger.exception("Failed to ingest job %s", job)
+
+        # _finalize runs only when control falls through normally. A
+        # BaseException (e.g. asyncio.CancelledError on shutdown) is not caught
+        # by ``except Exception``, so it propagates here, skipping finalization
+        # and leaving the job PROCESSING for stale-recovery to reclaim. Keeping
+        # this out of a ``finally`` is what stops a ``return`` swallowing it.
+        self._finalize(
+            job,
+            success=success,
+            chunk_count=chunk_count,
+            error_message=error_message,
+        )
 
         if not success:
             await self._handle_failure(job)

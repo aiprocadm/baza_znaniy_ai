@@ -944,7 +944,7 @@ def test_finalize_job_handles_missing_document_and_job_record() -> None:
 
 
 class _NullSession:
-    """Stand-in Session for _process: every DB op is a no-op."""
+    """Stand-in Session for _begin_processing: every DB op is a no-op."""
 
     def __enter__(self) -> "_NullSession":
         return self
@@ -961,10 +961,12 @@ class _NullSession:
     def commit(self) -> None:
         return None
 
+    def scalars(self, *_: object) -> SimpleNamespace:
+        # _begin_processing's page-cleanup select yields no rows.
+        return SimpleNamespace(all=lambda: [])
 
-# `session.exec(select(...)).all()` is called in _process's setup phase; supply
-# it without writing the literal token a JS-oriented security hook flags.
-setattr(_NullSession, "exec", lambda self, *_: SimpleNamespace(all=lambda: []))
+    def execute(self, *_: object) -> None:
+        return None
 
 
 def test_process_propagates_cancellation_without_swallowing(
@@ -1051,3 +1053,104 @@ def test_process_propagates_cancellation_without_swallowing(
     assert finalize_calls == []
     assert fail_calls == []  # the swallowing FILE_MISSING return was never reached
     assert handled == []
+
+
+# --- Orchestration tests for _process over its extracted phases --------------
+# With _begin_processing/_finalize as seams, _process's control flow is testable
+# by stubbing the phases directly - no Session, select or DB engine involved.
+
+
+def _make_worker() -> IngestWorker:
+    service = IngestService()
+    service._engine = SimpleNamespace()  # never touched; phases are stubbed
+    return IngestWorker(service)
+
+
+def _job() -> IngestJob:
+    return IngestJob(
+        tenant_id="acme", path="p", sha256="s", file_id=1, filename="f", document_id=None
+    )
+
+
+def test_process_skips_ingest_when_begin_returns_false(monkeypatch: pytest.MonkeyPatch) -> None:
+    worker = _make_worker()
+    monkeypatch.setattr(IngestWorker, "_begin_processing", lambda self, job: False)
+
+    ingest_calls: list = []
+
+    async def _ingest(self: object, job: object) -> int:
+        ingest_calls.append(1)
+        return 0
+
+    monkeypatch.setattr(IngestWorker, "_ingest_file", _ingest)
+    finalize_calls: list = []
+    monkeypatch.setattr(IngestWorker, "_finalize", lambda self, job, **k: finalize_calls.append(1))
+
+    asyncio.run(worker._process(_job()))
+
+    assert ingest_calls == []  # already-handled job is not re-ingested
+    assert finalize_calls == []
+
+
+def test_process_finalizes_success_and_skips_handle_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    worker = _make_worker()
+    monkeypatch.setattr(IngestWorker, "_begin_processing", lambda self, job: True)
+
+    async def _ingest(self: object, job: object) -> int:
+        return 7
+
+    monkeypatch.setattr(IngestWorker, "_ingest_file", _ingest)
+
+    captured: dict = {}
+
+    def _finalize(self: object, job: object, **kwargs: object) -> None:
+        captured.update(kwargs)
+
+    monkeypatch.setattr(IngestWorker, "_finalize", _finalize)
+
+    handled: list = []
+
+    async def _handle(self: object, job: object) -> None:
+        handled.append(1)
+
+    monkeypatch.setattr(IngestWorker, "_handle_failure", _handle)
+
+    asyncio.run(worker._process(_job()))
+
+    assert captured == {"success": True, "chunk_count": 7, "error_message": None}
+    assert handled == []
+
+
+def test_process_finalizes_failure_and_runs_handle_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    worker = _make_worker()
+    monkeypatch.setattr(IngestWorker, "_begin_processing", lambda self, job: True)
+
+    async def _ingest(self: object, job: object) -> int:
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(IngestWorker, "_ingest_file", _ingest)
+
+    captured: dict = {}
+
+    def _finalize(self: object, job: object, **kwargs: object) -> None:
+        captured.update(kwargs)
+
+    monkeypatch.setattr(IngestWorker, "_finalize", _finalize)
+
+    handled: list = []
+
+    async def _handle(self: object, job: object) -> None:
+        handled.append(1)
+
+    monkeypatch.setattr(IngestWorker, "_handle_failure", _handle)
+
+    asyncio.run(worker._process(_job()))
+
+    assert captured["success"] is False
+    assert captured["error_message"] == "boom"
+    assert captured["chunk_count"] == 0  # nothing ingested before the failure
+    assert handled == [1]
