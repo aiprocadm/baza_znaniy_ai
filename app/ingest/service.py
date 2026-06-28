@@ -228,50 +228,51 @@ class IngestService:
             return 0
         return value
 
-    def __init__(
-        self,
-        *,
-        queue: Optional[asyncio.Queue[Optional[IngestJob]]] = None,
-        queue_maxsize: Optional[int] = None,
-        max_retries: Optional[int] = None,
-        backoff_seconds: Optional[float] = None,
-        engine=None,
-        auto_process: bool = False,
-        use_local_queue: Optional[bool] = None,
-    ) -> None:
-        settings = get_settings()
+    @staticmethod
+    def _resolve_retries(max_retries: Optional[int], settings: Any) -> int:
+        """Resolve retry count with param > env(INGEST_MAX_RETRIES) > settings."""
 
         if max_retries is not None:
-            retries = max_retries
-        else:
-            env_retries = os.getenv("INGEST_MAX_RETRIES")
-            if env_retries is not None:
-                try:
-                    retries = int(env_retries)
-                except ValueError:
-                    logger.warning(
-                        "Invalid ingest retry count %r from environment; using settings value",
-                        env_retries,
-                    )
-                    retries = settings.ingest_max_retries
-            else:
-                retries = settings.ingest_max_retries
+            return max_retries
+        env_retries = os.getenv("INGEST_MAX_RETRIES")
+        if env_retries is not None:
+            try:
+                return int(env_retries)
+            except ValueError:
+                logger.warning(
+                    "Invalid ingest retry count %r from environment; using settings value",
+                    env_retries,
+                )
+        return settings.ingest_max_retries
+
+    @staticmethod
+    def _resolve_backoff(backoff_seconds: Optional[float], settings: Any) -> float:
+        """Resolve backoff with param > env(INGEST_BACKOFF_SECONDS/_BASE) > settings."""
 
         if backoff_seconds is not None:
-            backoff = backoff_seconds
-        else:
-            env_backoff = os.getenv("INGEST_BACKOFF_SECONDS") or os.getenv("INGEST_BACKOFF_BASE")
-            if env_backoff is not None:
-                try:
-                    backoff = float(env_backoff)
-                except ValueError:
-                    logger.warning(
-                        "Invalid ingest backoff %r from environment; using settings value",
-                        env_backoff,
-                    )
-                    backoff = settings.ingest_backoff_seconds
-            else:
-                backoff = settings.ingest_backoff_seconds
+            return backoff_seconds
+        env_backoff = os.getenv("INGEST_BACKOFF_SECONDS") or os.getenv("INGEST_BACKOFF_BASE")
+        if env_backoff is not None:
+            try:
+                return float(env_backoff)
+            except ValueError:
+                logger.warning(
+                    "Invalid ingest backoff %r from environment; using settings value",
+                    env_backoff,
+                )
+        return settings.ingest_backoff_seconds
+
+    def _resolve_queue(
+        self,
+        queue: Optional[asyncio.Queue[Optional[IngestJob]]],
+        queue_maxsize: Optional[int],
+        settings: Any,
+    ) -> tuple[asyncio.Queue[Optional[IngestJob]], int]:
+        """Resolve the queue object and its bounded size across all sources.
+
+        Precedence for the size: ``queue_maxsize`` param > a provided queue's
+        own maxsize > env(INGEST_QUEUE_SIZE/INGEST_MAX_QUEUE) > settings.
+        """
 
         env_queue_raw = None
         env_queue_source = "settings"
@@ -301,7 +302,6 @@ class IngestService:
             queue_size_raw, default=default_queue_size, source=queue_size_source
         )
 
-        self.queue: asyncio.Queue[Optional[IngestJob]]
         if queue is not None:
             actual_maxsize = getattr(queue, "maxsize", None)
             if queue_maxsize is not None and actual_maxsize not in (None, queue_size):
@@ -315,9 +315,27 @@ class IngestService:
                     default=queue_size,
                     source="provided queue",
                 )
-            self.queue = queue
-        else:
-            self.queue = asyncio.Queue(maxsize=queue_size)
+            return queue, queue_size
+        return asyncio.Queue(maxsize=queue_size), queue_size
+
+    def __init__(
+        self,
+        *,
+        queue: Optional[asyncio.Queue[Optional[IngestJob]]] = None,
+        queue_maxsize: Optional[int] = None,
+        max_retries: Optional[int] = None,
+        backoff_seconds: Optional[float] = None,
+        engine=None,
+        auto_process: bool = False,
+        use_local_queue: Optional[bool] = None,
+    ) -> None:
+        settings = get_settings()
+
+        retries = self._resolve_retries(max_retries, settings)
+        backoff = self._resolve_backoff(backoff_seconds, settings)
+
+        self.queue: asyncio.Queue[Optional[IngestJob]]
+        self.queue, queue_size = self._resolve_queue(queue, queue_maxsize, settings)
 
         self.queue_maxsize = queue_size
         self.max_retries = max(0, int(retries))
