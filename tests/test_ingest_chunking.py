@@ -454,6 +454,19 @@ def test_parse_and_chunk_pdf_uses_mock_tokenizer(monkeypatch: pytest.MonkeyPatch
             "page": index + 1,
             "sha256": _expected_sha(filename, index + 1, text),
             "text": text,
+            # Provenance metadata added by the docling auto-parser flow (471163f):
+            # a legacy-parsed PDF reports ocr_used=True (ext == "pdf" and backend
+            # == "legacy"). This is the intended parse_and_chunk payload contract.
+            "meta": {
+                "document": {"file": filename, "mime_type": "application/pdf"},
+                "page": {"number": index + 1},
+                "chunk": {"sha256": _expected_sha(filename, index + 1, text)},
+                "provenance": {
+                    "parser_backend_used": "legacy",
+                    "fallback_reason": None,
+                    "ocr_used": True,
+                },
+            },
         }
         for index, text in enumerate(cleaned_texts)
     ]
@@ -555,12 +568,25 @@ def test_parse_and_chunk_docx_uses_mock_tokenizer(monkeypatch: pytest.MonkeyPatc
     chunks = parse_and_chunk(filename, b"binary-docx")
 
     cleaned_text = _clean("\n".join(paragraphs))
+    docx_mime = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     expected = [
         {
             "file": filename,
             "page": 1,
             "sha256": _expected_sha(filename, 1, cleaned_text),
             "text": cleaned_text,
+            # Provenance metadata added by the docling auto-parser flow (471163f):
+            # a non-PDF document reports ocr_used=False. Intended payload contract.
+            "meta": {
+                "document": {"file": filename, "mime_type": docx_mime},
+                "page": {"number": 1},
+                "chunk": {"sha256": _expected_sha(filename, 1, cleaned_text)},
+                "provenance": {
+                    "parser_backend_used": "legacy",
+                    "fallback_reason": None,
+                    "ocr_used": False,
+                },
+            },
         }
     ]
 
