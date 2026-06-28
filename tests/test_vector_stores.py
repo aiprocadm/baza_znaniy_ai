@@ -533,3 +533,32 @@ def test_qdrant_and_faiss_apply_same_filters(tmp_path: Path) -> None:
     must_keys = [c.key for c in qfilter.must]
     assert "tenant_id" in must_keys and "tags" in must_keys and "reg_number" in must_keys
     assert [h["sha256"] for h in fhits] == ["1"]
+
+
+def test_delete_collection_safe_logs_swallowed_error(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A failed collection delete must be logged, not silently swallowed.
+
+    ``delete_collection_safe`` runs during reindex/cleanup; swallowing the
+    error with a bare ``pass`` leaves operators blind to a Qdrant that is
+    unreachable or rejecting the request.
+    """
+
+    settings = _make_settings(tmp_path, backend="qdrant")
+
+    class _FailingClient(_StubClient):
+        def delete_collection(self, **_: object) -> None:
+            raise RuntimeError("qdrant unreachable")
+
+    store = QdrantVectorStore(
+        settings=settings,
+        embedder_factory=lambda _: _StubEmbedder("stub"),
+        client_factory=lambda **_: _FailingClient(),
+    )
+
+    with caplog.at_level("WARNING", logger="app.retriever.qdrant"):
+        store.delete_collection_safe("temp-collection")  # must not raise
+
+    assert any("temp-collection" in record.getMessage() for record in caplog.records)

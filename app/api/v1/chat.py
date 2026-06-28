@@ -24,8 +24,12 @@ except ModuleNotFoundError:  # pragma: no cover - compatibility shim
 
 from app.core.auth import (
     SubjectAttribution,
+    _build_test_admin_user,
+    _env_auth_disabled,
+    _extract_bearer_token,
     ensure_tenant_access,
     get_current_active_user,
+    get_identity_provider,
     get_subject_attribution,
 )
 from app.core.config import get_settings
@@ -191,6 +195,45 @@ def chat(
     return response
 
 
+class _WebSocketAuthError(Exception):
+    """Raised when a websocket connection fails authentication."""
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(reason)
+        self.reason = reason
+
+
+def _authenticate_websocket(websocket: WebSocket) -> tuple[str, UserRecord | None]:
+    """Resolve the tenant (and user) for a websocket chat session.
+
+    Mirrors the HTTP ``/chat`` auth path: when auth is disabled (dev/test) a
+    synthetic admin tenant is used; otherwise the bearer token is verified and
+    the tenant is taken from the verified claims. Previously this surface only
+    checked that an ``Authorization`` header was *present* and hard-coded the
+    tenant to ``"ws"``, bypassing JWT verification and tenant isolation.
+    """
+
+    settings = get_settings()
+    if getattr(settings, "auth_disabled", False) or _env_auth_disabled():
+        admin = _build_test_admin_user()
+        return str(admin.tenant_slug or ""), admin
+
+    token = _extract_bearer_token(websocket)
+    if not token:
+        raise _WebSocketAuthError("AUTH_REQUIRED")
+
+    provider = get_identity_provider()
+    try:
+        claims = provider.verify_token(token)
+    except HTTPException as exc:
+        raise _WebSocketAuthError("INVALID_TOKEN") from exc
+
+    tenant = str(provider.extract_tenant(claims) or "").strip()
+    if not tenant:
+        raise _WebSocketAuthError("TENANT_REQUIRED")
+    return tenant, None
+
+
 @router.websocket("/ws/chat")
 async def chat_websocket(websocket: WebSocket) -> None:
     """
@@ -204,9 +247,10 @@ async def chat_websocket(websocket: WebSocket) -> None:
     """
 
     await websocket.accept()
-    auth_header = websocket.headers.get("authorization")
-    if not auth_header:
-        await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="AUTH_REQUIRED")
+    try:
+        ws_tenant, ws_user = _authenticate_websocket(websocket)
+    except _WebSocketAuthError as exc:
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason=exc.reason)
         return
     last_pong = asyncio.get_running_loop().time()
 
@@ -262,7 +306,7 @@ async def chat_websocket(websocket: WebSocket) -> None:
 
         await websocket.send_json({"type": "ack", "request_id": request_id})
 
-        context = ChatRequestContext(tenant="ws", user=None)
+        context = ChatRequestContext(tenant=ws_tenant, user=ws_user)
 
         try:
             runtime = _build_runtime(websocket.app.state, payload)

@@ -337,9 +337,10 @@ def test_chat_returns_503_when_model_missing(api_client: TestClient) -> None:
     assert payload["status"] == 503
 
 
-def test_chat_websocket_roundtrip(api_client: TestClient) -> None:
+def test_chat_websocket_roundtrip(api_client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify websocket chat request/response flow with partial tokens and final payload."""
 
+    monkeypatch.setenv("AUTH_DISABLED_FOR_TESTS", "1")
     with api_client.websocket_connect(
         "/api/v1/ws/chat", headers={"Authorization": "Bearer test-token"}
     ) as websocket:
@@ -373,9 +374,12 @@ def test_chat_websocket_roundtrip(api_client: TestClient) -> None:
         assert isinstance(payload["citations"], list)
 
 
-def test_chat_websocket_returns_error_for_bad_message_type(api_client: TestClient) -> None:
+def test_chat_websocket_returns_error_for_bad_message_type(
+    api_client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Ensure websocket channel reports protocol-level envelope errors."""
 
+    monkeypatch.setenv("AUTH_DISABLED_FOR_TESTS", "1")
     with api_client.websocket_connect(
         "/api/v1/ws/chat", headers={"Authorization": "Bearer test-token"}
     ) as websocket:
@@ -386,9 +390,12 @@ def test_chat_websocket_returns_error_for_bad_message_type(api_client: TestClien
         assert error["code"] == "BAD_MESSAGE_TYPE"
 
 
-def test_chat_websocket_returns_error_for_invalid_payload(api_client: TestClient) -> None:
+def test_chat_websocket_returns_error_for_invalid_payload(
+    api_client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Ensure websocket channel returns structured validation errors."""
 
+    monkeypatch.setenv("AUTH_DISABLED_FOR_TESTS", "1")
     with api_client.websocket_connect(
         "/api/v1/ws/chat", headers={"Authorization": "Bearer test-token"}
     ) as websocket:
@@ -407,6 +414,82 @@ def test_chat_websocket_returns_error_for_invalid_payload(api_client: TestClient
         assert error["type"] == "error"
         assert error["request_id"] == "bad-req"
         assert error["code"] == "INVALID_REQUEST"
+
+
+def test_chat_websocket_rejects_invalid_token(
+    api_client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A present-but-unverifiable bearer token must not grant a session.
+
+    Auth is enabled by default in tests; the handler must verify the JWT, not
+    merely check that an Authorization header exists.
+    """
+
+    import app.api.v1.chat as chat_module
+    from starlette.websockets import WebSocketDisconnect
+
+    # Fail fast instead of waiting a full heartbeat interval for the close.
+    monkeypatch.setattr(chat_module, "_HEARTBEAT_INTERVAL_SECONDS", 0.2)
+
+    with pytest.raises(WebSocketDisconnect) as exc_info:
+        with api_client.websocket_connect(
+            "/api/v1/ws/chat", headers={"Authorization": "Bearer not-a-real-jwt"}
+        ) as websocket:
+            websocket.receive_json()
+
+    assert exc_info.value.code == 1008  # WS_1008_POLICY_VIOLATION
+
+
+def test_authenticate_websocket_resolves_tenant_from_token(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The websocket session tenant comes from the verified token, not a constant."""
+
+    from types import SimpleNamespace
+
+    import app.api.v1.chat as chat_module
+
+    monkeypatch.setattr(chat_module, "get_settings", lambda: SimpleNamespace(auth_disabled=False))
+    monkeypatch.setattr(chat_module, "_env_auth_disabled", lambda: False)
+
+    class FakeProvider:
+        def verify_token(self, token: str) -> dict[str, str]:
+            return {"tenant": "acme", "sub": "7"}
+
+        def extract_tenant(self, claims: dict[str, str]) -> str:
+            return claims.get("tenant", "")
+
+    monkeypatch.setattr(chat_module, "get_identity_provider", lambda: FakeProvider())
+
+    websocket = SimpleNamespace(headers={"Authorization": "Bearer good"}, scope={})
+    tenant, _user = chat_module._authenticate_websocket(websocket)
+
+    assert tenant == "acme"
+
+
+def test_authenticate_websocket_rejects_unverifiable_token(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An invalid token raises the websocket auth error instead of resolving a tenant."""
+
+    from types import SimpleNamespace
+
+    from fastapi import HTTPException
+
+    import app.api.v1.chat as chat_module
+
+    monkeypatch.setattr(chat_module, "get_settings", lambda: SimpleNamespace(auth_disabled=False))
+    monkeypatch.setattr(chat_module, "_env_auth_disabled", lambda: False)
+
+    class FakeProvider:
+        def verify_token(self, token: str) -> dict[str, str]:
+            raise HTTPException(401, detail="INVALID_ACCESS_TOKEN")
+
+    monkeypatch.setattr(chat_module, "get_identity_provider", lambda: FakeProvider())
+
+    websocket = SimpleNamespace(headers={"Authorization": "Bearer bad"}, scope={})
+    with pytest.raises(chat_module._WebSocketAuthError):
+        chat_module._authenticate_websocket(websocket)
 
 
 def test_version_endpoint_reports_versions(api_client: TestClient) -> None:
@@ -471,3 +554,75 @@ def test_warmup_endpoint_preloads_components(
     assert provider.ensure_ready_calls == 1
     assert provider.ensure_adapter_calls == 1
     assert vector_calls["count"] == 1
+
+
+def test_delete_file_preserves_files_outside_data_dir(
+    api_client: TestClient, tmp_path: Path
+) -> None:
+    """A tampered record path outside DATA_DIR must never be unlinked.
+
+    ``record.path`` is data the delete handler trusts. If a row were tampered
+    with (or a bug stored an absolute path), unlinking it blindly could remove
+    arbitrary files on the host. The handler must only delete within DATA_DIR.
+    """
+
+    # Pin the data root via dependency override so the assertion does not race
+    # the process-wide settings cache shared with other tests.
+    data_root = Path(tmp_path) / "store"
+    data_root.mkdir()
+    api_client.app.dependency_overrides[core_deps.get_data_dir] = lambda: data_root
+
+    victim = data_root.parent / "victim_secret.txt"
+    victim.write_text("do not delete me")
+
+    service = api_client.app.state.ingest_service
+    with Session(service.engine) as session:
+        record = file_models.FileRecord(
+            tenant_id="default",
+            sha256="deadbeefcafefeed",
+            path=str(victim),
+            filename="victim_secret.txt",
+            size=victim.stat().st_size,
+        )
+        session.add(record)
+        session.commit()
+        session.refresh(record)
+        record_id = record.id
+
+    response = api_client.delete(f"/api/v1/file/{record_id}")
+
+    assert response.status_code == 200, response.json()
+    assert victim.exists(), "file outside DATA_DIR must not be unlinked"
+
+    with Session(service.engine) as session:
+        assert session.get(file_models.FileRecord, record_id) is None
+
+
+def test_delete_file_unlinks_files_inside_data_dir(api_client: TestClient, tmp_path: Path) -> None:
+    """Legitimate files stored under DATA_DIR are still removed on delete."""
+
+    data_root = Path(tmp_path) / "store"
+    data_root.mkdir()
+    api_client.app.dependency_overrides[core_deps.get_data_dir] = lambda: data_root
+
+    stored = data_root / "stored.txt"
+    stored.write_text("payload")
+
+    service = api_client.app.state.ingest_service
+    with Session(service.engine) as session:
+        record = file_models.FileRecord(
+            tenant_id="default",
+            sha256="feedfacecafebabe",
+            path=str(stored),
+            filename="stored.txt",
+            size=stored.stat().st_size,
+        )
+        session.add(record)
+        session.commit()
+        session.refresh(record)
+        record_id = record.id
+
+    response = api_client.delete(f"/api/v1/file/{record_id}")
+
+    assert response.status_code == 200, response.json()
+    assert not stored.exists(), "file inside DATA_DIR should be unlinked"

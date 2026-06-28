@@ -1019,6 +1019,33 @@ class Settings(BaseSettings):
             raise ValueError("Only one of LORA_FP16 or LORA_BF16 can be enabled")
         return self
 
+    @model_validator(mode="after")
+    def _reject_insecure_production_secrets(self) -> "Settings":
+        """Refuse to boot in production with the shipped placeholder secrets.
+
+        ``secret_key`` signs ``/api/v1`` JWTs and ``api_key_hash_salt`` hashes
+        API keys; their defaults are public, so leaving them in production lets
+        anyone forge tokens or precompute hash tables. Fail fast instead of
+        running silently insecure.
+        """
+
+        env = str(self.app_env or "").strip().lower()
+        if env not in {"production", "prod"}:
+            return self
+
+        insecure: list[str] = []
+        if self.secret_key == "change-me":
+            insecure.append("SECRET_KEY")
+        if self.api_key_hash_salt == "kb-ai-salt":
+            insecure.append("API_KEY_HASH_SALT")
+        if insecure:
+            raise ValueError(
+                "Insecure default secret(s) in production: "
+                + ", ".join(insecure)
+                + ". Provide real values via environment variables."
+            )
+        return self
+
     @field_validator("rerank_topk", mode="before")
     @classmethod
     def _coerce_optional_int(cls, value: object) -> int | None:
