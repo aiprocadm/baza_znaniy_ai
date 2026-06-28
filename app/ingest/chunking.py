@@ -430,6 +430,65 @@ def _handle_small_token_window(
     return _WindowPlan(char_token_ids, char_tokenizer)
 
 
+def _window_and_step(chunk: object, overlap: object) -> tuple[int, int]:
+    """Resolve a sanitised ``(window, step)`` from raw chunk/overlap inputs.
+
+    ``window`` is at least 1; ``overlap`` is clamped to ``[0, window-1]`` and
+    ``step`` to at least 1 so windowing always makes forward progress.
+    """
+
+    try:
+        window = int(chunk)  # type: ignore[arg-type]
+    except Exception:
+        window = 1
+    window = max(window, 1)
+
+    try:
+        overlap_value = int(overlap)  # type: ignore[arg-type]
+    except Exception:
+        overlap_value = 0
+    overlap_value = max(0, min(overlap_value, window - 1))
+    step = max(window - overlap_value, 1)
+    return window, step
+
+
+def _collect_windows(
+    length: int, window: int, step: int, fetch: Callable[[int, int], str]
+) -> List[str]:
+    """Slide a ``window`` over ``[0, length)`` collecting non-empty pieces.
+
+    ``fetch(start, end)`` materialises a piece (token-decode or string slice).
+    A trailing window anchored at the end is appended when it would otherwise
+    be missed, guaranteeing the tail of the source is always represented.
+    """
+
+    if length <= 0:
+        return []
+
+    pieces: List[str] = []
+    last_start: Optional[int] = None
+    limit = max(length - window + 1, 0)
+    for start in range(0, limit, step):
+        end = min(start + window, length)
+        piece = fetch(start, end)
+        if piece:
+            pieces.append(piece)
+            last_start = start
+
+    tail_start = max(length - window, 0)
+    if tail_start < length and (last_start is None or tail_start > last_start):
+        tail_piece = fetch(tail_start, length)
+        if tail_piece:
+            pieces.append(tail_piece)
+
+    if not pieces:
+        tail_piece = fetch(tail_start, length)
+        if tail_piece:
+            pieces.append(tail_piece)
+
+    return pieces
+
+
 def _chunk(
     text: str,
     *,
@@ -446,22 +505,9 @@ def _chunk(
     if not text:
         return []
 
-    try:
-        window = int(chunk)
-    except Exception:
-        window = 1
-
-    window = max(window, 1)
+    window, step = _window_and_step(chunk, overlap)
     if window == 1:
         return list(text)
-
-    try:
-        overlap_value = int(overlap)
-    except Exception:
-        overlap_value = 0
-
-    overlap_value = max(0, min(overlap_value, window - 1))
-    step = max(window - overlap_value, 1)
 
     if encoder is None:
         encoder = _get_tokenizer()
@@ -476,33 +522,6 @@ def _chunk(
             except Exception:  # pragma: no cover - defensive fallback
                 tokens = []
 
-    def _collect_chunks(length: int, fetch: Callable[[int, int], str]) -> List[str]:
-        if length <= 0:
-            return []
-
-        pieces: List[str] = []
-        last_start: Optional[int] = None
-        limit = max(length - window + 1, 0)
-        for start in range(0, limit, step):
-            end = min(start + window, length)
-            piece = fetch(start, end)
-            if piece:
-                pieces.append(piece)
-                last_start = start
-
-        tail_start = max(length - window, 0)
-        if tail_start < length and (last_start is None or tail_start > last_start):
-            tail_piece = fetch(tail_start, length)
-            if tail_piece:
-                pieces.append(tail_piece)
-
-        if not pieces:
-            tail_piece = fetch(tail_start, length)
-            if tail_piece:
-                pieces.append(tail_piece)
-
-        return pieces
-
     decoded_full = ""
     if tokens:
         try:
@@ -512,16 +531,20 @@ def _chunk(
 
         if not decoded_full or (len(tokens) > window or len(decoded_full) <= window):
             try:
-                return _collect_chunks(
+                return _collect_windows(
                     len(tokens),
+                    window,
+                    step,
                     lambda start, end: encoder.decode(tokens[start:end]),
                 )
             except Exception:  # pragma: no cover - fallback to character chunking
                 pass
 
     source_text = decoded_full or text
-    return _collect_chunks(
+    return _collect_windows(
         len(source_text),
+        window,
+        step,
         lambda start, end: source_text[start:end],
     )
 

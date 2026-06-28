@@ -228,50 +228,51 @@ class IngestService:
             return 0
         return value
 
-    def __init__(
-        self,
-        *,
-        queue: Optional[asyncio.Queue[Optional[IngestJob]]] = None,
-        queue_maxsize: Optional[int] = None,
-        max_retries: Optional[int] = None,
-        backoff_seconds: Optional[float] = None,
-        engine=None,
-        auto_process: bool = False,
-        use_local_queue: Optional[bool] = None,
-    ) -> None:
-        settings = get_settings()
+    @staticmethod
+    def _resolve_retries(max_retries: Optional[int], settings: Any) -> int:
+        """Resolve retry count with param > env(INGEST_MAX_RETRIES) > settings."""
 
         if max_retries is not None:
-            retries = max_retries
-        else:
-            env_retries = os.getenv("INGEST_MAX_RETRIES")
-            if env_retries is not None:
-                try:
-                    retries = int(env_retries)
-                except ValueError:
-                    logger.warning(
-                        "Invalid ingest retry count %r from environment; using settings value",
-                        env_retries,
-                    )
-                    retries = settings.ingest_max_retries
-            else:
-                retries = settings.ingest_max_retries
+            return max_retries
+        env_retries = os.getenv("INGEST_MAX_RETRIES")
+        if env_retries is not None:
+            try:
+                return int(env_retries)
+            except ValueError:
+                logger.warning(
+                    "Invalid ingest retry count %r from environment; using settings value",
+                    env_retries,
+                )
+        return settings.ingest_max_retries
+
+    @staticmethod
+    def _resolve_backoff(backoff_seconds: Optional[float], settings: Any) -> float:
+        """Resolve backoff with param > env(INGEST_BACKOFF_SECONDS/_BASE) > settings."""
 
         if backoff_seconds is not None:
-            backoff = backoff_seconds
-        else:
-            env_backoff = os.getenv("INGEST_BACKOFF_SECONDS") or os.getenv("INGEST_BACKOFF_BASE")
-            if env_backoff is not None:
-                try:
-                    backoff = float(env_backoff)
-                except ValueError:
-                    logger.warning(
-                        "Invalid ingest backoff %r from environment; using settings value",
-                        env_backoff,
-                    )
-                    backoff = settings.ingest_backoff_seconds
-            else:
-                backoff = settings.ingest_backoff_seconds
+            return backoff_seconds
+        env_backoff = os.getenv("INGEST_BACKOFF_SECONDS") or os.getenv("INGEST_BACKOFF_BASE")
+        if env_backoff is not None:
+            try:
+                return float(env_backoff)
+            except ValueError:
+                logger.warning(
+                    "Invalid ingest backoff %r from environment; using settings value",
+                    env_backoff,
+                )
+        return settings.ingest_backoff_seconds
+
+    def _resolve_queue(
+        self,
+        queue: Optional[asyncio.Queue[Optional[IngestJob]]],
+        queue_maxsize: Optional[int],
+        settings: Any,
+    ) -> tuple[asyncio.Queue[Optional[IngestJob]], int]:
+        """Resolve the queue object and its bounded size across all sources.
+
+        Precedence for the size: ``queue_maxsize`` param > a provided queue's
+        own maxsize > env(INGEST_QUEUE_SIZE/INGEST_MAX_QUEUE) > settings.
+        """
 
         env_queue_raw = None
         env_queue_source = "settings"
@@ -301,7 +302,6 @@ class IngestService:
             queue_size_raw, default=default_queue_size, source=queue_size_source
         )
 
-        self.queue: asyncio.Queue[Optional[IngestJob]]
         if queue is not None:
             actual_maxsize = getattr(queue, "maxsize", None)
             if queue_maxsize is not None and actual_maxsize not in (None, queue_size):
@@ -315,9 +315,27 @@ class IngestService:
                     default=queue_size,
                     source="provided queue",
                 )
-            self.queue = queue
-        else:
-            self.queue = asyncio.Queue(maxsize=queue_size)
+            return queue, queue_size
+        return asyncio.Queue(maxsize=queue_size), queue_size
+
+    def __init__(
+        self,
+        *,
+        queue: Optional[asyncio.Queue[Optional[IngestJob]]] = None,
+        queue_maxsize: Optional[int] = None,
+        max_retries: Optional[int] = None,
+        backoff_seconds: Optional[float] = None,
+        engine=None,
+        auto_process: bool = False,
+        use_local_queue: Optional[bool] = None,
+    ) -> None:
+        settings = get_settings()
+
+        retries = self._resolve_retries(max_retries, settings)
+        backoff = self._resolve_backoff(backoff_seconds, settings)
+
+        self.queue: asyncio.Queue[Optional[IngestJob]]
+        self.queue, queue_size = self._resolve_queue(queue, queue_maxsize, settings)
 
         self.queue_maxsize = queue_size
         self.max_retries = max(0, int(retries))
@@ -534,6 +552,75 @@ class IngestService:
             if manage_session:
                 session_obj.close()
 
+    @staticmethod
+    def _extract_row_id_and_status(row: object) -> tuple[Optional[int], str | None]:
+        """Pull ``(id, status)`` from a raw result row across driver shapes.
+
+        SQLModel/SQLAlchemy hand back different row types depending on the
+        backend and version: a ``_mapping``-bearing row, a plain indexable
+        tuple, or an attribute object. Normalise all three here.
+        """
+
+        mapping = getattr(row, "_mapping", None)
+        if mapping is not None and "id" in mapping:
+            return mapping["id"], mapping.get("status")
+        if hasattr(row, "__getitem__"):
+            try:
+                job_id: Optional[int] = int(row[0])  # type: ignore[index]
+            except Exception:
+                job_id = None
+            try:
+                previous_status: str | None = str(row[1])  # type: ignore[index]
+            except Exception:
+                previous_status = None
+            return job_id, previous_status
+        return getattr(row, "id", None), getattr(row, "status", None)
+
+    @staticmethod
+    def _ingest_job_from_record(job_record: JobRecord) -> "IngestJob | None":
+        """Build an :class:`IngestJob` from a claimed job record's payload.
+
+        Returns ``None`` when the payload lacks a usable ``file_id`` so the
+        caller can skip the job without claiming it.
+        """
+
+        payload = dict(job_record.payload or {})
+        file_id = payload.get("file_id")
+        if file_id is None:
+            return None
+        try:
+            file_id_int = int(file_id)
+        except (TypeError, ValueError):
+            return None
+
+        filename = str(payload.get("filename") or payload.get("file") or "")
+        path = str(payload.get("path") or "")
+        sha256 = str(payload.get("sha256") or "")
+        document_id = payload.get("document_id")
+        try:
+            document_id_int = int(document_id) if document_id is not None else None
+        except (TypeError, ValueError):
+            document_id_int = None
+
+        attempt_value = payload.get("attempt")
+        if attempt_value is None:
+            attempt_value = job_record.attempt
+        try:
+            attempt = int(attempt_value or 0)
+        except (TypeError, ValueError):
+            attempt = 0
+
+        return IngestJob(
+            tenant_id=job_record.tenant_id,
+            path=path,
+            sha256=sha256,
+            file_id=file_id_int,
+            filename=filename,
+            document_id=document_id_int,
+            job_record_id=job_record.id,
+            attempt=attempt,
+        )
+
     def dequeue_next_job(self, session: Session | None = None) -> IngestJob | None:
         """Atomically reserve the next queued job from the database."""
 
@@ -574,25 +661,7 @@ class IngestService:
             if row is None:
                 return None
 
-            job_id: Optional[int] = None
-            previous_status: str | None = None
-            mapping = getattr(row, "_mapping", None)
-            if mapping is not None and "id" in mapping:
-                job_id = mapping["id"]
-                previous_status = mapping.get("status")
-            elif hasattr(row, "__getitem__"):
-                try:
-                    job_id = int(row[0])  # type: ignore[index]
-                except Exception:
-                    job_id = None
-                try:
-                    previous_status = str(row[1])  # type: ignore[index]
-                except Exception:
-                    previous_status = None
-            else:
-                job_id = getattr(row, "id", None)
-                previous_status = getattr(row, "status", None)
-
+            job_id, previous_status = self._extract_row_id_and_status(row)
             if job_id is None or previous_status is None:
                 return None
 
@@ -640,44 +709,12 @@ class IngestService:
                 job_record.payload = payload
                 session_obj.add(job_record)
 
-            payload = dict(job_record.payload or {})
-            file_id = payload.get("file_id")
-            if file_id is None:
+            job = self._ingest_job_from_record(job_record)
+            if job is None:
                 return None
-
-            try:
-                file_id_int = int(file_id)
-            except (TypeError, ValueError):
-                return None
-
-            filename = str(payload.get("filename") or payload.get("file") or "")
-            path = str(payload.get("path") or "")
-            sha256 = str(payload.get("sha256") or "")
-            document_id = payload.get("document_id")
-            try:
-                document_id_int = int(document_id) if document_id is not None else None
-            except (TypeError, ValueError):
-                document_id_int = None
-
-            attempt_value = payload.get("attempt")
-            if attempt_value is None:
-                attempt_value = job_record.attempt
-            try:
-                attempt = int(attempt_value or 0)
-            except (TypeError, ValueError):
-                attempt = 0
 
             should_commit = True
-            return IngestJob(
-                tenant_id=job_record.tenant_id,
-                path=path,
-                sha256=sha256,
-                file_id=file_id_int,
-                filename=filename,
-                document_id=document_id_int,
-                job_record_id=job_record.id,
-                attempt=attempt,
-            )
+            return job
         except Exception:
             if manage_session:
                 session_obj.rollback()

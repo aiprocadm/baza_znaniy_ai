@@ -13,7 +13,7 @@ from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPBearer
 from sqlmodel import Session, select
 
-from app.core.config import get_settings
+from app.core.config import _env_auth_disabled, get_settings
 from app.core.deps import get_ingest_session, get_tenant
 from app.core.datetime_utils import utc_now
 from app.models.file import ApiKeyRecord
@@ -90,26 +90,6 @@ class KeycloakOidcProvider(LocalJwtProvider):
 
 class SupabaseAuthProvider(LocalJwtProvider):
     """Placeholder provider for Supabase Auth integration."""
-
-
-_AUTH_DISABLED_ENV_KEYS = (
-    "AUTH_DISABLED_FOR_TESTS",
-    "AUTH_DISABLED",
-    "DISABLE_AUTH",
-    "AUTH_DISABLE",
-    "KB_DISABLE_AUTH",
-)
-_TRUTHY_ENV_VALUES = {"1", "true", "yes", "on"}
-
-
-def _env_auth_disabled() -> bool:
-    """Return whether environment variables disable authentication."""
-
-    for key in _AUTH_DISABLED_ENV_KEYS:
-        raw_value = os.getenv(key)
-        if raw_value and raw_value.strip().lower() in _TRUTHY_ENV_VALUES:
-            return True
-    return False
 
 
 def _build_test_admin_user() -> UserRecord:

@@ -5,7 +5,7 @@ from __future__ import annotations
 import math
 import os
 
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -29,20 +29,43 @@ except ImportError:  # pragma: no cover - minimal shim for tests
     PydanticBaseSettings = None  # type: ignore[assignment]
 
 
+# Canonical "is authentication disabled via the environment" contract.
+#
+# This is the single source of truth for both ``_default_auth_disabled`` (the
+# ``Settings.auth_disabled`` default factory) and ``app.core.auth`` (which
+# imports ``_env_auth_disabled`` directly). Keep the list + truthy set here; do
+# not redefine them elsewhere — divergent copies previously let the two checks
+# disagree (e.g. ``AUTH_DISABLED_FOR_TESTS=0`` + ``AUTH_DISABLED=1``), and since
+# call sites OR the two together the looser one silently won, a security hazard.
+_AUTH_DISABLED_ENV_KEYS: tuple[str, ...] = (
+    "AUTH_DISABLED_FOR_TESTS",
+    "AUTH_DISABLED",
+    "DISABLE_AUTH",
+    "AUTH_DISABLE",
+    "KB_DISABLE_AUTH",
+)
+_TRUTHY_ENV_VALUES: frozenset[str] = frozenset({"1", "true", "yes", "on"})
+
+
+def _env_auth_disabled() -> bool:
+    """Return ``True`` if *any* recognised env key is set to a truthy value.
+
+    Canonical semantics: authentication is considered disabled when ANY of
+    ``_AUTH_DISABLED_ENV_KEYS`` holds a truthy value. A falsey value (e.g.
+    ``"0"``) on one key does NOT mask a truthy value on another.
+    """
+
+    for key in _AUTH_DISABLED_ENV_KEYS:
+        raw_value = os.getenv(key)
+        if raw_value and raw_value.strip().lower() in _TRUTHY_ENV_VALUES:
+            return True
+    return False
+
+
 def _default_auth_disabled() -> bool:
-    """Return whether authentication should be bypassed by default."""
+    """Default factory for ``Settings.auth_disabled`` — delegates to the canonical check."""
 
-    raw_value = (
-        os.getenv("AUTH_DISABLED_FOR_TESTS")
-        or os.getenv("AUTH_DISABLED")
-        or os.getenv("DISABLE_AUTH")
-        or os.getenv("AUTH_DISABLE")
-        or os.getenv("KB_DISABLE_AUTH")
-    )
-    if raw_value is None:
-        return False
-
-    return raw_value.strip().lower() in {"1", "true", "yes", "on"}
+    return _env_auth_disabled()
 
 
 def _flatten_aliases(source: object) -> list[str]:
@@ -161,6 +184,69 @@ def _environment_overrides(
     return overrides, consumed
 
 
+def _set_model_config_env_file(config_obj: object, value: object) -> None:
+    """Best-effort ``env_file`` assignment on a model_config (dict or object).
+
+    ``model_config`` may be a plain dict or a typed object depending on the
+    pydantic build, so try both access styles; one is expected to fail.
+    """
+
+    try:
+        config_obj["env_file"] = value  # type: ignore[index]
+    except Exception:
+        pass
+    try:
+        setattr(config_obj, "env_file", value)
+    except Exception:
+        pass
+
+
+def _init_with_environment_overrides(
+    instance: BaseModel,
+    super_init: Callable[..., None],
+    data: dict[str, object],
+) -> None:
+    """Run ``super_init`` with eager environment-alias overrides applied.
+
+    Shared by both ``BaseSettings`` shims (the BaseModel fallback and the
+    pydantic-settings subclass). The consumed env vars are popped while
+    pydantic initialises so its own loader cannot double-resolve aliases, then
+    the original environment (and ``env_file``) is restored afterwards.
+    """
+
+    overrides, consumed = _environment_overrides(instance.__class__, skip=data.keys())
+    merged = {**overrides, **data}
+    restored: list[tuple[str, str | None]] = []
+    seen: set[str] = set()
+    for env_names in consumed.values():
+        for env_name in env_names:
+            if env_name in seen:
+                continue
+            seen.add(env_name)
+            restored.append((env_name, os.environ.get(env_name)))
+            os.environ.pop(env_name, None)
+    config_obj = getattr(instance.__class__, "model_config", None)
+    previous_env_file = getattr(config_obj, "env_file", None)
+    if config_obj is not None:
+        _set_model_config_env_file(config_obj, ())
+    try:
+        super_init(**merged)
+        if overrides:
+            payload = instance.model_dump(mode="python")
+            payload.update(overrides)
+            updated = instance.__class__.model_validate(payload)
+            instance.__dict__.update(updated.__dict__)
+            instance.__pydantic_fields_set__ = updated.__pydantic_fields_set__
+    finally:
+        if config_obj is not None:
+            _set_model_config_env_file(config_obj, previous_env_file)
+        for env_name, original in reversed(restored):
+            if original is None:
+                os.environ.pop(env_name, None)
+            else:
+                os.environ[env_name] = original
+
+
 if PydanticBaseSettings is None:
 
     import os
@@ -234,52 +320,7 @@ if PydanticBaseSettings is None:
         model_config = SettingsConfigDict()
 
         def __init__(self, **data: object) -> None:
-
-            overrides, consumed = _environment_overrides(self.__class__, skip=data.keys())
-            merged = {**overrides, **data}
-            restored: list[tuple[str, str | None]] = []
-            seen: set[str] = set()
-            for env_names in consumed.values():
-                for env_name in env_names:
-                    if env_name in seen:
-                        continue
-                    seen.add(env_name)
-                    restored.append((env_name, os.environ.get(env_name)))
-                    os.environ.pop(env_name, None)
-            config_obj = getattr(self.__class__, "model_config", None)
-            previous_env_file = getattr(config_obj, "env_file", None)
-            if config_obj is not None:
-                try:
-                    config_obj["env_file"] = ()  # type: ignore[index]
-                except Exception:
-                    pass
-                try:
-                    setattr(config_obj, "env_file", ())
-                except Exception:
-                    pass
-            try:
-                super().__init__(**merged)
-                if overrides:
-                    payload = self.model_dump(mode="python")
-                    payload.update(overrides)
-                    updated = self.__class__.model_validate(payload)
-                    self.__dict__.update(updated.__dict__)
-                    self.__pydantic_fields_set__ = updated.__pydantic_fields_set__
-            finally:
-                if config_obj is not None:
-                    try:
-                        config_obj["env_file"] = previous_env_file  # type: ignore[index]
-                    except Exception:
-                        pass
-                    try:
-                        setattr(config_obj, "env_file", previous_env_file)
-                    except Exception:
-                        pass
-                for env_name, original in reversed(restored):
-                    if original is None:
-                        os.environ.pop(env_name, None)
-                    else:
-                        os.environ[env_name] = original
+            _init_with_environment_overrides(self, super().__init__, data)
 
 else:
 
@@ -289,51 +330,7 @@ else:
         model_config = SettingsConfigDict()
 
         def __init__(self, **data: object) -> None:
-            env_overrides, consumed = _environment_overrides(self.__class__, skip=data.keys())
-            merged = {**env_overrides, **data}
-            restored: list[tuple[str, str | None]] = []
-            seen: set[str] = set()
-            for env_names in consumed.values():
-                for env_name in env_names:
-                    if env_name in seen:
-                        continue
-                    seen.add(env_name)
-                    restored.append((env_name, os.environ.get(env_name)))
-                    os.environ.pop(env_name, None)
-            config_obj = getattr(self.__class__, "model_config", None)
-            previous_env_file = getattr(config_obj, "env_file", None)
-            if config_obj is not None:
-                try:
-                    config_obj["env_file"] = ()  # type: ignore[index]
-                except Exception:
-                    pass
-                try:
-                    setattr(config_obj, "env_file", ())
-                except Exception:
-                    pass
-            try:
-                super().__init__(**merged)
-                if env_overrides:
-                    payload = self.model_dump(mode="python")
-                    payload.update(env_overrides)
-                    updated = self.__class__.model_validate(payload)
-                    self.__dict__.update(updated.__dict__)
-                    self.__pydantic_fields_set__ = updated.__pydantic_fields_set__
-            finally:
-                if config_obj is not None:
-                    try:
-                        config_obj["env_file"] = previous_env_file  # type: ignore[index]
-                    except Exception:
-                        pass
-                    try:
-                        setattr(config_obj, "env_file", previous_env_file)
-                    except Exception:
-                        pass
-                for env_name, original in reversed(restored):
-                    if original is None:
-                        os.environ.pop(env_name, None)
-                    else:
-                        os.environ[env_name] = original
+            _init_with_environment_overrides(self, super().__init__, data)
 
             values: dict[str, object] = {}
             model_fields = getattr(self.__class__, "model_fields", None)
@@ -382,6 +379,20 @@ class Settings(BaseSettings):
         extra="ignore",
         populate_by_name=True,
     )
+
+    def __init__(self, **data: object) -> None:
+        super().__init__(**data)
+        # Make ``auth_disabled`` standalone-authoritative.
+        #
+        # The settings shim resolves the field from the FIRST matching alias and
+        # leans on pydantic's loose bool coercion, so the field alone could
+        # disagree with ``_env_auth_disabled`` (e.g. ``AUTH_DISABLED=0`` masking
+        # ``AUTH_DISABLED_FOR_TESTS=1``, or ``AUTH_DISABLED=y`` parsing truthy).
+        # The env is fully restored by the time ``super().__init__`` returns, so
+        # re-derive the field from the canonical contract here. An explicit
+        # constructor argument still wins (no recognised env key consulted).
+        if "auth_disabled" not in data:
+            self.auth_disabled = _env_auth_disabled()
 
     # Core application ---------------------------------------------------
     app_env: str = Field(
