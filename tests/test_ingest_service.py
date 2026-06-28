@@ -1192,3 +1192,62 @@ def test_page_sha_keys_on_length_while_chunk_sha_keys_on_text() -> None:
     assert IngestWorker._page_sha("doc", 1, "ab") == IngestWorker._page_sha("doc", 1, "cd")
     # ...whereas chunk sha keys on the text itself.
     assert IngestWorker._chunk_sha("doc", 1, 1, "ab") != IngestWorker._chunk_sha("doc", 1, 1, "cd")
+
+
+def test_chunk_meta_merges_provenance_and_attrs() -> None:
+    parse_result = SimpleNamespace(
+        parser_backend_used="pdfminer", fallback_reason=None, ocr_used=False
+    )
+    meta = IngestWorker._chunk_meta(
+        "docsha", 2, 3, parse_result, {"act_type": "law", "issuer": "X"}
+    )
+    assert meta["document_sha"] == "docsha"
+    assert meta["page"] == 2
+    assert meta["chunk"] == 3
+    assert meta["parser_backend"] == "pdfminer"
+    assert meta["fallback_reason"] is None
+    assert meta["ocr_used"] is False
+    assert meta["act_type"] == "law"
+    assert meta["issuer"] == "X"
+
+
+def test_chunk_meta_attrs_override_provenance_on_key_clash() -> None:
+    parse_result = SimpleNamespace(parser_backend_used="b", fallback_reason=None, ocr_used=False)
+    # `**attrs` is spread last, so a clashing key (here "page") wins by design.
+    meta = IngestWorker._chunk_meta("doc", 1, 1, parse_result, {"page": 99})
+    assert meta["page"] == 99
+
+
+def test_build_chunk_payload_shape() -> None:
+    payload = IngestWorker._build_chunk_payload(
+        filename="f.pdf",
+        page_number=4,
+        chunk_sha="abc",
+        chunk_text="body",
+        chunk_tokens=5,
+        meta={"k": "v"},
+        tenant_id="acme",
+    )
+    assert payload == {
+        "file": "f.pdf",
+        "page": 4,
+        "sha256": "abc",
+        "text": "body",
+        "tokens": 5,
+        "meta": {"k": "v"},
+        "owner": "acme",
+        "tenant_id": "acme",
+    }
+
+
+def test_build_chunk_payload_defaults_empty_meta() -> None:
+    payload = IngestWorker._build_chunk_payload(
+        filename="f",
+        page_number=1,
+        chunk_sha="s",
+        chunk_text="t",
+        chunk_tokens=1,
+        meta=None,
+        tenant_id="acme",
+    )
+    assert payload["meta"] == {}

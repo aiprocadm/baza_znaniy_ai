@@ -1188,6 +1188,50 @@ class IngestWorker:
             f"{document_sha}:{page_number}:{offset}:{chunk_text}".encode("utf-8")
         ).hexdigest()
 
+    @staticmethod
+    def _chunk_meta(
+        document_sha: str,
+        page_number: int,
+        offset: int,
+        parse_result: Any,
+        attrs: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Per-chunk metadata: parse provenance merged with the document NPA attrs."""
+
+        return {
+            "document_sha": document_sha,
+            "page": page_number,
+            "chunk": offset,
+            "parser_backend": parse_result.parser_backend_used,
+            "fallback_reason": parse_result.fallback_reason,
+            "ocr_used": parse_result.ocr_used,
+            **attrs,
+        }
+
+    @staticmethod
+    def _build_chunk_payload(
+        *,
+        filename: str,
+        page_number: int,
+        chunk_sha: str,
+        chunk_text: str,
+        chunk_tokens: int,
+        meta: dict[str, Any] | None,
+        tenant_id: str,
+    ) -> dict[str, object]:
+        """Assemble the vectorstore index payload for a single chunk."""
+
+        return {
+            "file": filename,
+            "page": page_number,
+            "sha256": chunk_sha,
+            "text": chunk_text,
+            "tokens": chunk_tokens,
+            "meta": meta or {},
+            "owner": tenant_id,
+            "tenant_id": tenant_id,
+        }
+
     async def _ingest_file(self, job: IngestJob) -> int:
         with Session(self.service.engine) as session:
             file_obj = session.get(FileRecord, job.file_id)
@@ -1254,6 +1298,9 @@ class IngestWorker:
                 for offset, chunk_text in enumerate(chunks, start=1):
                     chunk_sha = self._chunk_sha(job.sha256, page.number, offset, chunk_text)
                     chunk_tokens = self._count_tokens(self._tokenizer, chunk_text)
+                    chunk_meta = self._chunk_meta(
+                        job.sha256, page.number, offset, parse_result, attrs
+                    )
                     chunk = ChunkRecord(
                         tenant_id=job.tenant_id,
                         page_id=page.id,
@@ -1262,28 +1309,19 @@ class IngestWorker:
                         text=chunk_text,
                         batch=batch_index,
                         tokens=chunk_tokens,
-                        meta={
-                            "document_sha": job.sha256,
-                            "page": page.number,
-                            "chunk": offset,
-                            "parser_backend": parse_result.parser_backend_used,
-                            "fallback_reason": parse_result.fallback_reason,
-                            "ocr_used": parse_result.ocr_used,
-                            **attrs,
-                        },
+                        meta=chunk_meta,
                     )
                     session.add(chunk)
                     chunk_payloads.append(
-                        {
-                            "file": filename,
-                            "page": page.number,
-                            "sha256": chunk_sha,
-                            "text": chunk_text,
-                            "tokens": chunk_tokens,
-                            "meta": chunk.meta or {},
-                            "owner": job.tenant_id,
-                            "tenant_id": job.tenant_id,
-                        }
+                        self._build_chunk_payload(
+                            filename=filename,
+                            page_number=page.number,
+                            chunk_sha=chunk_sha,
+                            chunk_text=chunk_text,
+                            chunk_tokens=chunk_tokens,
+                            meta=chunk_meta,
+                            tenant_id=job.tenant_id,
+                        )
                     )
                     chunk_counter += 1
                     if chunk_counter % self.embed_batch_size == 0:
