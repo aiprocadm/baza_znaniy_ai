@@ -29,20 +29,43 @@ except ImportError:  # pragma: no cover - minimal shim for tests
     PydanticBaseSettings = None  # type: ignore[assignment]
 
 
+# Canonical "is authentication disabled via the environment" contract.
+#
+# This is the single source of truth for both ``_default_auth_disabled`` (the
+# ``Settings.auth_disabled`` default factory) and ``app.core.auth`` (which
+# imports ``_env_auth_disabled`` directly). Keep the list + truthy set here; do
+# not redefine them elsewhere — divergent copies previously let the two checks
+# disagree (e.g. ``AUTH_DISABLED_FOR_TESTS=0`` + ``AUTH_DISABLED=1``), and since
+# call sites OR the two together the looser one silently won, a security hazard.
+_AUTH_DISABLED_ENV_KEYS: tuple[str, ...] = (
+    "AUTH_DISABLED_FOR_TESTS",
+    "AUTH_DISABLED",
+    "DISABLE_AUTH",
+    "AUTH_DISABLE",
+    "KB_DISABLE_AUTH",
+)
+_TRUTHY_ENV_VALUES: frozenset[str] = frozenset({"1", "true", "yes", "on"})
+
+
+def _env_auth_disabled() -> bool:
+    """Return ``True`` if *any* recognised env key is set to a truthy value.
+
+    Canonical semantics: authentication is considered disabled when ANY of
+    ``_AUTH_DISABLED_ENV_KEYS`` holds a truthy value. A falsey value (e.g.
+    ``"0"``) on one key does NOT mask a truthy value on another.
+    """
+
+    for key in _AUTH_DISABLED_ENV_KEYS:
+        raw_value = os.getenv(key)
+        if raw_value and raw_value.strip().lower() in _TRUTHY_ENV_VALUES:
+            return True
+    return False
+
+
 def _default_auth_disabled() -> bool:
-    """Return whether authentication should be bypassed by default."""
+    """Default factory for ``Settings.auth_disabled`` — delegates to the canonical check."""
 
-    raw_value = (
-        os.getenv("AUTH_DISABLED_FOR_TESTS")
-        or os.getenv("AUTH_DISABLED")
-        or os.getenv("DISABLE_AUTH")
-        or os.getenv("AUTH_DISABLE")
-        or os.getenv("KB_DISABLE_AUTH")
-    )
-    if raw_value is None:
-        return False
-
-    return raw_value.strip().lower() in {"1", "true", "yes", "on"}
+    return _env_auth_disabled()
 
 
 def _flatten_aliases(source: object) -> list[str]:
@@ -356,6 +379,20 @@ class Settings(BaseSettings):
         extra="ignore",
         populate_by_name=True,
     )
+
+    def __init__(self, **data: object) -> None:
+        super().__init__(**data)
+        # Make ``auth_disabled`` standalone-authoritative.
+        #
+        # The settings shim resolves the field from the FIRST matching alias and
+        # leans on pydantic's loose bool coercion, so the field alone could
+        # disagree with ``_env_auth_disabled`` (e.g. ``AUTH_DISABLED=0`` masking
+        # ``AUTH_DISABLED_FOR_TESTS=1``, or ``AUTH_DISABLED=y`` parsing truthy).
+        # The env is fully restored by the time ``super().__init__`` returns, so
+        # re-derive the field from the canonical contract here. An explicit
+        # constructor argument still wins (no recognised env key consulted).
+        if "auth_disabled" not in data:
+            self.auth_disabled = _env_auth_disabled()
 
     # Core application ---------------------------------------------------
     app_env: str = Field(
