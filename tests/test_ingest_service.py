@@ -763,3 +763,93 @@ def test_extract_npa_fields_defaults_to_none_when_absent() -> None:
     fields = _extract_npa_fields("no structured metadata here")
     for key in ("act_type", "issuer", "reg_number", "adoption_date", "effective_date", "revision"):
         assert fields[key] is None
+
+
+# --- Characterization tests for the _process FILE_MISSING seams --------------
+# _load_file_and_job and _fail_job_file_missing were lifted out of two
+# near-identical inline blocks in IngestWorker._process. Pin their behaviour
+# here with a recording stand-in so no real DB engine is needed.
+
+
+class _RecordingSession:
+    """Minimal SQLModel-Session stand-in for the FILE_MISSING helpers."""
+
+    def __init__(self, rows: dict | None = None) -> None:
+        self._rows = rows or {}
+        self.added: list = []
+        self.commits = 0
+        self.get_calls: list = []
+
+    def get(self, model: object, ident: object) -> object:
+        self.get_calls.append((model, ident))
+        return self._rows.get((model, ident))
+
+    def add(self, obj: object) -> None:
+        self.added.append(obj)
+
+    def commit(self) -> None:
+        self.commits += 1
+
+
+def test_fail_job_file_missing_marks_failed_and_commits() -> None:
+    session = _RecordingSession()
+    record = JobRecord(tenant_id="acme", status=JobStatus.PROCESSING, payload={"file_id": 1})
+
+    IngestWorker._fail_job_file_missing(session, record)
+
+    assert record.status == JobStatus.FAILED
+    assert record.error == "FILE_MISSING"
+    assert record.finished_at is not None
+    assert record.finished_at == record.updated_at
+    assert session.added == [record]
+    assert session.commits == 1
+
+
+def test_fail_job_file_missing_is_noop_without_record() -> None:
+    session = _RecordingSession()
+
+    IngestWorker._fail_job_file_missing(session, None)
+
+    assert session.added == []
+    assert session.commits == 0
+
+
+def test_load_file_and_job_skips_job_lookup_without_record_id() -> None:
+    file_rec = FileRecord(tenant_id="acme", sha256="x", path="p", filename="f", size=1)
+    session = _RecordingSession({(FileRecord, 7): file_rec})
+    job = IngestJob(
+        tenant_id="acme",
+        path="p",
+        sha256="x",
+        file_id=7,
+        filename="f",
+        document_id=None,
+        job_record_id=None,
+    )
+
+    file_obj, job_record = IngestWorker._load_file_and_job(session, job)
+
+    assert file_obj is file_rec
+    assert job_record is None
+    # JobRecord must never be queried when the job carries no record id.
+    assert all(model is not JobRecord for model, _ in session.get_calls)
+
+
+def test_load_file_and_job_fetches_both_when_record_id_present() -> None:
+    file_rec = FileRecord(tenant_id="acme", sha256="x", path="p", filename="f", size=1)
+    job_rec = JobRecord(tenant_id="acme", payload={"file_id": 7})
+    session = _RecordingSession({(FileRecord, 7): file_rec, (JobRecord, 3): job_rec})
+    job = IngestJob(
+        tenant_id="acme",
+        path="p",
+        sha256="x",
+        file_id=7,
+        filename="f",
+        document_id=None,
+        job_record_id=3,
+    )
+
+    file_obj, job_record = IngestWorker._load_file_and_job(session, job)
+
+    assert file_obj is file_rec
+    assert job_record is job_rec

@@ -911,6 +911,40 @@ class IngestWorker:
         if self.service.auto_process:
             self.service.ensure_background_worker()
 
+    @staticmethod
+    def _load_file_and_job(
+        session: Session, job: IngestJob
+    ) -> "tuple[FileRecord | None, JobRecord | None]":
+        """Load the file row and (optional) job record for a job in one place.
+
+        ``job_record`` is only fetched when the job carries a record id, mirroring
+        the original inline loads in :meth:`_process`.
+        """
+
+        file_obj = session.get(FileRecord, job.file_id)
+        job_record = (
+            session.get(JobRecord, job.job_record_id) if job.job_record_id is not None else None
+        )
+        return file_obj, job_record
+
+    @staticmethod
+    def _fail_job_file_missing(session: Session, job_record: "JobRecord | None") -> None:
+        """Mark a claimed job FAILED/FILE_MISSING when its file row has vanished.
+
+        No-op when there is no job record to update. Commits its own change so
+        callers can simply ``return`` afterwards.
+        """
+
+        if job_record is None:
+            return
+        now = utc_now()
+        job_record.status = JobStatus.FAILED
+        job_record.error = "FILE_MISSING"
+        job_record.finished_at = now
+        job_record.updated_at = now
+        session.add(job_record)
+        session.commit()
+
     async def process_job(self, job: IngestJob) -> None:
         logger.debug("ingest worker immediate processing job %s", job)
         try:
@@ -962,18 +996,9 @@ class IngestWorker:
 
     async def _process(self, job: IngestJob) -> None:
         with Session(self.service.engine) as session:
-            file_obj = session.get(FileRecord, job.file_id)
-            job_record = (
-                session.get(JobRecord, job.job_record_id) if job.job_record_id is not None else None
-            )
+            file_obj, job_record = self._load_file_and_job(session, job)
             if not file_obj:
-                if job_record:
-                    job_record.status = JobStatus.FAILED
-                    job_record.error = "FILE_MISSING"
-                    job_record.finished_at = utc_now()
-                    job_record.updated_at = utc_now()
-                    session.add(job_record)
-                    session.commit()
+                self._fail_job_file_missing(session, job_record)
                 return
             document_id = job.document_id or file_obj.document_id
             document = session.get(DocumentRecord, document_id) if document_id is not None else None
@@ -1022,20 +1047,9 @@ class IngestWorker:
             logger.exception("Failed to ingest job %s", job)
         finally:
             with Session(self.service.engine) as session:
-                file_obj = session.get(FileRecord, job.file_id)
-                job_record = (
-                    session.get(JobRecord, job.job_record_id)
-                    if job.job_record_id is not None
-                    else None
-                )
+                file_obj, job_record = self._load_file_and_job(session, job)
                 if not file_obj:
-                    if job_record:
-                        job_record.status = JobStatus.FAILED
-                        job_record.error = "FILE_MISSING"
-                        job_record.finished_at = utc_now()
-                        job_record.updated_at = utc_now()
-                        session.add(job_record)
-                        session.commit()
+                    self._fail_job_file_missing(session, job_record)
                     return
                 document_id = job.document_id or file_obj.document_id
                 document = (
