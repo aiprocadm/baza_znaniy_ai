@@ -534,6 +534,75 @@ class IngestService:
             if manage_session:
                 session_obj.close()
 
+    @staticmethod
+    def _extract_row_id_and_status(row: object) -> tuple[Optional[int], str | None]:
+        """Pull ``(id, status)`` from a raw result row across driver shapes.
+
+        SQLModel/SQLAlchemy hand back different row types depending on the
+        backend and version: a ``_mapping``-bearing row, a plain indexable
+        tuple, or an attribute object. Normalise all three here.
+        """
+
+        mapping = getattr(row, "_mapping", None)
+        if mapping is not None and "id" in mapping:
+            return mapping["id"], mapping.get("status")
+        if hasattr(row, "__getitem__"):
+            try:
+                job_id: Optional[int] = int(row[0])  # type: ignore[index]
+            except Exception:
+                job_id = None
+            try:
+                previous_status: str | None = str(row[1])  # type: ignore[index]
+            except Exception:
+                previous_status = None
+            return job_id, previous_status
+        return getattr(row, "id", None), getattr(row, "status", None)
+
+    @staticmethod
+    def _ingest_job_from_record(job_record: JobRecord) -> "IngestJob | None":
+        """Build an :class:`IngestJob` from a claimed job record's payload.
+
+        Returns ``None`` when the payload lacks a usable ``file_id`` so the
+        caller can skip the job without claiming it.
+        """
+
+        payload = dict(job_record.payload or {})
+        file_id = payload.get("file_id")
+        if file_id is None:
+            return None
+        try:
+            file_id_int = int(file_id)
+        except (TypeError, ValueError):
+            return None
+
+        filename = str(payload.get("filename") or payload.get("file") or "")
+        path = str(payload.get("path") or "")
+        sha256 = str(payload.get("sha256") or "")
+        document_id = payload.get("document_id")
+        try:
+            document_id_int = int(document_id) if document_id is not None else None
+        except (TypeError, ValueError):
+            document_id_int = None
+
+        attempt_value = payload.get("attempt")
+        if attempt_value is None:
+            attempt_value = job_record.attempt
+        try:
+            attempt = int(attempt_value or 0)
+        except (TypeError, ValueError):
+            attempt = 0
+
+        return IngestJob(
+            tenant_id=job_record.tenant_id,
+            path=path,
+            sha256=sha256,
+            file_id=file_id_int,
+            filename=filename,
+            document_id=document_id_int,
+            job_record_id=job_record.id,
+            attempt=attempt,
+        )
+
     def dequeue_next_job(self, session: Session | None = None) -> IngestJob | None:
         """Atomically reserve the next queued job from the database."""
 
@@ -574,25 +643,7 @@ class IngestService:
             if row is None:
                 return None
 
-            job_id: Optional[int] = None
-            previous_status: str | None = None
-            mapping = getattr(row, "_mapping", None)
-            if mapping is not None and "id" in mapping:
-                job_id = mapping["id"]
-                previous_status = mapping.get("status")
-            elif hasattr(row, "__getitem__"):
-                try:
-                    job_id = int(row[0])  # type: ignore[index]
-                except Exception:
-                    job_id = None
-                try:
-                    previous_status = str(row[1])  # type: ignore[index]
-                except Exception:
-                    previous_status = None
-            else:
-                job_id = getattr(row, "id", None)
-                previous_status = getattr(row, "status", None)
-
+            job_id, previous_status = self._extract_row_id_and_status(row)
             if job_id is None or previous_status is None:
                 return None
 
@@ -640,44 +691,12 @@ class IngestService:
                 job_record.payload = payload
                 session_obj.add(job_record)
 
-            payload = dict(job_record.payload or {})
-            file_id = payload.get("file_id")
-            if file_id is None:
+            job = self._ingest_job_from_record(job_record)
+            if job is None:
                 return None
-
-            try:
-                file_id_int = int(file_id)
-            except (TypeError, ValueError):
-                return None
-
-            filename = str(payload.get("filename") or payload.get("file") or "")
-            path = str(payload.get("path") or "")
-            sha256 = str(payload.get("sha256") or "")
-            document_id = payload.get("document_id")
-            try:
-                document_id_int = int(document_id) if document_id is not None else None
-            except (TypeError, ValueError):
-                document_id_int = None
-
-            attempt_value = payload.get("attempt")
-            if attempt_value is None:
-                attempt_value = job_record.attempt
-            try:
-                attempt = int(attempt_value or 0)
-            except (TypeError, ValueError):
-                attempt = 0
 
             should_commit = True
-            return IngestJob(
-                tenant_id=job_record.tenant_id,
-                path=path,
-                sha256=sha256,
-                file_id=file_id_int,
-                filename=filename,
-                document_id=document_id_int,
-                job_record_id=job_record.id,
-                attempt=attempt,
-            )
+            return job
         except Exception:
             if manage_session:
                 session_obj.rollback()
