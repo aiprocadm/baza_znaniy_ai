@@ -1154,3 +1154,41 @@ def test_process_finalizes_failure_and_runs_handle_failure(
     assert captured["error_message"] == "boom"
     assert captured["chunk_count"] == 0  # nothing ingested before the failure
     assert handled == [1]
+
+
+# --- Characterization tests for the _ingest_file pure seams ------------------
+# Token counting (with its silent char-length fallback) and the page/chunk sha
+# formulas were lifted out of the ~115-line _ingest_file. Pin them here.
+
+
+def test_count_tokens_uses_encoder_length() -> None:
+    encoder = SimpleNamespace(encode=lambda text: list(text))
+    assert IngestWorker._count_tokens(encoder, "abcd") == 4
+
+
+def test_count_tokens_falls_back_to_char_length_on_error() -> None:
+    def _raise(_text: str) -> list:
+        raise RuntimeError("tokenizer down")
+
+    encoder = SimpleNamespace(encode=_raise)
+    assert IngestWorker._count_tokens(encoder, "hello") == 5
+
+
+def test_page_sha_matches_documented_format() -> None:
+    expected = hashlib.sha256("doc:3:5".encode("utf-8")).hexdigest()
+    assert IngestWorker._page_sha("doc", 3, "abcde") == expected
+
+
+def test_chunk_sha_matches_documented_format() -> None:
+    expected = hashlib.sha256("doc:3:2:body".encode("utf-8")).hexdigest()
+    assert IngestWorker._chunk_sha("doc", 3, 2, "body") == expected
+
+
+def test_page_sha_keys_on_length_while_chunk_sha_keys_on_text() -> None:
+    a = IngestWorker._page_sha("doc", 1, "text")
+    assert a == IngestWorker._page_sha("doc", 1, "text")  # deterministic
+    assert a != IngestWorker._page_sha("doc", 2, "text")  # page-number sensitive
+    # page sha keys on len(text), so equal-length texts collide by design...
+    assert IngestWorker._page_sha("doc", 1, "ab") == IngestWorker._page_sha("doc", 1, "cd")
+    # ...whereas chunk sha keys on the text itself.
+    assert IngestWorker._chunk_sha("doc", 1, 1, "ab") != IngestWorker._chunk_sha("doc", 1, 1, "cd")

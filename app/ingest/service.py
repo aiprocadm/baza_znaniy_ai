@@ -1159,6 +1159,35 @@ class IngestWorker:
         if not success:
             await self._handle_failure(job)
 
+    @staticmethod
+    def _count_tokens(encoder: Any, text: str) -> int:
+        """Token count for ``text``, falling back to character length.
+
+        The tokenizer can be a stub or raise on odd input; degrade to
+        ``len(text)`` rather than failing the whole ingest.
+        """
+
+        try:
+            return len(encoder.encode(text))
+        except Exception:
+            return len(text)
+
+    @staticmethod
+    def _page_sha(document_sha: str, page_number: int, text: str) -> str:
+        """Stable page digest keyed on the document sha, page number and length."""
+
+        return hashlib.sha256(
+            f"{document_sha}:{page_number}:{len(text)}".encode("utf-8")
+        ).hexdigest()
+
+    @staticmethod
+    def _chunk_sha(document_sha: str, page_number: int, offset: int, chunk_text: str) -> str:
+        """Stable chunk digest keyed on the document sha, page, offset and text."""
+
+        return hashlib.sha256(
+            f"{document_sha}:{page_number}:{offset}:{chunk_text}".encode("utf-8")
+        ).hexdigest()
+
     async def _ingest_file(self, job: IngestJob) -> int:
         with Session(self.service.engine) as session:
             file_obj = session.get(FileRecord, job.file_id)
@@ -1194,13 +1223,8 @@ class IngestWorker:
             batch_index = 0
             chunk_counter = 0
             for page_number, text in pages:
-                page_sha = hashlib.sha256(
-                    f"{job.sha256}:{page_number}:{len(text)}".encode("utf-8")
-                ).hexdigest()
-                try:
-                    page_tokens = len(self._tokenizer.encode(text))
-                except Exception:
-                    page_tokens = len(text)
+                page_sha = self._page_sha(job.sha256, page_number, text)
+                page_tokens = self._count_tokens(self._tokenizer, text)
                 page = PageRecord(
                     tenant_id=job.tenant_id,
                     file_id=job.file_id,
@@ -1228,13 +1252,8 @@ class IngestWorker:
                     encoder=self._tokenizer,
                 )
                 for offset, chunk_text in enumerate(chunks, start=1):
-                    chunk_sha = hashlib.sha256(
-                        f"{job.sha256}:{page.number}:{offset}:{chunk_text}".encode("utf-8")
-                    ).hexdigest()
-                    try:
-                        chunk_tokens = len(self._tokenizer.encode(chunk_text))
-                    except Exception:
-                        chunk_tokens = len(chunk_text)
+                    chunk_sha = self._chunk_sha(job.sha256, page.number, offset, chunk_text)
+                    chunk_tokens = self._count_tokens(self._tokenizer, chunk_text)
                     chunk = ChunkRecord(
                         tenant_id=job.tenant_id,
                         page_id=page.id,
