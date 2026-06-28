@@ -1,7 +1,7 @@
 import asyncio
 import hashlib
 from decimal import Decimal
-from datetime import timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -9,7 +9,13 @@ import pytest
 from sqlmodel import Session, select
 
 from app.core.datetime_utils import utc_now
-from app.ingest.service import IngestJob, IngestService, IngestWorker
+from app.ingest.service import (
+    IngestJob,
+    IngestService,
+    IngestWorker,
+    _extract_npa_fields,
+    _parse_act_date,
+)
 from app.models import file as file_models
 from app.models.entities import JobStatus, TenantRecord
 from app.models.file import (
@@ -17,6 +23,7 @@ from app.models.file import (
     DocumentRecord,
     DocumentStatus,
     FileRecord,
+    FileStatus,
     JobRecord,
     PageRecord,
 )
@@ -686,3 +693,561 @@ def test_resolve_backoff_precedence(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("INGEST_BACKOFF_SECONDS", raising=False)
     monkeypatch.delenv("INGEST_BACKOFF_BASE", raising=False)
     assert IngestService._resolve_backoff(None, settings) == 1.5
+
+
+# --- Characterization tests for the NPA metadata seams -----------------------
+# _parse_act_date was lifted out of the ~120-line _ingest_file so the lenient
+# "dd.mm.yyyy or None" parsing is provable without a full ingest round-trip.
+# _extract_npa_fields had no direct coverage at all; pin its precedence here.
+
+
+@pytest.mark.parametrize(
+    "raw, expected",
+    [
+        ("01.02.2024", datetime(2024, 2, 1)),
+        ("31.12.1999", datetime(1999, 12, 31)),
+        ("2024-02-01", None),  # ISO format is not the expected dd.mm.yyyy
+        ("32.13.2024", None),  # out-of-range day/month
+        ("not a date", None),
+        ("", None),
+        (None, None),
+        (20240201, None),  # non-string inputs degrade rather than raise
+    ],
+)
+def test_parse_act_date_lenient(raw: object, expected: datetime | None) -> None:
+    assert _parse_act_date(raw) == expected
+
+
+def test_extract_npa_fields_metadata_fallback_wins_over_regex() -> None:
+    content = "Тип акта: приказ\nномер: А-1"
+    fields = _extract_npa_fields(
+        content,
+        metadata={"act_type": "федеральный закон", "reg_number": "Z-9"},
+    )
+    # When metadata supplies a fallback key it short-circuits the regex scan.
+    assert fields["act_type"] == "федеральный закон"
+    assert fields["reg_number"] == "Z-9"
+
+
+def test_extract_npa_fields_regex_extraction_when_no_metadata() -> None:
+    content = (
+        "Тип акта: постановление\n"
+        "Издатель: Минюст\n"
+        "Дата принятия: 05.06.2021\n"
+        "Дата вступления в силу: 10.06.2021\n"
+    )
+    fields = _extract_npa_fields(content)
+    assert fields["act_type"] == "постановление"
+    assert fields["issuer"] == "Минюст"
+    assert fields["adoption_date"] == "05.06.2021"
+    assert fields["effective_date"] == "10.06.2021"
+
+
+@pytest.mark.parametrize(
+    "raw, expected",
+    [
+        (None, True),  # absent flag defaults to active
+        ("да", True),
+        ("true", True),
+        ("1", True),
+        ("нет", False),
+        ("0", False),
+        ("", False),
+    ],
+)
+def test_extract_npa_fields_is_active_truthiness(raw: object, expected: bool) -> None:
+    metadata = {} if raw is None else {"is_active": raw}
+    assert _extract_npa_fields("", metadata=metadata)["is_active"] is expected
+
+
+def test_extract_npa_fields_defaults_to_none_when_absent() -> None:
+    fields = _extract_npa_fields("no structured metadata here")
+    for key in ("act_type", "issuer", "reg_number", "adoption_date", "effective_date", "revision"):
+        assert fields[key] is None
+
+
+# --- Characterization tests for the _process FILE_MISSING seams --------------
+# _load_file_and_job and _fail_job_file_missing were lifted out of two
+# near-identical inline blocks in IngestWorker._process. Pin their behaviour
+# here with a recording stand-in so no real DB engine is needed.
+
+
+class _RecordingSession:
+    """Minimal SQLModel-Session stand-in for the FILE_MISSING helpers."""
+
+    def __init__(self, rows: dict | None = None) -> None:
+        self._rows = rows or {}
+        self.added: list = []
+        self.commits = 0
+        self.get_calls: list = []
+
+    def get(self, model: object, ident: object) -> object:
+        self.get_calls.append((model, ident))
+        return self._rows.get((model, ident))
+
+    def add(self, obj: object) -> None:
+        self.added.append(obj)
+
+    def commit(self) -> None:
+        self.commits += 1
+
+
+def test_fail_job_file_missing_marks_failed_and_commits() -> None:
+    session = _RecordingSession()
+    record = JobRecord(tenant_id="acme", status=JobStatus.PROCESSING, payload={"file_id": 1})
+
+    IngestWorker._fail_job_file_missing(session, record)
+
+    assert record.status == JobStatus.FAILED
+    assert record.error == "FILE_MISSING"
+    assert record.finished_at is not None
+    assert record.finished_at == record.updated_at
+    assert session.added == [record]
+    assert session.commits == 1
+
+
+def test_fail_job_file_missing_is_noop_without_record() -> None:
+    session = _RecordingSession()
+
+    IngestWorker._fail_job_file_missing(session, None)
+
+    assert session.added == []
+    assert session.commits == 0
+
+
+def test_load_file_and_job_skips_job_lookup_without_record_id() -> None:
+    file_rec = FileRecord(tenant_id="acme", sha256="x", path="p", filename="f", size=1)
+    session = _RecordingSession({(FileRecord, 7): file_rec})
+    job = IngestJob(
+        tenant_id="acme",
+        path="p",
+        sha256="x",
+        file_id=7,
+        filename="f",
+        document_id=None,
+        job_record_id=None,
+    )
+
+    file_obj, job_record = IngestWorker._load_file_and_job(session, job)
+
+    assert file_obj is file_rec
+    assert job_record is None
+    # JobRecord must never be queried when the job carries no record id.
+    assert all(model is not JobRecord for model, _ in session.get_calls)
+
+
+def test_load_file_and_job_fetches_both_when_record_id_present() -> None:
+    file_rec = FileRecord(tenant_id="acme", sha256="x", path="p", filename="f", size=1)
+    job_rec = JobRecord(tenant_id="acme", payload={"file_id": 7})
+    session = _RecordingSession({(FileRecord, 7): file_rec, (JobRecord, 3): job_rec})
+    job = IngestJob(
+        tenant_id="acme",
+        path="p",
+        sha256="x",
+        file_id=7,
+        filename="f",
+        document_id=None,
+        job_record_id=3,
+    )
+
+    file_obj, job_record = IngestWorker._load_file_and_job(session, job)
+
+    assert file_obj is file_rec
+    assert job_record is job_rec
+
+
+# --- Characterization tests for the _process finalization seam ---------------
+# _finalize_job collapses _process's symmetric success/failure branches. Pin
+# the per-row writes (status, error, chunks, retries, payload) for both
+# outcomes without a real DB engine.
+
+
+def test_finalize_job_success_writes_completed_and_clears_errors() -> None:
+    session = _RecordingSession()
+    file_obj = FileRecord(
+        tenant_id="acme", sha256="x", path="p", filename="f", size=1, retries=2, error="old"
+    )
+    document = DocumentRecord(tenant_id="acme", sha256="x", error="old")
+    job_record = JobRecord(tenant_id="acme", payload={"file_id": 1})
+
+    IngestWorker._finalize_job(
+        session,
+        file_obj=file_obj,
+        document=document,
+        job_record=job_record,
+        success=True,
+        chunk_count=5,
+        error_message=None,
+        attempt=0,
+    )
+
+    assert file_obj.status == FileStatus.COMPLETED
+    assert file_obj.error is None
+    assert file_obj.chunks == 5
+    assert file_obj.retries == 2  # unchanged on success
+    assert document.status == DocumentStatus.COMPLETED
+    assert document.error is None and document.chunks == 5
+    assert job_record.status == JobStatus.COMPLETED
+    assert job_record.error is None
+    assert job_record.payload == {"file_id": 1, "chunks": 5, "attempt": 0}
+    assert session.commits == 1
+
+
+def test_finalize_job_failure_sets_retries_and_propagates_error() -> None:
+    session = _RecordingSession()
+    file_obj = FileRecord(tenant_id="acme", sha256="x", path="p", filename="f", size=1)
+    document = DocumentRecord(tenant_id="acme", sha256="x")
+    job_record = JobRecord(tenant_id="acme", payload={"file_id": 1})
+
+    IngestWorker._finalize_job(
+        session,
+        file_obj=file_obj,
+        document=document,
+        job_record=job_record,
+        success=False,
+        chunk_count=0,
+        error_message="boom",
+        attempt=2,
+    )
+
+    assert file_obj.status == FileStatus.FAILED
+    assert file_obj.retries == 3  # attempt + 1
+    assert file_obj.error == "boom"
+    assert file_obj.chunks == 0
+    assert document.status == DocumentStatus.FAILED
+    assert document.error == "boom"
+    assert job_record.status == JobStatus.FAILED
+    assert job_record.error == "boom"
+    assert job_record.payload == {"file_id": 1, "chunks": 0, "attempt": 2}
+    assert session.commits == 1
+
+
+def test_finalize_job_handles_missing_document_and_job_record() -> None:
+    session = _RecordingSession()
+    file_obj = FileRecord(tenant_id="acme", sha256="x", path="p", filename="f", size=1)
+
+    IngestWorker._finalize_job(
+        session,
+        file_obj=file_obj,
+        document=None,
+        job_record=None,
+        success=True,
+        chunk_count=3,
+        error_message=None,
+        attempt=0,
+    )
+
+    assert file_obj.status == FileStatus.COMPLETED
+    assert file_obj.chunks == 3
+    assert session.added == [file_obj]
+    assert session.commits == 1
+
+
+class _NullSession:
+    """Stand-in Session for _begin_processing: every DB op is a no-op."""
+
+    def __enter__(self) -> "_NullSession":
+        return self
+
+    def __exit__(self, *exc: object) -> bool:
+        return False
+
+    def get(self, *_: object) -> None:
+        return None
+
+    def add(self, *_: object) -> None:
+        return None
+
+    def commit(self) -> None:
+        return None
+
+    def scalars(self, *_: object) -> SimpleNamespace:
+        # _begin_processing's page-cleanup select yields no rows.
+        return SimpleNamespace(all=lambda: [])
+
+    def execute(self, *_: object) -> None:
+        return None
+
+
+def test_process_propagates_cancellation_without_swallowing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A BaseException from _ingest_file must propagate, skipping finalization.
+
+    Regression guard: finalization used to live in a ``finally`` whose ``return``
+    (the FILE_MISSING path) silently swallowed in-flight ``CancelledError``,
+    breaking task shutdown and leaving the job mismarked. The fix re-raises so
+    stale-recovery can reclaim the still-PROCESSING job.
+    """
+
+    service = IngestService()
+    service._engine = SimpleNamespace()  # sentinel; Session is patched out below
+    worker = IngestWorker(service)
+
+    file_obj = SimpleNamespace(
+        id=1,
+        status=FileStatus.QUEUED,
+        error=None,
+        chunks=None,
+        updated_at=None,
+        document_id=None,
+    )
+    job_record = SimpleNamespace(status=JobStatus.QUEUED, started_at=None, updated_at=None)
+
+    monkeypatch.setattr("app.ingest.service.Session", lambda *a, **k: _NullSession())
+    # Pre-ingest setup runs `select(...).where(...)`; stub it so the page-cleanup
+    # query yields no rows regardless of the SQLModel backend on this machine.
+    monkeypatch.setattr(
+        "app.ingest.service.select",
+        lambda *a, **k: SimpleNamespace(where=lambda *a, **k: None),
+    )
+
+    load_calls = {"n": 0}
+
+    def fake_load(session: object, job: object) -> tuple:
+        load_calls["n"] += 1
+        # First call is the pre-ingest setup (file present, proceed). Any later
+        # call is the finalization phase, which the fix must never reach here.
+        return (file_obj, job_record) if load_calls["n"] == 1 else (None, job_record)
+
+    monkeypatch.setattr(IngestWorker, "_load_file_and_job", staticmethod(fake_load))
+
+    fail_calls: list = []
+    monkeypatch.setattr(
+        IngestWorker,
+        "_fail_job_file_missing",
+        staticmethod(lambda *a, **k: fail_calls.append(1)),
+    )
+    finalize_calls: list = []
+    monkeypatch.setattr(
+        IngestWorker,
+        "_finalize_job",
+        staticmethod(lambda *a, **k: finalize_calls.append(1)),
+    )
+
+    async def _boom(self: object, job: object) -> int:
+        raise asyncio.CancelledError()
+
+    monkeypatch.setattr(IngestWorker, "_ingest_file", _boom)
+
+    handled: list = []
+
+    async def _handle(self: object, job: object) -> None:
+        handled.append(1)
+
+    monkeypatch.setattr(IngestWorker, "_handle_failure", _handle)
+
+    job = IngestJob(
+        tenant_id="acme",
+        path="p",
+        sha256="s",
+        file_id=1,
+        filename="f",
+        document_id=None,
+    )
+
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(worker._process(job))
+
+    assert load_calls["n"] == 1  # finalization phase never entered
+    assert finalize_calls == []
+    assert fail_calls == []  # the swallowing FILE_MISSING return was never reached
+    assert handled == []
+
+
+# --- Orchestration tests for _process over its extracted phases --------------
+# With _begin_processing/_finalize as seams, _process's control flow is testable
+# by stubbing the phases directly - no Session, select or DB engine involved.
+
+
+def _make_worker() -> IngestWorker:
+    service = IngestService()
+    service._engine = SimpleNamespace()  # never touched; phases are stubbed
+    return IngestWorker(service)
+
+
+def _job() -> IngestJob:
+    return IngestJob(
+        tenant_id="acme", path="p", sha256="s", file_id=1, filename="f", document_id=None
+    )
+
+
+def test_process_skips_ingest_when_begin_returns_false(monkeypatch: pytest.MonkeyPatch) -> None:
+    worker = _make_worker()
+    monkeypatch.setattr(IngestWorker, "_begin_processing", lambda self, job: False)
+
+    ingest_calls: list = []
+
+    async def _ingest(self: object, job: object) -> int:
+        ingest_calls.append(1)
+        return 0
+
+    monkeypatch.setattr(IngestWorker, "_ingest_file", _ingest)
+    finalize_calls: list = []
+    monkeypatch.setattr(IngestWorker, "_finalize", lambda self, job, **k: finalize_calls.append(1))
+
+    asyncio.run(worker._process(_job()))
+
+    assert ingest_calls == []  # already-handled job is not re-ingested
+    assert finalize_calls == []
+
+
+def test_process_finalizes_success_and_skips_handle_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    worker = _make_worker()
+    monkeypatch.setattr(IngestWorker, "_begin_processing", lambda self, job: True)
+
+    async def _ingest(self: object, job: object) -> int:
+        return 7
+
+    monkeypatch.setattr(IngestWorker, "_ingest_file", _ingest)
+
+    captured: dict = {}
+
+    def _finalize(self: object, job: object, **kwargs: object) -> None:
+        captured.update(kwargs)
+
+    monkeypatch.setattr(IngestWorker, "_finalize", _finalize)
+
+    handled: list = []
+
+    async def _handle(self: object, job: object) -> None:
+        handled.append(1)
+
+    monkeypatch.setattr(IngestWorker, "_handle_failure", _handle)
+
+    asyncio.run(worker._process(_job()))
+
+    assert captured == {"success": True, "chunk_count": 7, "error_message": None}
+    assert handled == []
+
+
+def test_process_finalizes_failure_and_runs_handle_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    worker = _make_worker()
+    monkeypatch.setattr(IngestWorker, "_begin_processing", lambda self, job: True)
+
+    async def _ingest(self: object, job: object) -> int:
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(IngestWorker, "_ingest_file", _ingest)
+
+    captured: dict = {}
+
+    def _finalize(self: object, job: object, **kwargs: object) -> None:
+        captured.update(kwargs)
+
+    monkeypatch.setattr(IngestWorker, "_finalize", _finalize)
+
+    handled: list = []
+
+    async def _handle(self: object, job: object) -> None:
+        handled.append(1)
+
+    monkeypatch.setattr(IngestWorker, "_handle_failure", _handle)
+
+    asyncio.run(worker._process(_job()))
+
+    assert captured["success"] is False
+    assert captured["error_message"] == "boom"
+    assert captured["chunk_count"] == 0  # nothing ingested before the failure
+    assert handled == [1]
+
+
+# --- Characterization tests for the _ingest_file pure seams ------------------
+# Token counting (with its silent char-length fallback) and the page/chunk sha
+# formulas were lifted out of the ~115-line _ingest_file. Pin them here.
+
+
+def test_count_tokens_uses_encoder_length() -> None:
+    encoder = SimpleNamespace(encode=lambda text: list(text))
+    assert IngestWorker._count_tokens(encoder, "abcd") == 4
+
+
+def test_count_tokens_falls_back_to_char_length_on_error() -> None:
+    def _raise(_text: str) -> list:
+        raise RuntimeError("tokenizer down")
+
+    encoder = SimpleNamespace(encode=_raise)
+    assert IngestWorker._count_tokens(encoder, "hello") == 5
+
+
+def test_page_sha_matches_documented_format() -> None:
+    expected = hashlib.sha256("doc:3:5".encode("utf-8")).hexdigest()
+    assert IngestWorker._page_sha("doc", 3, "abcde") == expected
+
+
+def test_chunk_sha_matches_documented_format() -> None:
+    expected = hashlib.sha256("doc:3:2:body".encode("utf-8")).hexdigest()
+    assert IngestWorker._chunk_sha("doc", 3, 2, "body") == expected
+
+
+def test_page_sha_keys_on_length_while_chunk_sha_keys_on_text() -> None:
+    a = IngestWorker._page_sha("doc", 1, "text")
+    assert a == IngestWorker._page_sha("doc", 1, "text")  # deterministic
+    assert a != IngestWorker._page_sha("doc", 2, "text")  # page-number sensitive
+    # page sha keys on len(text), so equal-length texts collide by design...
+    assert IngestWorker._page_sha("doc", 1, "ab") == IngestWorker._page_sha("doc", 1, "cd")
+    # ...whereas chunk sha keys on the text itself.
+    assert IngestWorker._chunk_sha("doc", 1, 1, "ab") != IngestWorker._chunk_sha("doc", 1, 1, "cd")
+
+
+def test_chunk_meta_merges_provenance_and_attrs() -> None:
+    parse_result = SimpleNamespace(
+        parser_backend_used="pdfminer", fallback_reason=None, ocr_used=False
+    )
+    meta = IngestWorker._chunk_meta(
+        "docsha", 2, 3, parse_result, {"act_type": "law", "issuer": "X"}
+    )
+    assert meta["document_sha"] == "docsha"
+    assert meta["page"] == 2
+    assert meta["chunk"] == 3
+    assert meta["parser_backend"] == "pdfminer"
+    assert meta["fallback_reason"] is None
+    assert meta["ocr_used"] is False
+    assert meta["act_type"] == "law"
+    assert meta["issuer"] == "X"
+
+
+def test_chunk_meta_attrs_override_provenance_on_key_clash() -> None:
+    parse_result = SimpleNamespace(parser_backend_used="b", fallback_reason=None, ocr_used=False)
+    # `**attrs` is spread last, so a clashing key (here "page") wins by design.
+    meta = IngestWorker._chunk_meta("doc", 1, 1, parse_result, {"page": 99})
+    assert meta["page"] == 99
+
+
+def test_build_chunk_payload_shape() -> None:
+    payload = IngestWorker._build_chunk_payload(
+        filename="f.pdf",
+        page_number=4,
+        chunk_sha="abc",
+        chunk_text="body",
+        chunk_tokens=5,
+        meta={"k": "v"},
+        tenant_id="acme",
+    )
+    assert payload == {
+        "file": "f.pdf",
+        "page": 4,
+        "sha256": "abc",
+        "text": "body",
+        "tokens": 5,
+        "meta": {"k": "v"},
+        "owner": "acme",
+        "tenant_id": "acme",
+    }
+
+
+def test_build_chunk_payload_defaults_empty_meta() -> None:
+    payload = IngestWorker._build_chunk_payload(
+        filename="f",
+        page_number=1,
+        chunk_sha="s",
+        chunk_text="t",
+        chunk_tokens=1,
+        meta=None,
+        tenant_id="acme",
+    )
+    assert payload["meta"] == {}

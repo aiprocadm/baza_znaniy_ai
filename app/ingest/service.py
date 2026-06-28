@@ -126,6 +126,23 @@ def _extract_npa_fields(content: str, metadata: dict[str, Any] | None = None) ->
     }
 
 
+def _parse_act_date(raw: object) -> datetime | None:
+    """Parse a Russian-format act date (``dd.mm.yyyy``) into a ``datetime``.
+
+    Anything that is not a non-empty ``dd.mm.yyyy`` string — ``None``, blanks,
+    non-strings and malformed dates — degrades to ``None`` rather than raising,
+    matching the lenient metadata contract of :func:`_extract_npa_fields`
+    (which is the sole producer of the strings fed here).
+    """
+
+    if not isinstance(raw, str) or not raw:
+        return None
+    try:
+        return datetime.strptime(raw, "%d.%m.%Y")
+    except ValueError:
+        return None
+
+
 logger = logging.getLogger(__name__)
 
 
@@ -894,6 +911,94 @@ class IngestWorker:
         if self.service.auto_process:
             self.service.ensure_background_worker()
 
+    @staticmethod
+    def _load_file_and_job(
+        session: Session, job: IngestJob
+    ) -> "tuple[FileRecord | None, JobRecord | None]":
+        """Load the file row and (optional) job record for a job in one place.
+
+        ``job_record`` is only fetched when the job carries a record id, mirroring
+        the original inline loads in :meth:`_process`.
+        """
+
+        file_obj = session.get(FileRecord, job.file_id)
+        job_record = (
+            session.get(JobRecord, job.job_record_id) if job.job_record_id is not None else None
+        )
+        return file_obj, job_record
+
+    @staticmethod
+    def _fail_job_file_missing(session: Session, job_record: "JobRecord | None") -> None:
+        """Mark a claimed job FAILED/FILE_MISSING when its file row has vanished.
+
+        No-op when there is no job record to update. Commits its own change so
+        callers can simply ``return`` afterwards.
+        """
+
+        if job_record is None:
+            return
+        now = utc_now()
+        job_record.status = JobStatus.FAILED
+        job_record.error = "FILE_MISSING"
+        job_record.finished_at = now
+        job_record.updated_at = now
+        session.add(job_record)
+        session.commit()
+
+    @staticmethod
+    def _finalize_job(
+        session: Session,
+        *,
+        file_obj: FileRecord,
+        document: "DocumentRecord | None",
+        job_record: "JobRecord | None",
+        success: bool,
+        chunk_count: int,
+        error_message: Optional[str],
+        attempt: int,
+    ) -> None:
+        """Write terminal status onto the file/document/job rows after ingest.
+
+        Consolidates the symmetric success/failure branches of :meth:`_process`'s
+        finalization. On failure ``file_obj.retries`` advances to ``attempt + 1``
+        and the error message is propagated to every row; on success the error is
+        cleared. Commits once at the end.
+        """
+
+        now = utc_now()
+        file_status = FileStatus.COMPLETED if success else FileStatus.FAILED
+        doc_status = DocumentStatus.COMPLETED if success else DocumentStatus.FAILED
+        job_status = JobStatus.COMPLETED if success else JobStatus.FAILED
+        chunks_value = chunk_count if success else (chunk_count or 0)
+        error_value = None if success else error_message
+
+        file_obj.status = file_status
+        file_obj.updated_at = now
+        file_obj.error = error_value
+        file_obj.chunks = chunks_value
+        if not success:
+            file_obj.retries = attempt + 1
+        session.add(file_obj)
+
+        if document:
+            document.status = doc_status
+            document.updated_at = now
+            document.error = error_value
+            document.chunks = chunks_value
+            session.add(document)
+
+        if job_record:
+            job_record.status = job_status
+            job_record.finished_at = now
+            job_record.updated_at = now
+            payload = dict(job_record.payload or {})
+            payload.update({"chunks": chunks_value, "attempt": attempt})
+            job_record.payload = payload
+            job_record.error = error_value
+            session.add(job_record)
+
+        session.commit()
+
     async def process_job(self, job: IngestJob) -> None:
         logger.debug("ingest worker immediate processing job %s", job)
         try:
@@ -943,21 +1048,18 @@ class IngestWorker:
             processed += 1
         return processed
 
-    async def _process(self, job: IngestJob) -> None:
+    def _begin_processing(self, job: IngestJob) -> bool:
+        """Reserve a job: flip its rows to PROCESSING and clear stale pages.
+
+        Returns ``False`` (caller should stop) when the file row has vanished or
+        the file is already COMPLETED; ``True`` when ingestion should proceed.
+        """
+
         with Session(self.service.engine) as session:
-            file_obj = session.get(FileRecord, job.file_id)
-            job_record = (
-                session.get(JobRecord, job.job_record_id) if job.job_record_id is not None else None
-            )
+            file_obj, job_record = self._load_file_and_job(session, job)
             if not file_obj:
-                if job_record:
-                    job_record.status = JobStatus.FAILED
-                    job_record.error = "FILE_MISSING"
-                    job_record.finished_at = utc_now()
-                    job_record.updated_at = utc_now()
-                    session.add(job_record)
-                    session.commit()
-                return
+                self._fail_job_file_missing(session, job_record)
+                return False
             document_id = job.document_id or file_obj.document_id
             document = session.get(DocumentRecord, document_id) if document_id is not None else None
             if file_obj.status == FileStatus.COMPLETED:
@@ -967,7 +1069,7 @@ class IngestWorker:
                     job_record.updated_at = utc_now()
                     session.add(job_record)
                     session.commit()
-                return
+                return False
             file_obj.status = FileStatus.PROCESSING
             file_obj.error = None
             file_obj.chunks = None
@@ -986,13 +1088,51 @@ class IngestWorker:
                 session.add(job_record)
             session.commit()
 
-            page_ids = session.exec(
+            # scalars()/execute() are the SQLAlchemy-native equivalents of
+            # SQLModel's exec() wrapper: scalars() yields the bare ids for the
+            # single-column select, execute() runs the bulk-delete DML.
+            page_ids = session.scalars(
                 select(PageRecord.id).where(PageRecord.file_id == file_obj.id)
             ).all()
             if page_ids:
-                session.exec(delete(ChunkRecord).where(ChunkRecord.page_id.in_(page_ids)))
-                session.exec(delete(PageRecord).where(PageRecord.id.in_(page_ids)))
+                session.execute(delete(ChunkRecord).where(ChunkRecord.page_id.in_(page_ids)))
+                session.execute(delete(PageRecord).where(PageRecord.id.in_(page_ids)))
                 session.commit()
+        return True
+
+    def _finalize(
+        self,
+        job: IngestJob,
+        *,
+        success: bool,
+        chunk_count: int,
+        error_message: Optional[str],
+    ) -> None:
+        """Reload the rows and write terminal status after an ingest attempt."""
+
+        with Session(self.service.engine) as session:
+            file_obj, job_record = self._load_file_and_job(session, job)
+            if not file_obj:
+                self._fail_job_file_missing(session, job_record)
+                return
+            document_id = job.document_id or file_obj.document_id
+            document = (
+                session.get(DocumentRecord, document_id) if document_id is not None else None
+            )
+            self._finalize_job(
+                session,
+                file_obj=file_obj,
+                document=document,
+                job_record=job_record,
+                success=success,
+                chunk_count=chunk_count,
+                error_message=error_message,
+                attempt=job.attempt,
+            )
+
+    async def _process(self, job: IngestJob) -> None:
+        if not self._begin_processing(job):
+            return
 
         success = True
         error_message: Optional[str] = None
@@ -1003,73 +1143,94 @@ class IngestWorker:
             success = False
             error_message = str(exc)
             logger.exception("Failed to ingest job %s", job)
-        finally:
-            with Session(self.service.engine) as session:
-                file_obj = session.get(FileRecord, job.file_id)
-                job_record = (
-                    session.get(JobRecord, job.job_record_id)
-                    if job.job_record_id is not None
-                    else None
-                )
-                if not file_obj:
-                    if job_record:
-                        job_record.status = JobStatus.FAILED
-                        job_record.error = "FILE_MISSING"
-                        job_record.finished_at = utc_now()
-                        job_record.updated_at = utc_now()
-                        session.add(job_record)
-                        session.commit()
-                    return
-                document_id = job.document_id or file_obj.document_id
-                document = (
-                    session.get(DocumentRecord, document_id) if document_id is not None else None
-                )
-                if success:
-                    file_obj.status = FileStatus.COMPLETED
-                    file_obj.updated_at = utc_now()
-                    file_obj.error = None
-                    file_obj.chunks = chunk_count
-                    if document:
-                        document.status = DocumentStatus.COMPLETED
-                        document.updated_at = utc_now()
-                        document.error = None
-                        document.chunks = chunk_count
-                        session.add(document)
-                    if job_record:
-                        job_record.status = JobStatus.COMPLETED
-                        job_record.finished_at = utc_now()
-                        job_record.updated_at = utc_now()
-                        payload = dict(job_record.payload or {})
-                        payload.update({"chunks": chunk_count, "attempt": job.attempt})
-                        job_record.payload = payload
-                        job_record.error = None
-                        session.add(job_record)
-                else:
-                    file_obj.status = FileStatus.FAILED
-                    file_obj.retries = job.attempt + 1
-                    file_obj.updated_at = utc_now()
-                    file_obj.error = error_message
-                    file_obj.chunks = chunk_count or 0
-                    if document:
-                        document.status = DocumentStatus.FAILED
-                        document.updated_at = utc_now()
-                        document.error = error_message
-                        document.chunks = chunk_count or 0
-                        session.add(document)
-                    if job_record:
-                        job_record.status = JobStatus.FAILED
-                        job_record.finished_at = utc_now()
-                        job_record.updated_at = utc_now()
-                        payload = dict(job_record.payload or {})
-                        payload.update({"chunks": chunk_count or 0, "attempt": job.attempt})
-                        job_record.payload = payload
-                        job_record.error = error_message
-                        session.add(job_record)
-                session.add(file_obj)
-                session.commit()
+
+        # _finalize runs only when control falls through normally. A
+        # BaseException (e.g. asyncio.CancelledError on shutdown) is not caught
+        # by ``except Exception``, so it propagates here, skipping finalization
+        # and leaving the job PROCESSING for stale-recovery to reclaim. Keeping
+        # this out of a ``finally`` is what stops a ``return`` swallowing it.
+        self._finalize(
+            job,
+            success=success,
+            chunk_count=chunk_count,
+            error_message=error_message,
+        )
 
         if not success:
             await self._handle_failure(job)
+
+    @staticmethod
+    def _count_tokens(encoder: Any, text: str) -> int:
+        """Token count for ``text``, falling back to character length.
+
+        The tokenizer can be a stub or raise on odd input; degrade to
+        ``len(text)`` rather than failing the whole ingest.
+        """
+
+        try:
+            return len(encoder.encode(text))
+        except Exception:
+            return len(text)
+
+    @staticmethod
+    def _page_sha(document_sha: str, page_number: int, text: str) -> str:
+        """Stable page digest keyed on the document sha, page number and length."""
+
+        return hashlib.sha256(
+            f"{document_sha}:{page_number}:{len(text)}".encode("utf-8")
+        ).hexdigest()
+
+    @staticmethod
+    def _chunk_sha(document_sha: str, page_number: int, offset: int, chunk_text: str) -> str:
+        """Stable chunk digest keyed on the document sha, page, offset and text."""
+
+        return hashlib.sha256(
+            f"{document_sha}:{page_number}:{offset}:{chunk_text}".encode("utf-8")
+        ).hexdigest()
+
+    @staticmethod
+    def _chunk_meta(
+        document_sha: str,
+        page_number: int,
+        offset: int,
+        parse_result: Any,
+        attrs: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Per-chunk metadata: parse provenance merged with the document NPA attrs."""
+
+        return {
+            "document_sha": document_sha,
+            "page": page_number,
+            "chunk": offset,
+            "parser_backend": parse_result.parser_backend_used,
+            "fallback_reason": parse_result.fallback_reason,
+            "ocr_used": parse_result.ocr_used,
+            **attrs,
+        }
+
+    @staticmethod
+    def _build_chunk_payload(
+        *,
+        filename: str,
+        page_number: int,
+        chunk_sha: str,
+        chunk_text: str,
+        chunk_tokens: int,
+        meta: dict[str, Any] | None,
+        tenant_id: str,
+    ) -> dict[str, object]:
+        """Assemble the vectorstore index payload for a single chunk."""
+
+        return {
+            "file": filename,
+            "page": page_number,
+            "sha256": chunk_sha,
+            "text": chunk_text,
+            "tokens": chunk_tokens,
+            "meta": meta or {},
+            "owner": tenant_id,
+            "tenant_id": tenant_id,
+        }
 
     async def _ingest_file(self, job: IngestJob) -> int:
         with Session(self.service.engine) as session:
@@ -1100,26 +1261,14 @@ class IngestWorker:
                 document.revision = attrs.get("revision")
                 document.is_active = bool(attrs.get("is_active", True))
                 for field_name in ("adoption_date", "effective_date"):
-                    raw = attrs.get(field_name)
-                    parsed = None
-                    if isinstance(raw, str) and raw:
-                        try:
-                            parsed = datetime.strptime(raw, "%d.%m.%Y")
-                        except ValueError:
-                            parsed = None
-                    setattr(document, field_name, parsed)
+                    setattr(document, field_name, _parse_act_date(attrs.get(field_name)))
                 session.add(document)
                 session.commit()
             batch_index = 0
             chunk_counter = 0
             for page_number, text in pages:
-                page_sha = hashlib.sha256(
-                    f"{job.sha256}:{page_number}:{len(text)}".encode("utf-8")
-                ).hexdigest()
-                try:
-                    page_tokens = len(self._tokenizer.encode(text))
-                except Exception:
-                    page_tokens = len(text)
+                page_sha = self._page_sha(job.sha256, page_number, text)
+                page_tokens = self._count_tokens(self._tokenizer, text)
                 page = PageRecord(
                     tenant_id=job.tenant_id,
                     file_id=job.file_id,
@@ -1147,13 +1296,11 @@ class IngestWorker:
                     encoder=self._tokenizer,
                 )
                 for offset, chunk_text in enumerate(chunks, start=1):
-                    chunk_sha = hashlib.sha256(
-                        f"{job.sha256}:{page.number}:{offset}:{chunk_text}".encode("utf-8")
-                    ).hexdigest()
-                    try:
-                        chunk_tokens = len(self._tokenizer.encode(chunk_text))
-                    except Exception:
-                        chunk_tokens = len(chunk_text)
+                    chunk_sha = self._chunk_sha(job.sha256, page.number, offset, chunk_text)
+                    chunk_tokens = self._count_tokens(self._tokenizer, chunk_text)
+                    chunk_meta = self._chunk_meta(
+                        job.sha256, page.number, offset, parse_result, attrs
+                    )
                     chunk = ChunkRecord(
                         tenant_id=job.tenant_id,
                         page_id=page.id,
@@ -1162,28 +1309,19 @@ class IngestWorker:
                         text=chunk_text,
                         batch=batch_index,
                         tokens=chunk_tokens,
-                        meta={
-                            "document_sha": job.sha256,
-                            "page": page.number,
-                            "chunk": offset,
-                            "parser_backend": parse_result.parser_backend_used,
-                            "fallback_reason": parse_result.fallback_reason,
-                            "ocr_used": parse_result.ocr_used,
-                            **attrs,
-                        },
+                        meta=chunk_meta,
                     )
                     session.add(chunk)
                     chunk_payloads.append(
-                        {
-                            "file": filename,
-                            "page": page.number,
-                            "sha256": chunk_sha,
-                            "text": chunk_text,
-                            "tokens": chunk_tokens,
-                            "meta": chunk.meta or {},
-                            "owner": job.tenant_id,
-                            "tenant_id": job.tenant_id,
-                        }
+                        self._build_chunk_payload(
+                            filename=filename,
+                            page_number=page.number,
+                            chunk_sha=chunk_sha,
+                            chunk_text=chunk_text,
+                            chunk_tokens=chunk_tokens,
+                            meta=chunk_meta,
+                            tenant_id=job.tenant_id,
+                        )
                     )
                     chunk_counter += 1
                     if chunk_counter % self.embed_batch_size == 0:
