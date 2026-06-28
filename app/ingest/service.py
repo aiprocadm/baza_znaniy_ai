@@ -1251,6 +1251,88 @@ class IngestWorker:
             "tenant_id": tenant_id,
         }
 
+    def _persist_page(
+        self,
+        session: Session,
+        *,
+        job: IngestJob,
+        parse_result: Any,
+        attrs: dict[str, Any],
+        filename: str,
+        page_number: int,
+        text: str,
+        batch_index: int,
+        chunk_counter: int,
+    ) -> tuple[int, int, list[dict[str, object]]]:
+        """Persist one page row and its chunk rows; return the page's index
+        payloads plus the advanced ``(batch_index, chunk_counter)``.
+
+        The batch-commit cadence (commit every ``embed_batch_size`` chunks) runs
+        across the whole file, so the counters thread through successive pages.
+        """
+
+        page_payloads: list[dict[str, object]] = []
+        page_sha = self._page_sha(job.sha256, page_number, text)
+        page_tokens = self._count_tokens(self._tokenizer, text)
+        page = PageRecord(
+            tenant_id=job.tenant_id,
+            file_id=job.file_id,
+            number=page_number,
+            sha256=page_sha,
+            text=text,
+            tokens=page_tokens,
+            meta={
+                "document_sha": job.sha256,
+                "page": page_number,
+                "file_id": job.file_id,
+                "parser_backend": parse_result.parser_backend_used,
+                "fallback_reason": parse_result.fallback_reason,
+                "ocr_used": parse_result.ocr_used,
+            },
+        )
+        session.add(page)
+        session.commit()
+        session.refresh(page)
+
+        chunks = _chunk(
+            text,
+            chunk=self.chunk_size,
+            overlap=self.overlap,
+            encoder=self._tokenizer,
+        )
+        for offset, chunk_text in enumerate(chunks, start=1):
+            chunk_sha = self._chunk_sha(job.sha256, page.number, offset, chunk_text)
+            chunk_tokens = self._count_tokens(self._tokenizer, chunk_text)
+            chunk_meta = self._chunk_meta(job.sha256, page.number, offset, parse_result, attrs)
+            chunk = ChunkRecord(
+                tenant_id=job.tenant_id,
+                page_id=page.id,
+                index=offset,
+                sha256=chunk_sha,
+                text=chunk_text,
+                batch=batch_index,
+                tokens=chunk_tokens,
+                meta=chunk_meta,
+            )
+            session.add(chunk)
+            page_payloads.append(
+                self._build_chunk_payload(
+                    filename=filename,
+                    page_number=page.number,
+                    chunk_sha=chunk_sha,
+                    chunk_text=chunk_text,
+                    chunk_tokens=chunk_tokens,
+                    meta=chunk_meta,
+                    tenant_id=job.tenant_id,
+                )
+            )
+            chunk_counter += 1
+            if chunk_counter % self.embed_batch_size == 0:
+                batch_index += 1
+                session.commit()
+        session.commit()
+        return batch_index, chunk_counter, page_payloads
+
     async def _ingest_file(self, job: IngestJob) -> int:
         with Session(self.service.engine) as session:
             file_obj = session.get(FileRecord, job.file_id)
@@ -1278,67 +1360,18 @@ class IngestWorker:
             batch_index = 0
             chunk_counter = 0
             for page_number, text in pages:
-                page_sha = self._page_sha(job.sha256, page_number, text)
-                page_tokens = self._count_tokens(self._tokenizer, text)
-                page = PageRecord(
-                    tenant_id=job.tenant_id,
-                    file_id=job.file_id,
-                    number=page_number,
-                    sha256=page_sha,
+                batch_index, chunk_counter, page_payloads = self._persist_page(
+                    session,
+                    job=job,
+                    parse_result=parse_result,
+                    attrs=attrs,
+                    filename=filename,
+                    page_number=page_number,
                     text=text,
-                    tokens=page_tokens,
-                    meta={
-                        "document_sha": job.sha256,
-                        "page": page_number,
-                        "file_id": job.file_id,
-                        "parser_backend": parse_result.parser_backend_used,
-                        "fallback_reason": parse_result.fallback_reason,
-                        "ocr_used": parse_result.ocr_used,
-                    },
+                    batch_index=batch_index,
+                    chunk_counter=chunk_counter,
                 )
-                session.add(page)
-                session.commit()
-                session.refresh(page)
-
-                chunks = _chunk(
-                    text,
-                    chunk=self.chunk_size,
-                    overlap=self.overlap,
-                    encoder=self._tokenizer,
-                )
-                for offset, chunk_text in enumerate(chunks, start=1):
-                    chunk_sha = self._chunk_sha(job.sha256, page.number, offset, chunk_text)
-                    chunk_tokens = self._count_tokens(self._tokenizer, chunk_text)
-                    chunk_meta = self._chunk_meta(
-                        job.sha256, page.number, offset, parse_result, attrs
-                    )
-                    chunk = ChunkRecord(
-                        tenant_id=job.tenant_id,
-                        page_id=page.id,
-                        index=offset,
-                        sha256=chunk_sha,
-                        text=chunk_text,
-                        batch=batch_index,
-                        tokens=chunk_tokens,
-                        meta=chunk_meta,
-                    )
-                    session.add(chunk)
-                    chunk_payloads.append(
-                        self._build_chunk_payload(
-                            filename=filename,
-                            page_number=page.number,
-                            chunk_sha=chunk_sha,
-                            chunk_text=chunk_text,
-                            chunk_tokens=chunk_tokens,
-                            meta=chunk_meta,
-                            tenant_id=job.tenant_id,
-                        )
-                    )
-                    chunk_counter += 1
-                    if chunk_counter % self.embed_batch_size == 0:
-                        batch_index += 1
-                        session.commit()
-                session.commit()
+                chunk_payloads.extend(page_payloads)
 
         vectorstore.index_chunks(chunk_payloads)
         return len(chunk_payloads)
