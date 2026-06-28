@@ -945,6 +945,60 @@ class IngestWorker:
         session.add(job_record)
         session.commit()
 
+    @staticmethod
+    def _finalize_job(
+        session: Session,
+        *,
+        file_obj: FileRecord,
+        document: "DocumentRecord | None",
+        job_record: "JobRecord | None",
+        success: bool,
+        chunk_count: int,
+        error_message: Optional[str],
+        attempt: int,
+    ) -> None:
+        """Write terminal status onto the file/document/job rows after ingest.
+
+        Consolidates the symmetric success/failure branches of :meth:`_process`'s
+        finalization. On failure ``file_obj.retries`` advances to ``attempt + 1``
+        and the error message is propagated to every row; on success the error is
+        cleared. Commits once at the end.
+        """
+
+        now = utc_now()
+        file_status = FileStatus.COMPLETED if success else FileStatus.FAILED
+        doc_status = DocumentStatus.COMPLETED if success else DocumentStatus.FAILED
+        job_status = JobStatus.COMPLETED if success else JobStatus.FAILED
+        chunks_value = chunk_count if success else (chunk_count or 0)
+        error_value = None if success else error_message
+
+        file_obj.status = file_status
+        file_obj.updated_at = now
+        file_obj.error = error_value
+        file_obj.chunks = chunks_value
+        if not success:
+            file_obj.retries = attempt + 1
+        session.add(file_obj)
+
+        if document:
+            document.status = doc_status
+            document.updated_at = now
+            document.error = error_value
+            document.chunks = chunks_value
+            session.add(document)
+
+        if job_record:
+            job_record.status = job_status
+            job_record.finished_at = now
+            job_record.updated_at = now
+            payload = dict(job_record.payload or {})
+            payload.update({"chunks": chunks_value, "attempt": attempt})
+            job_record.payload = payload
+            job_record.error = error_value
+            session.add(job_record)
+
+        session.commit()
+
     async def process_job(self, job: IngestJob) -> None:
         logger.debug("ingest worker immediate processing job %s", job)
         try:
@@ -1055,49 +1109,16 @@ class IngestWorker:
                 document = (
                     session.get(DocumentRecord, document_id) if document_id is not None else None
                 )
-                if success:
-                    file_obj.status = FileStatus.COMPLETED
-                    file_obj.updated_at = utc_now()
-                    file_obj.error = None
-                    file_obj.chunks = chunk_count
-                    if document:
-                        document.status = DocumentStatus.COMPLETED
-                        document.updated_at = utc_now()
-                        document.error = None
-                        document.chunks = chunk_count
-                        session.add(document)
-                    if job_record:
-                        job_record.status = JobStatus.COMPLETED
-                        job_record.finished_at = utc_now()
-                        job_record.updated_at = utc_now()
-                        payload = dict(job_record.payload or {})
-                        payload.update({"chunks": chunk_count, "attempt": job.attempt})
-                        job_record.payload = payload
-                        job_record.error = None
-                        session.add(job_record)
-                else:
-                    file_obj.status = FileStatus.FAILED
-                    file_obj.retries = job.attempt + 1
-                    file_obj.updated_at = utc_now()
-                    file_obj.error = error_message
-                    file_obj.chunks = chunk_count or 0
-                    if document:
-                        document.status = DocumentStatus.FAILED
-                        document.updated_at = utc_now()
-                        document.error = error_message
-                        document.chunks = chunk_count or 0
-                        session.add(document)
-                    if job_record:
-                        job_record.status = JobStatus.FAILED
-                        job_record.finished_at = utc_now()
-                        job_record.updated_at = utc_now()
-                        payload = dict(job_record.payload or {})
-                        payload.update({"chunks": chunk_count or 0, "attempt": job.attempt})
-                        job_record.payload = payload
-                        job_record.error = error_message
-                        session.add(job_record)
-                session.add(file_obj)
-                session.commit()
+                self._finalize_job(
+                    session,
+                    file_obj=file_obj,
+                    document=document,
+                    job_record=job_record,
+                    success=success,
+                    chunk_count=chunk_count,
+                    error_message=error_message,
+                    attempt=job.attempt,
+                )
 
         if not success:
             await self._handle_failure(job)

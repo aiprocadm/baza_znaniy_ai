@@ -23,6 +23,7 @@ from app.models.file import (
     DocumentRecord,
     DocumentStatus,
     FileRecord,
+    FileStatus,
     JobRecord,
     PageRecord,
 )
@@ -853,3 +854,90 @@ def test_load_file_and_job_fetches_both_when_record_id_present() -> None:
 
     assert file_obj is file_rec
     assert job_record is job_rec
+
+
+# --- Characterization tests for the _process finalization seam ---------------
+# _finalize_job collapses _process's symmetric success/failure branches. Pin
+# the per-row writes (status, error, chunks, retries, payload) for both
+# outcomes without a real DB engine.
+
+
+def test_finalize_job_success_writes_completed_and_clears_errors() -> None:
+    session = _RecordingSession()
+    file_obj = FileRecord(
+        tenant_id="acme", sha256="x", path="p", filename="f", size=1, retries=2, error="old"
+    )
+    document = DocumentRecord(tenant_id="acme", sha256="x", error="old")
+    job_record = JobRecord(tenant_id="acme", payload={"file_id": 1})
+
+    IngestWorker._finalize_job(
+        session,
+        file_obj=file_obj,
+        document=document,
+        job_record=job_record,
+        success=True,
+        chunk_count=5,
+        error_message=None,
+        attempt=0,
+    )
+
+    assert file_obj.status == FileStatus.COMPLETED
+    assert file_obj.error is None
+    assert file_obj.chunks == 5
+    assert file_obj.retries == 2  # unchanged on success
+    assert document.status == DocumentStatus.COMPLETED
+    assert document.error is None and document.chunks == 5
+    assert job_record.status == JobStatus.COMPLETED
+    assert job_record.error is None
+    assert job_record.payload == {"file_id": 1, "chunks": 5, "attempt": 0}
+    assert session.commits == 1
+
+
+def test_finalize_job_failure_sets_retries_and_propagates_error() -> None:
+    session = _RecordingSession()
+    file_obj = FileRecord(tenant_id="acme", sha256="x", path="p", filename="f", size=1)
+    document = DocumentRecord(tenant_id="acme", sha256="x")
+    job_record = JobRecord(tenant_id="acme", payload={"file_id": 1})
+
+    IngestWorker._finalize_job(
+        session,
+        file_obj=file_obj,
+        document=document,
+        job_record=job_record,
+        success=False,
+        chunk_count=0,
+        error_message="boom",
+        attempt=2,
+    )
+
+    assert file_obj.status == FileStatus.FAILED
+    assert file_obj.retries == 3  # attempt + 1
+    assert file_obj.error == "boom"
+    assert file_obj.chunks == 0
+    assert document.status == DocumentStatus.FAILED
+    assert document.error == "boom"
+    assert job_record.status == JobStatus.FAILED
+    assert job_record.error == "boom"
+    assert job_record.payload == {"file_id": 1, "chunks": 0, "attempt": 2}
+    assert session.commits == 1
+
+
+def test_finalize_job_handles_missing_document_and_job_record() -> None:
+    session = _RecordingSession()
+    file_obj = FileRecord(tenant_id="acme", sha256="x", path="p", filename="f", size=1)
+
+    IngestWorker._finalize_job(
+        session,
+        file_obj=file_obj,
+        document=None,
+        job_record=None,
+        success=True,
+        chunk_count=3,
+        error_message=None,
+        attempt=0,
+    )
+
+    assert file_obj.status == FileStatus.COMPLETED
+    assert file_obj.chunks == 3
+    assert session.added == [file_obj]
+    assert session.commits == 1
