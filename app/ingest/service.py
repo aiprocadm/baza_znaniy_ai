@@ -1116,9 +1116,7 @@ class IngestWorker:
                 self._fail_job_file_missing(session, job_record)
                 return
             document_id = job.document_id or file_obj.document_id
-            document = (
-                session.get(DocumentRecord, document_id) if document_id is not None else None
-            )
+            document = session.get(DocumentRecord, document_id) if document_id is not None else None
             self._finalize_job(
                 session,
                 file_obj=file_obj,
