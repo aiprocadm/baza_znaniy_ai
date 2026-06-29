@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import io
-import sys
 import types
 from typing import List
 
@@ -16,41 +15,6 @@ pytest.importorskip("pptx")
 from openpyxl import Workbook
 from pptx import Presentation
 from pptx.util import Inches
-
-if "app.ingest.service" not in sys.modules:
-    service_stub = types.ModuleType("app.ingest.service")
-
-    class IngestJob:
-        def __init__(self, file_record: object | None = None, *, attempt: int = 0) -> None:
-            self.file_record = file_record
-            self.attempt = attempt
-            self.job_record_id: int | None = None
-
-    class IngestWorker:
-        def __init__(self, service: "IngestService") -> None:
-            self.service = service
-            self._task = None
-
-        def ensure_started(self) -> None:  # pragma: no cover - no-op for tests
-            return None
-
-    class IngestService:
-        def __init__(self, *args: object, **kwargs: object) -> None:
-            self.worker: IngestWorker | None = None
-
-        def set_worker(self, worker: IngestWorker) -> None:
-            self.worker = worker
-
-        def ensure_background_worker(self) -> None:  # pragma: no cover - no-op
-            return None
-
-        async def stop_background_worker(self) -> None:  # pragma: no cover - no-op
-            return None
-
-    service_stub.IngestJob = IngestJob
-    service_stub.IngestService = IngestService
-    service_stub.IngestWorker = IngestWorker
-    sys.modules["app.ingest.service"] = service_stub
 
 import app.ingest.chunking as ingest
 
