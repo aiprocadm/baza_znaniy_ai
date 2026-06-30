@@ -63,12 +63,22 @@ BASE_JSON = EVAL_DIR / "pravo_base.json"
 STUDENT_JSON = EVAL_DIR / "pravo_student.json"
 TEACHER_JSON = EVAL_DIR / "pravo_teacher.json"
 TEACHER_MODEL = "BAAI/bge-reranker-v2-m3"
-# Эмбеддер eval-шагов прибит к тому, чем построены golden_pravo_natural и
-# замороженный гейт (intfloat/multilingual-e5-small, 384-dim). Без этого eval-
-# subprocess берёт дефолт бокса (KB_EMBEDDINGS_BACKEND=st сам по себе резолвится
-# в bge-m3 / 1024) и падает на EmbedderMismatchError — голый запуск раннера
-# переставал быть turnkey. Зеркалит контракт scripts/freeze_pravo_eval.py.
-EVAL_EMBEDDER_ENV = {
+# Полный контракт eval-шагов прибит к тому, чем построены golden_pravo_natural и
+# замороженный гейт: стор var/data/pravo_public.sqlite + эмбеддер
+# intfloat/multilingual-e5-small (384-dim). Зеркалит scripts/freeze_pravo_eval.py,
+# который фиксирует ВСЕ три (KB_MVP_DB_PATH из DEFAULT_STORE, backend=st, e5-small).
+# Без db-пина eval-subprocess берёт дефолт бокса (var/data/kb_mvp.sqlite) — и при
+# уже готовых sentinel'ах pravo_pairs/stage2 (preflight пропускает store-probe)
+# eval_base падает на corpus-signature mismatch; без эмбеддер-пина
+# KB_EMBEDDINGS_BACKEND=st сам по себе резолвится в bge-m3 / 1024 и даёт
+# EmbedderMismatchError. Раннер целиком pravo-only (golden хардкоднут), так что
+# другого корректного стора у eval нет — голый запуск становится turnkey.
+# Plain str, not Path: it is only ever an env-var value (never path-manipulated
+# here), so a forward-slash literal stays identical cross-platform and matches
+# scripts/freeze_pravo_eval.py's DEFAULT_STORE verbatim.
+PRAVO_STORE = "var/data/pravo_public.sqlite"
+EVAL_STORE_ENV = {
+    "KB_MVP_DB_PATH": PRAVO_STORE,
     "KB_EMBEDDINGS_BACKEND": "st",
     "ST_EMBED_MODEL": "intfloat/multilingual-e5-small",
 }
@@ -214,14 +224,14 @@ def build_plan(profile: str = "full") -> list[Step]:
             "scripts.eval_rag",
             ["run", "--golden", golden, "--out", str(p.base_json)],
             p.base_json,
-            env={**EVAL_EMBEDDER_ENV},
+            env={**EVAL_STORE_ENV},
         ),
         Step(
             "eval_student",
             "scripts.eval_rag",
             ["run", "--golden", golden, "--rerank", "--out", str(p.student_json)],
             p.student_json,
-            env={**EVAL_EMBEDDER_ENV, "KB_RERANK_MODEL": str(p.student)},
+            env={**EVAL_STORE_ENV, "KB_RERANK_MODEL": str(p.student)},
             depends_on=["stage2_train"],  # retrain -> this eval is stale -> re-runs
         ),
         Step(
@@ -229,7 +239,7 @@ def build_plan(profile: str = "full") -> list[Step]:
             "scripts.eval_rag",
             ["run", "--golden", golden, "--rerank", "--out", str(p.teacher_json)],
             p.teacher_json,
-            env={**EVAL_EMBEDDER_ENV, "KB_RERANK_MODEL": TEACHER_MODEL},
+            env={**EVAL_STORE_ENV, "KB_RERANK_MODEL": TEACHER_MODEL},
         ),
     ]
 
