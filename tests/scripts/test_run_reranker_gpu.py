@@ -97,16 +97,22 @@ def test_eval_steps_select_model_via_rerank_env() -> None:
     assert teacher.env["KB_RERANK_MODEL"] == "BAAI/bge-reranker-v2-m3"
 
 
-def test_eval_steps_pin_embedder_to_match_pravo_golden() -> None:
+def test_eval_steps_pin_store_to_match_pravo_golden() -> None:
     # golden_pravo_natural + the frozen gate are built against the 384-dim
-    # intfloat/multilingual-e5-small store. Without pinning the embedder the eval
-    # subprocess inherits whatever the box defaults to (KB_EMBEDDINGS_BACKEND=st
-    # alone resolves to bge-m3 / 1024) and dies with EmbedderMismatchError — so a
-    # bare `python -m scripts.run_reranker_gpu` is not turnkey. Every eval step
-    # must carry the same st/e5-small contract as scripts/freeze_pravo_eval.py.
+    # intfloat/multilingual-e5-small store at var/data/pravo_public.sqlite. Each
+    # eval step must pin the SAME three knobs scripts/freeze_pravo_eval.py fixes —
+    # the store path AND the embedder — or a bare `python -m scripts.run_reranker_gpu`
+    # is not turnkey:
+    #   * no store pin -> the eval subprocess opens the box default
+    #     (var/data/kb_mvp.sqlite); on a resumed run where pravo_pairs/stage2
+    #     sentinels already exist the preflight store-probe is skipped, so eval_base
+    #     reaches a wrong corpus and dies with a corpus-signature mismatch.
+    #   * no embedder pin -> KB_EMBEDDINGS_BACKEND=st alone resolves to bge-m3 / 1024
+    #     and dies with EmbedderMismatchError.
     plan = build_plan("full")
     for name in ("eval_base", "eval_student", "eval_teacher"):
         env = _by_name(plan, name).env
+        assert env["KB_MVP_DB_PATH"] == "var/data/pravo_public.sqlite", name
         assert env["KB_EMBEDDINGS_BACKEND"] == "st", name
         assert env["ST_EMBED_MODEL"] == "intfloat/multilingual-e5-small", name
     # the embedder pin must MERGE with, not clobber, the per-step rerank model.
