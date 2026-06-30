@@ -63,6 +63,15 @@ BASE_JSON = EVAL_DIR / "pravo_base.json"
 STUDENT_JSON = EVAL_DIR / "pravo_student.json"
 TEACHER_JSON = EVAL_DIR / "pravo_teacher.json"
 TEACHER_MODEL = "BAAI/bge-reranker-v2-m3"
+# Эмбеддер eval-шагов прибит к тому, чем построены golden_pravo_natural и
+# замороженный гейт (intfloat/multilingual-e5-small, 384-dim). Без этого eval-
+# subprocess берёт дефолт бокса (KB_EMBEDDINGS_BACKEND=st сам по себе резолвится
+# в bge-m3 / 1024) и падает на EmbedderMismatchError — голый запуск раннера
+# переставал быть turnkey. Зеркалит контракт scripts/freeze_pravo_eval.py.
+EVAL_EMBEDDER_ENV = {
+    "KB_EMBEDDINGS_BACKEND": "st",
+    "ST_EMBED_MODEL": "intfloat/multilingual-e5-small",
+}
 DEFAULT_LOG = Path("var/log/reranker_gpu_run.log")
 SMOKE_ROOT = Path("var/_smoke")  # throwaway CPU-smoke artifacts, isolated from full
 
@@ -205,13 +214,14 @@ def build_plan(profile: str = "full") -> list[Step]:
             "scripts.eval_rag",
             ["run", "--golden", golden, "--out", str(p.base_json)],
             p.base_json,
+            env={**EVAL_EMBEDDER_ENV},
         ),
         Step(
             "eval_student",
             "scripts.eval_rag",
             ["run", "--golden", golden, "--rerank", "--out", str(p.student_json)],
             p.student_json,
-            env={"KB_RERANK_MODEL": str(p.student)},
+            env={**EVAL_EMBEDDER_ENV, "KB_RERANK_MODEL": str(p.student)},
             depends_on=["stage2_train"],  # retrain -> this eval is stale -> re-runs
         ),
         Step(
@@ -219,7 +229,7 @@ def build_plan(profile: str = "full") -> list[Step]:
             "scripts.eval_rag",
             ["run", "--golden", golden, "--rerank", "--out", str(p.teacher_json)],
             p.teacher_json,
-            env={"KB_RERANK_MODEL": TEACHER_MODEL},
+            env={**EVAL_EMBEDDER_ENV, "KB_RERANK_MODEL": TEACHER_MODEL},
         ),
     ]
 

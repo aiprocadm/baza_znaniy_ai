@@ -97,6 +97,25 @@ def test_eval_steps_select_model_via_rerank_env() -> None:
     assert teacher.env["KB_RERANK_MODEL"] == "BAAI/bge-reranker-v2-m3"
 
 
+def test_eval_steps_pin_embedder_to_match_pravo_golden() -> None:
+    # golden_pravo_natural + the frozen gate are built against the 384-dim
+    # intfloat/multilingual-e5-small store. Without pinning the embedder the eval
+    # subprocess inherits whatever the box defaults to (KB_EMBEDDINGS_BACKEND=st
+    # alone resolves to bge-m3 / 1024) and dies with EmbedderMismatchError — so a
+    # bare `python -m scripts.run_reranker_gpu` is not turnkey. Every eval step
+    # must carry the same st/e5-small contract as scripts/freeze_pravo_eval.py.
+    plan = build_plan("full")
+    for name in ("eval_base", "eval_student", "eval_teacher"):
+        env = _by_name(plan, name).env
+        assert env["KB_EMBEDDINGS_BACKEND"] == "st", name
+        assert env["ST_EMBED_MODEL"] == "intfloat/multilingual-e5-small", name
+    # the embedder pin must MERGE with, not clobber, the per-step rerank model.
+    assert _by_name(plan, "eval_student").env["KB_RERANK_MODEL"] == str(
+        _by_name(plan, "stage2_train").produces.parent
+    )
+    assert _by_name(plan, "eval_teacher").env["KB_RERANK_MODEL"] == "BAAI/bge-reranker-v2-m3"
+
+
 def test_every_step_declares_an_output_for_resumability() -> None:
     for step in build_plan("full"):
         assert step.produces is not None and isinstance(step.produces, Path)
