@@ -30,7 +30,11 @@ from app.services.kb_store import SearchHit
 LOGGER = logging.getLogger(__name__)
 
 DEFAULT_MODEL_NAME = "BAAI/bge-reranker-v2-m3"
-DEFAULT_CANDIDATES = 20
+# Точка полного паритета качества (Track B sweep, runbook 2026-06-15): на
+# golden_pravo_natural реранк сверх 12 кандидатов не меняет ни одну headline-метрику
+# (hit@1/hit@3/mrr@5/recall@10 равны значениям k=20), только растит латентность
+# (~0.9 с/кандидат на CPU). Для других корпусов — env KB_RERANK_CANDIDATES.
+DEFAULT_CANDIDATES = 12
 DEFAULT_TOP_N = 5
 
 _RERANKER_LOCK = threading.Lock()
