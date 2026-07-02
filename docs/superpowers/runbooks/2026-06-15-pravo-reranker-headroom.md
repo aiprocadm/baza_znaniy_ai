@@ -293,3 +293,59 @@ ONNX would not bridge a 20×-params gap). So this gate **is** the latency path:
 a student that passes §4 and is fast on CPU resolves quality and latency together.
 If the GPU run is NO-GO, the honest fallback is a revised latency budget +
 `KB_RERANK_CANDIDATES` tuning, documented as the close of the learned-reranker bet.
+
+## Candidate/latency sweep (Track B, 2026-07-02)
+
+Quality vs CPU latency as a function of `KB_RERANK_CANDIDATES` (bge teacher over
+the e5 base) on `golden_pravo_natural` (n=36). Quality is reconstructed offline
+from `data/eval/rerank_sweep_pravo.json` (top-20 bi-encoder shortlist +
+per-candidate bge score, sig-matched to the golden); latency is the real
+`bge-reranker-v2-m3` on this CPU, single-process, warm-up discarded, through the
+production scoring path (`CrossEncoder.predict`, **no** `max_length` cap — same
+as `app/retriever/rerank.py`).
+
+| candidates (k) | hit@1 | hit@3 | mrr@5 | recall@10 | p50 (ms) | p95 (ms) |
+|---|---|---|---|---|---|---|
+| 1  | 0.778 | 0.778 | 0.778 | 0.411 | 1682 | 2030 |
+| 2  | 0.861 | 0.861 | 0.861 | 0.530 | 3071 | 3756 |
+| 3  | 0.861 | 0.861 | 0.861 | 0.565 | 4000 | 4583 |
+| 5  | 0.861 | 0.917 | 0.889 | 0.609 | 5906 | 6690 |
+| 8  | 0.889 | 0.944 | 0.917 | 0.674 | 8719 | 10006 |
+| 10 | 0.889 | 0.944 | 0.917 | 0.694 | 10398 | 12842 |
+| **12** | **0.889** | **0.944** | **0.917** | **0.707** | **11585** | **13437** |
+| 16 | 0.889 | 0.944 | 0.917 | 0.707 | 14719 | 16463 |
+| 20 | 0.889 | 0.944 | 0.917 | 0.707 | 18488 | 21049 |
+| base (no rerank) | 0.778 | 0.861 | 0.832 | 0.694 | — | — |
+
+- **Knee = k=12 (full-parity point).** hit@1/mrr@5 plateau at k=8 already
+  (0.889/0.917, exactly the k=20 values), but recall@10 at k=8 is 0.674 — 3.3 pp
+  below the k=20 value 0.707; it reaches parity only at k=12 (the reranker pulls
+  relevant chunks from shortlist positions 11–20 into the top-10). With the
+  "keep the quality win" priority, the operating point is **k=12**: every
+  headline metric identical to k=20 at **−36 % latency** (p95 13.4 s vs 21.0 s).
+  `KB_RERANK_CANDIDATES` default lowered 20 → 12 accordingly (env override
+  remains for other corpora; the parity evidence is this domain golden, n=36).
+- **CORRECTION of an earlier note.** The "Teacher CPU p95 ≈ 1.2 s for 20
+  candidates" figure quoted above (Track A section) was a misattribution: the
+  1228 ms p95 was measured for the **rubert-tiny2 student** at `max_length=256`
+  (`scripts/quantize_reranker.py` docstring, 2026-06-13). The bge **teacher**
+  had never been latency-measured on the production path until this sweep: it
+  costs **~0.9 s per candidate** (p95 2.0 s at k=1, 21.0 s at k=20) on this CPU.
+- **Revised budget (priority: keep quality).** No k fits an interactive budget —
+  even k=1 (which is quality-identical to base, i.e. pointless) breaches 200 ms
+  by 10×. Conclusions: (a) the **200 ms budget stays** as the product target for
+  the interactive path and as the `bench_reranker.py` gate — it gates the
+  distilled *student*, and relabeling it to teacher-reality would gut its
+  meaning; (b) the teacher is a **quality-first, non-interactive tool** (eval,
+  refreeze, batch/async pipelines) — for teacher-enabled runs on this CPU class
+  the honest expectation is **p95 ≤ 16 s at k=12** (measured 13.4 s + headroom);
+  (c) sub-200 ms interactive reranking remains reserved for the distilled
+  student (Phase 1 GPU run) — unchanged from the closure-by-reference above.
+- **Follow-up lever (out of Track B scope):** production
+  `CrossEncoderReranker` sets no `max_length` (`rerank.py`: `CrossEncoder(model_name)`),
+  so long legal chunks pay quadratic attention; `bench_reranker.py` caps at 384.
+  Capping production `max_length` is a potential ~3–4× latency lever but changes
+  scoring inputs (truncates long chunks) — needs its own quality re-measure
+  before adoption.
+- **Reproduce:** `KB_EMBEDDINGS_BACKEND=st py -3.13 -m scripts.sweep_rerank_candidates --latency`
+  (env pinning as in the Phase 0 section; capture ≈ 2 min, latency sweep ≈ 12 min).
